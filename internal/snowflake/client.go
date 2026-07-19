@@ -541,8 +541,19 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// after the Go side closes it.  Setting MaxIdleConns equal to
 	// MaxOpenConns prevents connection churn that creates zombie sessions.
 	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
-	db.SetMaxOpenConns(DefaultMaxOpenConns)
-	db.SetMaxIdleConns(DefaultMaxIdleConns)
+	maxOpen, maxIdle := DefaultMaxOpenConns, DefaultMaxIdleConns
+	if sc.loginGate != nil {
+		// MFA auth: keep the pool small. Every new physical connection is a
+		// fresh MFA login, which only succeeds seamlessly when the account has
+		// ALLOW_CLIENT_MFA_CACHING = TRUE (so the driver can reuse a cached
+		// token); otherwise it falls back to the single-use passcode, which
+		// can't be replayed and fails. A small pool minimizes those logins — and
+		// the "Authentication FAILED" churn / MFA-rate-limit exposure — during
+		// connection bursts (post-connect metadata listing, DDL export). #804.
+		maxOpen, maxIdle = MFAMaxOpenConns, MFAMaxOpenConns
+	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
@@ -574,10 +585,26 @@ const DefaultMaxOpenConns = 8
 // DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
 const DefaultMaxIdleConns = 8
 
+// MFAMaxOpenConns caps the pool for username_password_mfa auth. Every new
+// physical connection is a fresh MFA login (expensive and failure-prone unless
+// the account allows MFA-token caching), so bulk callers that ask for a wide
+// pool are clamped to this to avoid a wave of re-auths. See issue #804.
+const MFAMaxOpenConns = 4
+
 // SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
 // Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
-// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns.
+// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns; bulk
+// callers (DDL export) request 32/32. For MFA auth the request is clamped to
+// MFAMaxOpenConns so a bulk burst doesn't trigger a flood of MFA logins.
 func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
+	if c.connector != nil && c.connector.loginGate != nil {
+		if maxOpen > MFAMaxOpenConns {
+			maxOpen = MFAMaxOpenConns
+		}
+		if maxIdle > MFAMaxOpenConns {
+			maxIdle = MFAMaxOpenConns
+		}
+	}
 	c.db.SetMaxOpenConns(maxOpen)
 	c.db.SetMaxIdleConns(maxIdle)
 }

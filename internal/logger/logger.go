@@ -218,22 +218,39 @@ func parseSlogTime(line string) (time.Time, bool) {
 
 // driverNoiseFilter is a slog.Handler wrapper that suppresses known-noisy
 // ERROR messages emitted by the gosnowflake driver as side-effects of query
-// cancellation or result-row truncation (50 k cap).  These messages are not
-// actionable from the application's perspective and would otherwise mislead
-// users scanning the terminal output.
+// cancellation, result-row truncation (50 k cap), or per-connection auth
+// retries.  These messages are not actionable from the application's
+// perspective and would otherwise mislead users scanning the terminal output.
 type driverNoiseFilter struct{ inner slog.Handler }
 
 func (f *driverNoiseFilter) Enabled(ctx context.Context, level slog.Level) bool {
 	return f.inner.Enabled(ctx, level)
 }
 
+// driverAuthNoise are ERROR message prefixes the gosnowflake driver logs for
+// every failed login handshake. During MFA connection bursts the pool re-auths
+// many connections and each failure emits both lines, flooding thaw.log. The
+// real, detailed connect error is always surfaced separately — App.Connect logs
+// "connection failed" with the underlying SnowflakeError and returns it to the
+// UI — so these bare, reason-less driver lines add only noise. See issue #804.
+var driverAuthNoise = []string{
+	"Authentication FAILED",
+	"Failed to authenticate. Connection failed after",
+}
+
 func (f *driverNoiseFilter) Handle(ctx context.Context, r slog.Record) error {
-	// Suppress Arrow chunk download errors that arise when rows.Close() is
-	// called asynchronously after a cancellation or the 50k row cap is hit.
-	// The driver logs these at ERROR even though they are expected and harmless.
-	if r.Level == slog.LevelError &&
-		strings.Contains(r.Message, "failed to extract HTTP response body") {
-		return nil
+	if r.Level == slog.LevelError {
+		// Suppress Arrow chunk download errors that arise when rows.Close() is
+		// called asynchronously after a cancellation or the 50k row cap is hit.
+		// The driver logs these at ERROR even though they are expected and harmless.
+		if strings.Contains(r.Message, "failed to extract HTTP response body") {
+			return nil
+		}
+		for _, prefix := range driverAuthNoise {
+			if strings.HasPrefix(r.Message, prefix) {
+				return nil
+			}
+		}
 	}
 	return f.inner.Handle(ctx, r)
 }

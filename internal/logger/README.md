@@ -8,7 +8,9 @@ Initialises a `slog.Logger` backed by a rotating log file (`lumberjack`) and exp
 as the package-level `L` variable. Dev builds additionally echo to stderr and enable
 `DEBUG` level. Production builds use an OS-specific log directory. A `driverNoiseFilter`
 `slog.Handler` wrapper suppresses known-harmless ERROR messages emitted by the
-gosnowflake driver as side-effects of query cancellation and row-cap truncation.
+gosnowflake driver as side-effects of query cancellation, row-cap truncation, and
+per-connection auth retries (the real connect error is surfaced separately by
+`App.Connect`).
 
 The minimum level is **runtime-adjustable**: the handler is wired to a package-level
 `slog.LevelVar` (seeded to the build default — DEBUG in dev, INFO in production), and
@@ -59,7 +61,7 @@ instead of rotating it as a whole.
 | `maybeRotateByAge` | Rotates the active file on startup when its oldest entry is older than `rotationInterval`, so age-based cleanup has backups to prune. |
 | `startRotationTicker` | Rotates on `rotationInterval` until stopped, keeping retention bounded during long sessions. |
 | `firstEntryTime` / `parseSlogTime` | Read the first log line and parse its `time=<RFC3339>` prefix to find the oldest entry's timestamp. |
-| `driverNoiseFilter` | Drops `slog.LevelError` records whose message contains `"failed to extract HTTP response body"` (Arrow chunk download errors from gosnowflake). |
+| `driverNoiseFilter` | Drops `slog.LevelError` records that are handled-but-noisy gosnowflake output: message containing `"failed to extract HTTP response body"` (Arrow chunk download errors), or beginning with `"Authentication FAILED"` / `"Failed to authenticate. Connection failed after"` (per-connection MFA re-auth churn — the detailed connect error is logged and surfaced by `App.Connect`). |
 
 ## Patterns & integration
 

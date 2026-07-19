@@ -4,6 +4,7 @@ package snowflake
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"sync"
 	"sync/atomic"
@@ -88,5 +89,24 @@ func TestSessionConnector_LoginGateHonorsContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("connectBase did not observe context cancellation while waiting on the login gate")
+	}
+}
+
+// TestSetPoolLimits_ClampsMFA verifies the issue #804 fix: a Client whose
+// connector serializes MFA logins clamps a wide pool request (DDL export asks
+// for 32/32) down to MFAMaxOpenConns, while a non-MFA client honors the request.
+func TestSetPoolLimits_ClampsMFA(t *testing.T) {
+	mfa := &Client{db: sql.OpenDB(&recordingConnector{}), connector: &sessionConnector{loginGate: make(chan struct{}, 1)}}
+	defer mfa.db.Close() //nolint:errcheck
+	mfa.SetPoolLimits(32, 32)
+	if got := mfa.db.Stats().MaxOpenConnections; got != MFAMaxOpenConns {
+		t.Errorf("MFA client: MaxOpenConnections = %d, want %d", got, MFAMaxOpenConns)
+	}
+
+	plain := &Client{db: sql.OpenDB(&recordingConnector{}), connector: &sessionConnector{}}
+	defer plain.db.Close() //nolint:errcheck
+	plain.SetPoolLimits(32, 32)
+	if got := plain.db.Stats().MaxOpenConnections; got != 32 {
+		t.Errorf("non-MFA client: MaxOpenConnections = %d, want 32", got)
 	}
 }
