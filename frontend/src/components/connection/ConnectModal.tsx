@@ -620,27 +620,39 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               />
             </Form.Item>
 
-            {/* MFA token-caching advisory: without ALLOW_CLIENT_MFA_CACHING,
-                pooled connections re-auth with the single-use passcode and fail,
-                so Thaw runs at reduced concurrency. See issue #804. */}
-            {auth === "username_password_mfa" && (
+            {/* MFA lockout warning. Thaw opens several pooled connections and each
+                must authenticate; a one-time MFA code/push (or the TOTP passcode
+                reused for password auth) works only once, so the extra logins fail
+                and can lock the account — unless ALLOW_CLIENT_MFA_CACHING is on.
+                Shown for MFA and for password auth (which usually needs a TOTP code
+                when MFA is enforced). See issue #804. */}
+            {(auth === "username_password_mfa" || auth === "snowflake") && (
               <Alert
-                type="warning"
+                type="error"
                 showIcon
                 style={{ marginBottom: 16 }}
-                message="Enable MFA token caching for this account"
+                message="MFA does not work reliably with Thaw — it can lock your account"
                 description={
                   <span style={{ fontSize: 12 }}>
-                    For MFA to work smoothly with Thaw, an ACCOUNTADMIN should enable
-                    account-level MFA token caching:
+                    {auth === "snowflake"
+                      ? "If your account enforces MFA (a one-time TOTP code), be careful: "
+                      : ""}
+                    Thaw opens several connections at once and each must authenticate. A
+                    one-time MFA code or push can only be used once, so the extra logins
+                    fail — and enough failed attempts will <strong>lock your Snowflake
+                    account</strong>.
+                    <br />
+                    <br />
+                    MFA only works safely if an ACCOUNTADMIN first enables MFA token
+                    caching on the account:
                     <br />
                     <code style={{ userSelect: "text" }}>
                       ALTER ACCOUNT SET ALLOW_CLIENT_MFA_CACHING = TRUE;
                     </code>
                     <br />
-                    Without it, Thaw keeps its connection pool small to avoid repeated MFA
-                    prompts and login errors during bulk actions (e.g. DDL export). Key-pair
-                    authentication avoids MFA prompts entirely and needs no account change.
+                    <br />
+                    If you can't enable it, use <strong>key-pair authentication</strong>{" "}
+                    instead — it needs no MFA prompt and no account-level change.
                   </span>
                 }
               />
