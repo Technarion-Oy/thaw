@@ -53,8 +53,7 @@ export default function UserAgreementModal({ open, onClose }: Props) {
         <Paragraph>
           Thaw connects to Snowflake using credentials you provide. It does not
           store or transmit your Snowflake credentials or query data to any
-          third party. Anonymous, non-identifying usage telemetry may be
-          collected to help improve the software.
+          third party.
         </Paragraph>
 
         <Title level={5}>Copyright</Title>

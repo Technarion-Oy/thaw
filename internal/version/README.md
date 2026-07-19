@@ -34,7 +34,6 @@ go build -ldflags "-X thaw/internal/version.Version=1.2.3" .
 Consumers:
 - `internal/app/run.go` — passes `version.Version` to `wails.Run` (window title / about box).
 - `internal/crashreport` — embeds version in crash JSON via `crashreport.Init(version.Version)`.
-- `internal/telemetry` — embeds version in every telemetry event via `telemetry.Init(version.Version)`.
 - `internal/app/app.go` — returns `version.Version` as part of the `AppInfo` IPC response.
 - `internal/updater` / `internal/app/updater.go` — compares `version.Version` against the latest GitHub release tag; the update check is **skipped entirely when `Version == "dev"`**.
 

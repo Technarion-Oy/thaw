@@ -22,7 +22,6 @@ import (
 	"thaw/internal/session"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowpark"
-	"thaw/internal/telemetry"
 	"thaw/internal/version"
 	"time"
 
@@ -209,7 +208,7 @@ func workdirOverrideArg() string {
 }
 
 // startup is called by the Wails runtime after the application window is ready.
-// It stores the application context, initializes logging and telemetry.
+// It stores the application context and initializes logging.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if a.savedWindowState != nil {
@@ -222,9 +221,7 @@ func (a *App) startup(ctx context.Context) {
 	// Apply persisted logging preferences (runtime log level, SQL-logging
 	// switches) with any IT-admin policy on top of the build default level.
 	a.applyLogPrefs(a.loadEffectiveLogPrefs())
-	telemetry.Init(version.Version)
 	logger.L.Info("application started")
-	telemetry.Track(telemetry.EventAppStarted, nil)
 
 	// Cache the export directory so file management IPC methods don't re-read config.
 	// A --workdir override (this window was opened via "Open Folder in New Window")
@@ -513,7 +510,7 @@ func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 
 // shutdown is called by the Wails runtime just before the application exits.
 // It stops the embedded terminal, cancels any in-flight query, closes the
-// Snowflake connection, and flushes logs and telemetry.
+// Snowflake connection, and flushes logs.
 func (a *App) shutdown(_ context.Context) {
 	// Persist window geometry so it can be restored on the next launch.
 	w, h := wailsruntime.WindowGetSize(a.ctx)
@@ -576,9 +573,6 @@ func (a *App) shutdown(_ context.Context) {
 		a.fnStore.Close() //nolint:errcheck
 	}
 
-	telemetry.Track(telemetry.EventAppStopped, telemetry.Props{
-		"duration_s": int(telemetry.SessionDuration().Seconds()),
-	})
 	logger.L.Info("application shutting down")
 	if a.logCleanup != nil {
 		a.logCleanup()
@@ -603,7 +597,6 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 			return fmt.Errorf("connection canceled")
 		}
 		logger.L.Error("connection failed", "account", params.Account, "err", err)
-		telemetry.Track(telemetry.EventConnectionFailed, nil)
 		return err
 	}
 	// Wire the query-log hook on the shared client so internal queries
@@ -652,7 +645,6 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	a.applyFeatureFlagExclusions()
 
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
-	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 
 	// Refresh the function metadata cache in the background.
 	if a.fnStore != nil {
@@ -745,7 +737,6 @@ func (a *App) Disconnect() error {
 		return nil
 	}
 	err := client.Close()
-	telemetry.Track(telemetry.EventDisconnected, nil)
 	return err
 }
 

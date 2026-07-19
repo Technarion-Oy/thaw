@@ -22,7 +22,6 @@ func GetCodebaseSemanticMap() string {
         "internal/session/",
         "internal/sfconfig/",
         "internal/sysinfo/",
-        "internal/telemetry/",
         "internal/updater/",
         "internal/version/",
         "main.go"

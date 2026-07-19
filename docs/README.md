@@ -32,7 +32,6 @@ For workflow rules (branching, commits, PRs, docs) see [`CONTRIBUTING.md`](../CO
 | [internal/logger](backend/internal/logger.md) | Structured rotating log setup; gosnowflake log redirect |
 | [internal/sfconfig](backend/internal/sfconfig.md) | Snowflake CLI config reader (`~/.snowflake/config.toml`) |
 | [internal/snowflake](backend/internal/snowflake.md) | Snowflake driver wrapper with session-state-aware connection pool |
-| [internal/telemetry](backend/internal/telemetry.md) | Anonymous usage event tracking |
 
 ---
 

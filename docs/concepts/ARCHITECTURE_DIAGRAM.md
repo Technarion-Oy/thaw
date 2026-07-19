@@ -193,7 +193,7 @@ Use the `docs:` commit prefix — this does not trigger a release.
 | `be-fs` | `internal/filesystem` |
 | `be-sfconf` | `internal/sfconfig` |
 | `be-builders` | `internal/{fileformat,stage,integrations,procedure,pipe,secret,tasks}` |
-| `be-infra` | `internal/{logger,telemetry,crashreport}` |
+| `be-infra` | `internal/{logger,crashreport}` |
 
 ### External service nodes (`parent="1"`)
 
