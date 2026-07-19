@@ -287,7 +287,7 @@ func UsesSingleUseMFACredential(p ConnectParams) bool {
 
 // PasscodeFunc prompts the user for a fresh one-time MFA/TOTP passcode when a
 // re-login is needed (the previous single-use code is spent). It returns the new
-// code, or an error — including context cancellation or the user cancelling — to
+// code, or an error — including context cancellation or the user canceling — to
 // abort the login. See issue #804.
 type PasscodeFunc func(ctx context.Context) (string, error)
 
