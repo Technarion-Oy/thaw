@@ -169,13 +169,28 @@ type sessionConnector struct {
 	wh   string
 	db   string // active database
 	sc   string // active schema
+
+	// serialLogin serializes the underlying login handshake for authenticators
+	// that reuse a cached, sequentially-rotated credential — currently only
+	// username_password_mfa. The gosnowflake driver caches the MFA token but
+	// only serializes concurrent logins while the cache is COLD; once a token
+	// is cached, every new connection takes a fast path and reuses it
+	// concurrently. A warm-cache burst (the post-connect metadata listing, or
+	// DDL export's 32-wide pool) then has many logins present the same token at
+	// once — the server rejects the duplicates ("Authentication FAILED"), and
+	// on each failure the driver deletes and re-fetches the token, thrashing and
+	// risking the MFA rate limiter. Serializing the handshake makes token reuse
+	// sequential, as the cache is designed for. Non-MFA auth is unaffected. See
+	// issue #804.
+	serialLogin bool
+	loginMu     sync.Mutex
 }
 
 // Connect opens a new raw driver connection via the underlying gosnowflake
 // connector and immediately applies the stored role and warehouse, ensuring
 // that every pooled connection reflects the current session state.
 func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := sc.base.Connect(ctx)
+	conn, err := sc.connectBase(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +219,19 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		}
 	}
 	return conn, nil
+}
+
+// connectBase performs the underlying login handshake, serialized under loginMu
+// when serialLogin is set (MFA auth) so concurrent connections reuse the cached
+// MFA token sequentially instead of racing on it. Only the handshake is guarded;
+// the USE role/warehouse/database/schema statements in Connect run unserialized.
+func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error) {
+	if !sc.serialLogin {
+		return sc.base.Connect(ctx)
+	}
+	sc.loginMu.Lock()
+	defer sc.loginMu.Unlock()
+	return sc.base.Connect(ctx)
 }
 
 // Driver returns the underlying gosnowflake driver. Required by driver.Connector.
@@ -461,6 +489,10 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		wh:   strings.TrimSpace(p.Warehouse),
 		db:   strings.TrimSpace(p.Database), // initialize from profile so Connect() applies it
 		sc:   strings.TrimSpace(p.Schema),   // on connections created after pool recycles
+		// Serialize the login handshake for MFA auth so concurrent pool
+		// connections reuse the cached MFA token sequentially rather than racing
+		// on it (see sessionConnector.serialLogin and issue #804).
+		serialLogin: auth == sf.AuthTypeUsernamePasswordMFA,
 	}
 
 	db := sql.OpenDB(sc)
