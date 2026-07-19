@@ -192,21 +192,6 @@ func (a *App) currentConnectParams() *snowflake.ConnectParams {
 	return a.connectParams
 }
 
-// usesSingleUseMFACredential reports whether the connection authenticates with a
-// single-use MFA credential — a device push or a one-time TOTP passcode — that
-// cannot be reused across independent connections. Such sessions run on a single
-// shared connection (tabs reuse it) rather than per-tab pools. Mirrors the
-// snowflake package's shouldSerializeLogins. See issue #804.
-func usesSingleUseMFACredential(p *snowflake.ConnectParams) bool {
-	switch strings.ToLower(p.Authenticator) {
-	case "username_password_mfa":
-		return true
-	case "snowflake", "":
-		return p.Passcode != ""
-	default:
-		return false
-	}
-}
 
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
 // command line, or "" if absent. Set by "Open Folder in New Window" when it
@@ -353,7 +338,7 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 	// and failing — burning MFA attempts toward an account lock. Back the tab
 	// with the shared single connection instead: tabs lose per-tab isolation but
 	// the whole session stays on one login. See issue #804.
-	if usesSingleUseMFACredential(params) {
+	if snowflake.UsesSingleUseMFACredential(*params) {
 		shared := a.currentClient()
 		if shared == nil {
 			tabSessionInitMu.Unlock()
@@ -478,8 +463,11 @@ func (a *App) evictIfNeeded() {
 		if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
 			ts := val.(*tabSession)
 			if ts.shared {
-				// Shared-client tab: no own connection to reclaim; just drop the
-				// (cheap) entry so the loop makes progress.
+				// Defensive: shared and owned tabs shouldn't coexist (auth mode is
+				// fixed per connection, and the shared path returns before
+				// evictIfNeeded is ever called). If one is here, it has no own
+				// connection to reclaim — drop the cheap entry so the loop makes
+				// progress rather than closing the shared client.
 				continue
 			}
 			a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
@@ -675,12 +663,15 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		}()
 	}
 
-	// For MFA auth, nudge the user (once) to enable account-level MFA-token
-	// caching when it's off — without it, pooled connections re-auth with the
-	// single-use passcode and fail, so Thaw runs bulk work at reduced
-	// concurrency. Best-effort and backgrounded so it never delays connect; the
-	// authenticator is checked here so non-MFA connects don't spin a goroutine.
-	if strings.EqualFold(params.Authenticator, "username_password_mfa") {
+	// Nudge the user (once) to enable account-level MFA-token caching when it's
+	// off. Gated to the dedicated username_password_mfa authenticator on purpose:
+	// the driver only requests/reuses a cached MFA token for that authenticator,
+	// so ALLOW_CLIENT_MFA_CACHING does nothing for plain password + TOTP auth
+	// (those users are steered toward the MFA authenticator / key-pair by the
+	// prominent connect-dialog warning instead). Best-effort and backgrounded so
+	// it never delays connect; checked here so non-MFA connects don't spin a
+	// goroutine. See issue #804.
+	if snowflake.IsMFAAuthenticator(params.Authenticator) {
 		go a.maybeHintMFACaching(client)
 	}
 

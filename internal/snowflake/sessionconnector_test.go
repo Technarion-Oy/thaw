@@ -73,6 +73,9 @@ func TestSessionConnector_SerializesMFALogin(t *testing.T) {
 	if peak := peakConcurrency(t, true); peak != 1 {
 		t.Errorf("serialLogin: expected peak login concurrency 1, got %d", peak)
 	}
+	// The non-serial direction relies on the 2 ms Connect overlap across 16
+	// goroutines actually overlapping; on a fully starved single-core runner it
+	// could in theory schedule to 1. Practically reliable — noted in case of flakes.
 	if peak := peakConcurrency(t, false); peak <= 1 {
 		t.Errorf("non-serial: expected concurrent logins (peak > 1), got %d", peak)
 	}
@@ -241,5 +244,56 @@ func TestCloneConfigWithPasscode(t *testing.T) {
 	got.Params["extra"] = &v
 	if _, ok := base.Params["extra"]; ok {
 		t.Error("clone shares Params map with base")
+	}
+}
+
+// TestUsesSingleUseMFACredential covers the unified classification (issue #804
+// review): it resolves the authenticator exactly as NewClient does, so an
+// unrecognized string folds to the "snowflake" default — the edge where the old
+// app-side copy diverged from shouldSerializeLogins.
+func TestUsesSingleUseMFACredential(t *testing.T) {
+	tests := []struct {
+		name string
+		auth string
+		pass string
+		want bool
+	}{
+		{"mfa push", "username_password_mfa", "", true},
+		{"mfa push mixed case", "Username_Password_MFA", "", true},
+		{"password with TOTP", "snowflake", "123456", true},
+		{"empty auth with TOTP", "", "123456", true},
+		{"unrecognized auth with TOTP folds to snowflake", "password", "123456", true},
+		{"password without TOTP", "snowflake", "", false},
+		{"key-pair", "snowflake_jwt", "", false},
+		{"external browser", "externalbrowser", "", false},
+		{"oauth with stray passcode", "oauth", "123456", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := UsesSingleUseMFACredential(ConnectParams{Authenticator: tt.auth, Passcode: tt.pass})
+			if got != tt.want {
+				t.Errorf("UsesSingleUseMFACredential(auth=%q pass=%q) = %v, want %v", tt.auth, tt.pass, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsMFAAuthenticator locks the dedicated-MFA-authenticator predicate used to
+// gate the ALLOW_CLIENT_MFA_CACHING hint.
+func TestIsMFAAuthenticator(t *testing.T) {
+	for _, tt := range []struct {
+		auth string
+		want bool
+	}{
+		{"username_password_mfa", true},
+		{"USERNAME_PASSWORD_MFA", true},
+		{"snowflake", false},
+		{"", false},
+		{"snowflake_jwt", false},
+		{"password", false},
+	} {
+		if got := IsMFAAuthenticator(tt.auth); got != tt.want {
+			t.Errorf("IsMFAAuthenticator(%q) = %v, want %v", tt.auth, got, tt.want)
+		}
 	}
 }

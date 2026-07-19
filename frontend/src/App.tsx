@@ -60,6 +60,12 @@ export default function App() {
   // and needs a fresh one-time code. mfaPrompt holds the pending request.
   const [mfaPrompt, setMfaPrompt] = useState<{ requestId: string; user: string; account: string } | null>(null);
   const [mfaCode, setMfaCode] = useState("");
+  // Reply to the pending MFA prompt and close the modal. An empty code cancels
+  // (the backend treats "" as cancellation).
+  const submitMfa = (code: string) => {
+    if (mfaPrompt) void SubmitMFACode(mfaPrompt.requestId, code);
+    setMfaPrompt(null);
+  };
 
   // Whether the Zustand persist store has finished hydrating from sessionStorage.
   // We hold off rendering AppLayout until we know the true persisted state so
@@ -509,14 +515,8 @@ export default function App() {
           title="Enter a new MFA code"
           okText="Submit"
           okButtonProps={{ disabled: mfaCode.trim() === "" }}
-          onOk={() => {
-            if (mfaPrompt) void SubmitMFACode(mfaPrompt.requestId, mfaCode.trim());
-            setMfaPrompt(null);
-          }}
-          onCancel={() => {
-            if (mfaPrompt) void SubmitMFACode(mfaPrompt.requestId, "");
-            setMfaPrompt(null);
-          }}
+          onOk={() => submitMfa(mfaCode.trim())}
+          onCancel={() => submitMfa("")}
           destroyOnClose
           maskClosable={false}
         >
@@ -529,12 +529,7 @@ export default function App() {
             autoFocus
             value={mfaCode}
             onChange={(e) => setMfaCode(e.target.value)}
-            onPressEnter={() => {
-              if (mfaPrompt && mfaCode.trim() !== "") {
-                void SubmitMFACode(mfaPrompt.requestId, mfaCode.trim());
-                setMfaPrompt(null);
-              }
-            }}
+            onPressEnter={() => { if (mfaCode.trim() !== "") submitMfa(mfaCode.trim()); }}
             placeholder="6-digit code"
             maxLength={8}
             inputMode="numeric"
