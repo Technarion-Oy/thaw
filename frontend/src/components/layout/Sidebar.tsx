@@ -4674,7 +4674,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItemSub("Data Loading", <InboxOutlined style={{ fontSize: 12 }} />, "create-data-loading", (
                 <>
                   {menuItem("Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
-                  {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
+                  {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat)}
                   {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
                 </>
               ), 1)}
@@ -4850,9 +4850,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Manage Storage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
+            menuItem("Manage Storage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable them under View → Enabled Features…")}
+            menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, openStageProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
@@ -5009,14 +5009,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* Stage directory/file context menu */}
           {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "stagedir" &&
-            menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
+            menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir)}
           {ctxMenu.nodeType === "stagefile" && stageFileIsSql &&
             menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
-            menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
+            menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile)}
           {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}
           {ctxMenu.nodeType === "stagefile" &&
-            menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
+            menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile)}
 
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}

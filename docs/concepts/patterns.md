@@ -56,14 +56,21 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 ## Adding a feature flag
 
-Flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **View → Enabled Features…**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
+Flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **View → Enabled Features…**. Most flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install (opt-in flags like `queryLog`/`mcpServer` default to `false`).
 
 1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags`, set it `true` in `DefaultFeatureFlags()`, bump `flagsVersion`, and add migration logic to `MigrateFlags()`.
 2. **`wails generate module`** — regenerates `frontend/wailsjs/go/models.ts`.
 3. **`FeatureFlagsModal.tsx`** — add a `<FlagRow>` (with `locked={locked.myNewFeature}`) in the right category.
 4. **In the gated component** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your UI. When a flag is `false`, the feature must be HIDDEN or DISABLED.
 
-Also update `FEATURES.md` (and its "Feasible Optional Features" section if toggleable).
+Also update `FEATURES.md` (and its "User-Toggleable Features" list if toggleable).
+
+**Reserve a user toggle for real user choices.** Basic functionality — standard SQL commands, core editor search, everyday data workflows — should ship always-on rather than behind a switch (issue #567 removed a batch of these). A flag earns a user-facing row only when it hides an admin surface, declutters the UI for a whole optional workflow, lets credit-conscious users stop background Snowflake/AI queries, or is genuinely experimental/opt-in.
+
+**Removing a toggle** (two shapes):
+
+- *Delete the flag entirely* — only when the flag is **not** admin-lockable (no field in `adminconfig.go`). Drop the field from `FeatureFlags`/`DefaultFeatureFlags()`/`MigrateFlags()`, bump `flagsVersion`, remove the `FlagRow`, un-gate every consumer (Go and TSX), remove it from `featureFlagsStore.ts`, and run `wails generate module`.
+- *Hide the row but keep the flag* — when IT policy must still be able to force the feature off. Leave `config.go` and `adminconfig.go` untouched, delete only the `FlagRow`, and add the field to `ForceAlwaysOnFlags()` (config.go) so a stale user-stored `false` is overridden to `true` on the read path while admin overrides (applied on top by `LoadAdminConfig`) still win. `loadUserFeatureFlags()` runs `ForceAlwaysOnFlags` after `MigrateFlags`.
 
 ### IT-admin enforced policies
 
@@ -77,7 +84,7 @@ Admins can lock flags per platform — macOS managed plist (`Disable<Feature> = 
 
 Key prefixes identify node types:
 
-- **Columns**: `col:DB:SCHEMA:TABLE:COLUMN` — leaf nodes under `obj:` TABLE/VIEW nodes; carry props for the context menu. **All column DDL is built in the backend `internal/column` package** — the Sidebar and `AddColumnModal` only collect config and call the builder, never construct SQL inline. Datatype/collation reference data also comes from the backend (`internal/snowflake/collations.go`). Altering actions are gated behind the `columnManagement` flag.
+- **Columns**: `col:DB:SCHEMA:TABLE:COLUMN` — leaf nodes under `obj:` TABLE/VIEW nodes; carry props for the context menu. **All column DDL is built in the backend `internal/column` package** — the Sidebar and `AddColumnModal` only collect config and call the builder, never construct SQL inline. Datatype/collation reference data also comes from the backend (`internal/snowflake/collations.go`). Altering actions have no user toggle (always on) but stay admin-lockable via the `columnManagement` flag.
 - **Git Repos**: `obj:DB:SCHEMA:GIT REPOSITORY:NAME` → `gitbranches:`/`gittags:`/`gitcommits:` → `gitdir:…` → `gitfile:…`
 - **Stages**: `obj:DB:SCHEMA:STAGE:NAME` → `stagedir:…` → `stagefile:…`
 - **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:…` → `dbtdir:…` → `dbtfile:…`
@@ -98,11 +105,11 @@ Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buil
 
 ## Cross-tab search & replace
 
-`CrossTabSearch` (`components/editor/CrossTabSearch.tsx`) renders between the TabBar and editor, triggered by `⌘⇧H`, gated behind `crossTabSearch`. It searches all tabs (and notebook cells via parsed Jupyter JSON), navigates via the `thaw:scroll-to-line` event (waiting for `thaw:editor-ready` with a 500 ms fallback), and routes replaces on the active non-notebook tab through `editor.executeEdits()` so Monaco's undo stack works.
+`CrossTabSearch` (`components/editor/CrossTabSearch.tsx`) renders between the TabBar and editor, triggered by `⌘⇧H` (always available — no feature flag). It searches all tabs (and notebook cells via parsed Jupyter JSON), navigates via the `thaw:scroll-to-line` event (waiting for `thaw:editor-ready` with a 500 ms fallback), and routes replaces on the active non-notebook tab through `editor.executeEdits()` so Monaco's undo stack works.
 
 ## File system watcher
 
-`internal/filesystem/watcher.go` (`Watcher`) installs a single recursive watch (`rjeczalik/notify`: FSEvents/macOS, `ReadDirectoryChangesW`/Windows, inotify/Linux) over the whole tree, filters out hidden dirs per-event, and debounces 200 ms per directory. The recursive watch avoids the per-directory file-descriptor exhaustion that broke opening large trees (e.g. a `venv`) on macOS (issue #485). Write events on existing files are emitted as well, so external edits propagate to open editor tabs. `StartFileWatcher(dir)`/`StopFileWatcher()` IPC emit `"fs:changed"` events. `QueryPage.tsx` owns the watcher's start/stop lifecycle (keyed on `exportDir`) — it's always mounted, whereas `FileBrowser` is unmounted when the sidebar is hidden via ⌘B, which would otherwise tear the watcher down. `QueryPage` also listens for `"fs:changed"` and re-reads **every** open file-backed tab (not directory-matched: native dialogs return symlink-resolved paths that the watcher's pre-resolution root can't match) via `queryStore.refreshFileTab` — a clean tab adopts the new disk content; a dirty tab keeps the user's edits but advances `savedSql` to the new disk baseline so it stays correctly dirty and a later save can't silently clobber the external change — or `orphanFileTab` if the file is gone (only on a locale-independent "file not found" marker the backend tags `os.ErrNotExist` with; transient errors never orphan). `FileBrowser.tsx` consumes the same `"fs:changed"` events to incrementally refresh the tree; its own mutations (and editor saves, via the `thaw:file-saved` path) mark dirs in a `selfChangedDirs` Set (500 ms) to suppress the redundant re-list. Gated behind `fileWatcher`.
+`internal/filesystem/watcher.go` (`Watcher`) installs a single recursive watch (`rjeczalik/notify`: FSEvents/macOS, `ReadDirectoryChangesW`/Windows, inotify/Linux) over the whole tree, filters out hidden dirs per-event, and debounces 200 ms per directory. The recursive watch avoids the per-directory file-descriptor exhaustion that broke opening large trees (e.g. a `venv`) on macOS (issue #485). Write events on existing files are emitted as well, so external edits propagate to open editor tabs. `StartFileWatcher(dir)`/`StopFileWatcher()` IPC emit `"fs:changed"` events. `QueryPage.tsx` owns the watcher's start/stop lifecycle (keyed on `exportDir`) — it's always mounted, whereas `FileBrowser` is unmounted when the sidebar is hidden via ⌘B, which would otherwise tear the watcher down. `QueryPage` also listens for `"fs:changed"` and re-reads **every** open file-backed tab (not directory-matched: native dialogs return symlink-resolved paths that the watcher's pre-resolution root can't match) via `queryStore.refreshFileTab` — a clean tab adopts the new disk content; a dirty tab keeps the user's edits but advances `savedSql` to the new disk baseline so it stays correctly dirty and a later save can't silently clobber the external change — or `orphanFileTab` if the file is gone (only on a locale-independent "file not found" marker the backend tags `os.ErrNotExist` with; transient errors never orphan). `FileBrowser.tsx` consumes the same `"fs:changed"` events to incrementally refresh the tree; its own mutations (and editor saves, via the `thaw:file-saved` path) mark dirs in a `selfChangedDirs` Set (500 ms) to suppress the redundant re-list. Always on for users (the `fileWatcher` flag has no modal row — it's tuned under **View → File Watching…**), but still admin-lockable via policy.
 
 ## Snowflake CLI profile management
 

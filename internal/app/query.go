@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"thaw/internal/apperrors"
 	"thaw/internal/logger"
@@ -131,20 +130,6 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 	ts, err := a.getOrInitTabSession(tabId)
 	if err != nil {
 		return "", err
-	}
-
-	// Enforce PUT/GET feature flags before execution.
-	flags := loadUserFeatureFlags()
-	trimmed := strings.TrimSpace(strings.ToUpper(sql))
-	if strings.HasPrefix(trimmed, "PUT ") || strings.HasPrefix(trimmed, "PUT\t") {
-		if !flags.PutCommand {
-			return "", fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
-		}
-	}
-	if strings.HasPrefix(trimmed, "GET ") || strings.HasPrefix(trimmed, "GET\t") {
-		if !flags.GetCommand {
-			return "", fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
-		}
 	}
 
 	// Create a per-query cancellable context and replace any previous one.

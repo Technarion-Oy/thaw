@@ -6,7 +6,7 @@
 
 - Define every top-level configuration struct that is serialised to `~/.config/thaw/config.json` (mode 0600).
 - Provide `Load()` / `Save()` helpers for the JSON config file.
-- Manage the `FeatureFlags` schema: versioned bool fields, `Initialized` sentinel, `DefaultFeatureFlags()`, and `MigrateFlags()` for forward migration.
+- Manage the `FeatureFlags` schema: versioned bool fields, `Initialized` sentinel, `DefaultFeatureFlags()`, `MigrateFlags()` for forward migration, and `ForceAlwaysOnFlags()` for features whose user-facing toggle was removed but whose field is kept for admin policy (issue #567).
 - Read and apply IT-admin enforced policies from platform-specific sources (macOS managed plist, Windows Group Policy registry, Linux/other `features.json`).
 - Validate and clamp `SessionConfig` values to safe ranges.
 - Prevent frontend bypass of admin-locked flags via `RestoreAdminLockedFields`.
@@ -35,8 +35,9 @@ type FeatureFlags struct {
 }
 
 // config.go:253
-func DefaultFeatureFlags() FeatureFlags   // all flags true
+func DefaultFeatureFlags() FeatureFlags   // all flags true (except opt-in queryLog/mcpServer)
 func MigrateFlags(f FeatureFlags) FeatureFlags  // fills zero fields for new flags
+func ForceAlwaysOnFlags(f FeatureFlags) FeatureFlags  // forces "removed toggle, kept for admin" flags true
 
 // config.go:361
 type AppConfig struct {
@@ -110,9 +111,10 @@ func ValidateSessionConfig(sc SessionConfig) SessionConfig
 
 ## Patterns & integration
 
-- `Load()` returns a zero-value `AppConfig` when the file does not exist (fresh install); callers apply `DefaultFeatureFlags()` / `MigrateFlags()` from `internal/app/config.go`.
+- `Load()` returns a zero-value `AppConfig` when the file does not exist (fresh install); callers apply `DefaultFeatureFlags()` / `MigrateFlags()` / `ForceAlwaysOnFlags()` via `loadUserFeatureFlags()` in `internal/app/config.go`.
 - `FeatureFlags.Initialized` is a sentinel: a `false` value means the config file predates feature flags; `GetFeatureFlags()` in `internal/app/config.go` substitutes `DefaultFeatureFlags()` in that case.
-- `flagsVersion` (currently 16) is bumped each time a new flag is added, and a corresponding `setIfZero` call is added to `MigrateFlags` so existing users get the new flag enabled by default.
+- `flagsVersion` (currently 18) is bumped each time a flag is added **or removed**, and a corresponding `setIfZero` call is added to `MigrateFlags` so existing users get a new flag enabled by default. Removing a flag deletes its field/default/`setIfZero` line; unknown JSON keys in an older config are ignored on unmarshal, so no field-level migration is needed for a deletion.
+- `ForceAlwaysOnFlags()` runs on the read path (after `MigrateFlags`, before admin overrides) to force the "removed the user toggle but kept the field for admin policy" flags back to `true`, so a stale user-stored `false` is overridden while `LoadAdminConfig` can still enforce a policy `false` on top. See issue #567.
 - Admin enforcement: `LoadAdminConfig` chains `loadAdminJSON` → `applyPlatformOverrides` → `mergeAdminOverrides`. Platform files are selected at compile time via build tags (`//go:build darwin`, `//go:build windows`, `//go:build !darwin && !windows`).
 - macOS platform override uses `plutil -convert json` (always available, no CGo) to parse plists.
 - Windows platform override uses `golang.org/x/sys/windows/registry`; registry DWORD `1` = disabled.
@@ -133,8 +135,9 @@ Reads and clears of the actual values happen at each consumer's IPC seam (see `i
 
 - Config is written with `os.WriteFile(..., 0o600)` — never 0644. It no longer holds secrets (see **Secret handling**), but still contains connection profiles and other private settings.
 - Secrets are scrubbed on every `save()`; do not add a new secret-bearing field without also handling it in `secretsync.go` (`buildDiskConfig`, `hasPlaintextSecret`, `blankSecrets`) and a `secrets` key.
-- Do not edit `flagsVersion` without also adding a `setIfZero` block in `MigrateFlags`; forgetting this silently leaves new flags as `false` for existing users.
-- After adding a new `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add a `<FlagRow>` in `FeatureFlagsModal.tsx`.
+- Do not edit `flagsVersion` for an *added* flag without also adding a `setIfZero` block in `MigrateFlags`; forgetting this silently leaves new flags as `false` for existing users. (Bumping the version for a *removed* flag needs no `setIfZero` — the deleted key is just ignored on unmarshal.)
+- After adding or removing a `FeatureFlags` field, run `wails generate module` to regenerate `frontend/wailsjs/go/models.ts`, then add/remove the `<FlagRow>` in `FeatureFlagsModal.tsx` and update `frontend/src/store/featureFlagsStore.ts` (both the `allEnabled` and `nothingLocked` literals list every field).
+- When *hiding* a user toggle but keeping the flag for admin policy, add the field to `ForceAlwaysOnFlags` rather than deleting it — otherwise a user who had it stored `false` keeps the feature off with no way to re-enable it.
 - The macOS plist priority order is highest-priority-last (reversed iteration); the managed pref at `/Library/Managed Preferences/` wins over the user pref at `~/Library/Preferences/`.
 - `SessionConfig.MaxIdleConnsPerSession` is clamped to never exceed `MaxOpenConnsPerSession` by `ValidateSessionConfig` (`restore.go:55`).
 - Admin `features.json` `"logging"`: forcing `"includeInternalQueries": true` automatically implies and locks `"includeQuerySQL": true` (via `mergeAdminLogPrefs`), so the audit policy works from a single key rather than silently no-opping. An explicit `"includeQuerySQL": false` alongside it is honored as-is (a contradictory config), and `ValidateLogPrefs` then normalizes internal logging off since it has no effect without SQL logging.

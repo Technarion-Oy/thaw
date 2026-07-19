@@ -2672,21 +2672,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       },
     });
 
-    if (useFeatureFlagsStore.getState().flags.crossTabSearch) {
-      // No keybindings — ⌘⇧H is handled by QueryPage's global keydown handler
-      // to avoid a double-toggle when Monaco doesn't preventDefault on the event.
-      editor.addAction({
-        id: "thaw.crossTabSearch",
-        // No `keybindings` entry (see comment above) so Monaco can't resolve a real
-        // keybinding for this action id — the shortcut is appended to the label instead.
-        label: isMac ? "Find & Replace in Tabs    ⌘⇧H" : "Find & Replace in Tabs    Ctrl+Shift+H",
-        contextMenuGroupId: "3_find",
-        contextMenuOrder: 1,
-        run: () => {
-          window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
-        },
-      });
-    }
+    // No keybindings — ⌘⇧H is handled by QueryPage's global keydown handler
+    // to avoid a double-toggle when Monaco doesn't preventDefault on the event.
+    editor.addAction({
+      id: "thaw.crossTabSearch",
+      // No `keybindings` entry (see comment above) so Monaco can't resolve a real
+      // keybinding for this action id — the shortcut is appended to the label instead.
+      label: isMac ? "Find & Replace in Tabs    ⌘⇧H" : "Find & Replace in Tabs    Ctrl+Shift+H",
+      contextMenuGroupId: "3_find",
+      contextMenuOrder: 1,
+      run: () => {
+        window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
+      },
+    });
 
     // Only the primary editor (no tabId) should respond to scroll-to-line
     // events — split/secondary editors have different content and the line

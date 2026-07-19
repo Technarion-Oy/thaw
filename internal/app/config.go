@@ -68,13 +68,16 @@ func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
 
 // loadUserFeatureFlags returns the raw user-persisted flags (or defaults when
 // the config predates feature flags). Runs MigrateFlags so that new flags
-// added after an existing config was written are filled with their defaults.
+// added after an existing config was written are filled with their defaults,
+// then ForceAlwaysOnFlags so features whose user-facing toggle was removed
+// (issue #567) come back on regardless of an old stored false — admin policy is
+// still applied on top by the callers via config.LoadAdminConfig.
 func loadUserFeatureFlags() config.FeatureFlags {
 	cfg, err := config.Load()
 	if err != nil || !cfg.FeatureFlags.Initialized {
 		return config.DefaultFeatureFlags()
 	}
-	return config.MigrateFlags(cfg.FeatureFlags)
+	return config.ForceAlwaysOnFlags(config.MigrateFlags(cfg.FeatureFlags))
 }
 
 // GetFeatureFlags returns the effective feature flag settings with IT admin

@@ -64,11 +64,6 @@ func (a *App) UploadFileToStage(localPath string, stageName string, parallel int
 		return apperrors.ErrNotConnected
 	}
 
-	flags := loadUserFeatureFlags()
-	if !flags.PutCommand {
-		return fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
-	}
-
 	return stage.UploadFileToStage(a.fctx(FeatureStages), client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
 }
 
@@ -79,11 +74,6 @@ func (a *App) DownloadFileFromStage(stageName string, localDirPath string, paral
 		return apperrors.ErrNotConnected
 	}
 
-	flags := loadUserFeatureFlags()
-	if !flags.GetCommand {
-		return fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
-	}
-
 	return stage.DownloadFileFromStage(a.fctx(FeatureStages), client, stageName, localDirPath, parallel, pattern)
 }
 
@@ -92,11 +82,6 @@ func (a *App) RemoveStageFiles(stageName string, pattern string) error {
 	client := a.currentClient()
 	if client == nil {
 		return apperrors.ErrNotConnected
-	}
-
-	flags := loadUserFeatureFlags()
-	if !flags.RemoveCommand {
-		return fmt.Errorf("REMOVE commands are disabled. Enable them under View → Enabled Features…")
 	}
 
 	return stage.RemoveStageFiles(a.fctx(FeatureStages), client, stageName, pattern)

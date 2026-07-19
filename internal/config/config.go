@@ -406,8 +406,11 @@ func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 17 (added InsertRow).
-const flagsVersion = 17
+// Current version: 18 (removed the PutCommand, GetCommand, RemoveCommand,
+// CrossTabSearch, and FileFormatBuilder toggles — those features are now always
+// on; the fields were deleted entirely because they were never admin-lockable.
+// See issue #567).
+const flagsVersion = 18
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -418,9 +421,6 @@ type FeatureFlags struct {
 	ExportTableData bool `json:"exportTableData"` // Table Data Export
 	TableDataImport bool `json:"tableDataImport"`
 	DDLExport       bool `json:"ddlExport"`
-	PutCommand      bool `json:"putCommand"`    // PUT file:// … @stage uploads from the SQL editor
-	GetCommand      bool `json:"getCommand"`    // GET @stage file:// downloads from the SQL editor
-	RemoveCommand   bool `json:"removeCommand"` // REMOVE @stage/file deletes
 
 	// Governance & Administration
 	UserRoleManagement     bool `json:"userRoleManagement"`
@@ -458,9 +458,6 @@ type FeatureFlags struct {
 	SchemaAutocomplete bool `json:"schemaAutocomplete"`
 	DdlHoverTooltips   bool `json:"ddlHoverTooltips"`
 
-	// Data Engineering
-	FileFormatBuilder bool `json:"fileFormatBuilder"` // Visual CREATE FILE FORMAT builder & previewer
-
 	// Connection
 	SnowflakeCLIProfileManager bool `json:"snowflakeCLIProfileManager"` // Manage Snowflake CLI profiles from the connection dialog
 
@@ -468,9 +465,6 @@ type FeatureFlags struct {
 	MultiCellCopy   bool `json:"multiCellCopy"`   // Range selection and multi-cell copy in query results
 	CellDetailPanel bool `json:"cellDetailPanel"` // Side panel showing the full content of the selected cell
 	ColumnReorder   bool `json:"columnReorder"`   // Drag result-grid column headers to reorder them (view-only)
-
-	// Editor Productivity
-	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
 
 	// File Browser
 	FileWatcher bool `json:"fileWatcher"` // Auto-refresh file browser on external changes
@@ -491,9 +485,6 @@ func DefaultFeatureFlags() FeatureFlags {
 		ExportTableData:            true,
 		TableDataImport:            true,
 		DDLExport:                  true,
-		PutCommand:                 true,
-		GetCommand:                 true,
-		RemoveCommand:              true,
 		UserRoleManagement:         true,
 		WarehouseManagement:        true,
 		WarehouseCreditUsage:       true,
@@ -518,12 +509,10 @@ func DefaultFeatureFlags() FeatureFlags {
 		SqlDiagnostics:             true,
 		SchemaAutocomplete:         true,
 		DdlHoverTooltips:           true,
-		FileFormatBuilder:          true,
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
 		CellDetailPanel:            true,
 		ColumnReorder:              true,
-		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
 		MCPServer:                  false,
@@ -572,19 +561,14 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.SqlDiagnostics, defaults.SqlDiagnostics)
 	setIfZero(&f.SchemaAutocomplete, defaults.SchemaAutocomplete)
 	setIfZero(&f.DdlHoverTooltips, defaults.DdlHoverTooltips)
-	// Version 2 → 3: file-transfer flags added; both default to true.
-	setIfZero(&f.PutCommand, defaults.PutCommand)
-	setIfZero(&f.GetCommand, defaults.GetCommand)
-	// Version 3 → 4: FileFormatBuilder added; defaults to true.
-	setIfZero(&f.FileFormatBuilder, defaults.FileFormatBuilder)
-	// Version 4 → 5: RemoveCommand added; defaults to true.
-	setIfZero(&f.RemoveCommand, defaults.RemoveCommand)
+	// Version 2 → 3: PutCommand/GetCommand added (v3 → 4 added FileFormatBuilder,
+	// v4 → 5 added RemoveCommand, v7 → 8 added CrossTabSearch). All five toggles
+	// were removed in v18 — those features are now always on — so their
+	// backfills are gone. See the v17 → 18 note below.
 	// Version 5 → 6: SnowflakeCLIProfileManager added; defaults to true.
 	setIfZero(&f.SnowflakeCLIProfileManager, defaults.SnowflakeCLIProfileManager)
 	// Version 6 → 7: MultiCellCopy added; defaults to true.
 	setIfZero(&f.MultiCellCopy, defaults.MultiCellCopy)
-	// Version 7 → 8: CrossTabSearch added; defaults to true.
-	setIfZero(&f.CrossTabSearch, defaults.CrossTabSearch)
 	// Version 9 → 10: FileWatcher added; defaults to true.
 	setIfZero(&f.FileWatcher, defaults.FileWatcher)
 	// Version 10 → 11: DbtProjectBrowser added; defaults to true.
@@ -603,7 +587,41 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.ColumnReorder, defaults.ColumnReorder)
 	// Version 16 → 17: InsertRow added; defaults to true.
 	setIfZero(&f.InsertRow, defaults.InsertRow)
+	// Version 17 → 18: the PutCommand, GetCommand, RemoveCommand, CrossTabSearch,
+	// and FileFormatBuilder fields were deleted — those features are now always
+	// on and were never admin-lockable. Unknown JSON keys in an older config are
+	// simply ignored on unmarshal, so no field-level migration is needed here.
 	f.Version = flagsVersion
+	return f
+}
+
+// ForceAlwaysOnFlags forces every flag whose user-facing toggle was removed in
+// issue #567 — but whose field is kept so IT-admin policy can still force it
+// off — back to true. It runs on the read path (see loadUserFeatureFlags),
+// after MigrateFlags and before admin overrides are merged, so:
+//   - a user who had disabled one of these before the toggle was removed gets
+//     the feature back (the stored false is overridden), and
+//   - an admin who force-disables it via features.json still wins, because
+//     LoadAdminConfig applies its overrides on top of the returned value.
+//
+// These are the "basic functionality" features the modal no longer exposes:
+// basic data workflows, results-grid UX, user-initiated read-only diagnostics,
+// data-entry helpers, schema management, and the file watcher (now owned by
+// Preferences, see #488/#803).
+func ForceAlwaysOnFlags(f FeatureFlags) FeatureFlags {
+	f.ResultsetExport = true
+	f.ExportTableData = true
+	f.TableDataImport = true
+	f.DDLExport = true
+	f.MultiCellCopy = true
+	f.CellDetailPanel = true
+	f.ColumnReorder = true
+	f.QueryProfile = true
+	f.ExplainSQL = true
+	f.InsertMapping = true
+	f.InsertRow = true
+	f.ColumnManagement = true
+	f.FileWatcher = true
 	return f
 }
 
