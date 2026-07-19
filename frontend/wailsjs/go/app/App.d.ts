@@ -987,6 +987,8 @@ export function PickNotebookFile():Promise<string>;
 
 export function PickOpenFile():Promise<string>;
 
+export function PickPrivateKeyFile():Promise<string>;
+
 export function PickPyprojectFile():Promise<string>;
 
 export function PickQueryLogExportFile(arg1:string):Promise<string>;

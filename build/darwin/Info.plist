@@ -23,6 +23,12 @@
         <string>true</string>
         <key>NSHumanReadableCopyright</key>
         <string>{{.Info.Copyright}}</string>
+        <key>NSDocumentsFolderUsageDescription</key>
+        <string>Thaw needs access to your Documents folder to read a private key file you select for Snowflake key-pair authentication.</string>
+        <key>NSDesktopFolderUsageDescription</key>
+        <string>Thaw needs access to your Desktop folder to read a private key file you select for Snowflake key-pair authentication.</string>
+        <key>NSDownloadsFolderUsageDescription</key>
+        <string>Thaw needs access to your Downloads folder to read a private key file you select for Snowflake key-pair authentication.</string>
         {{if .Info.FileAssociations}}
         <key>CFBundleDocumentTypes</key>
         <array>

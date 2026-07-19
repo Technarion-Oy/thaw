@@ -81,3 +81,13 @@ import "monaco-editor/esm/vs/editor/editor.all.js";                     // all e
 ## Lazy-load heavy panels/modals to protect cold start
 
 `manualChunks` previously lumped **all** of `node_modules` into one eager `vendor` chunk, forcing on-demand-only libraries (xlsx, recharts + d3, xterm, @xyflow/@dagrejs) to load at boot. They are now split into `vendor-xlsx`/`vendor-xterm`/`vendor-viz` and reached only through `React.lazy` boundaries (terminal, notebook, and the chart / ER / task-graph / migration / dbt / function-catalog modals), plus a dynamic `import("xlsx")` for Excel export. When adding a feature that pulls a heavy dependency used only by a modal/panel, `React.lazy` it (wrap the render site in `<Suspense>`) and, if the dep is new, add it to `VIZ_DEPS` or its own `vendor-*` chunk so it stays out of the boot bundle.
+
+## macOS TCC blocks reads of key files in protected folders
+
+Thaw is **not** App-Sandboxed (no `.entitlements`, no sandbox keys in `build/darwin/Info.plist`), so on macOS a plain `os.ReadFile` of a path under a TCC-protected folder — `~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive — is denied with **`EPERM` ("operation not permitted"), not `ENOENT`**, and *no* permission prompt appears. This bit key-pair auth: `loadPrivateKey` (`internal/snowflake/client.go`) read a hand-typed key path directly and failed silently.
+
+The fix, and the rule for any future direct-read feature:
+
+- **Prefer a native open panel.** A user selection through `wailsruntime.OpenFileDialog` (→ `NSOpenPanel`) confers implicit, path-scoped consent that the OS **persists across launches** via the `com.apple.macl` xattr on the file. That is why the key field's **Browse** button (`App.PickPrivateKeyFile`) makes reconnects keep working with no bookmark machinery. Security-scoped bookmarks are **not** an option — they need App-Sandbox and Wails v2 doesn't expose them.
+- **Give an actionable error when a read is denied anyway** (saved connections, imported profiles, post-hoc TCC revocations all bypass the picker). `keyReadHint(runtime.GOOS, path, err)` wraps a darwin `os.ErrPermission` with a message pointing at Browse / System Settings → Privacy & Security → Files & Folders / moving the key to `~/.thaw` or `~/.snowflake`. It takes `goos` as an argument so the branch is unit-testable on any platform.
+- **Declare usage strings.** `Info.plist` carries `NSDocumentsFolderUsageDescription` / `NSDesktopFolderUsageDescription` / `NSDownloadsFolderUsageDescription` so if a programmatic read *does* trigger a TCC prompt, the user sees a rationale instead of a silent denial. Do **not** reach for Full Disk Access (wildly oversized) or silently copy key material into the config dir.

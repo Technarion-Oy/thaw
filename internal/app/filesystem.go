@@ -373,6 +373,31 @@ func (a *App) SaveBinaryFile(path, base64Content string) error {
 	return filesystem.WriteBinaryFile(path, base64Content)
 }
 
+// PickPrivateKeyFile opens a native open-file dialog filtered to private-key
+// files (*.p8, *.pem, *.key) for Snowflake key-pair authentication and returns
+// the chosen path, or "" if the user cancels.
+//
+// Selecting the key through the native panel matters beyond convenience on
+// macOS: a user-driven NSOpenPanel selection grants Thaw path-scoped read
+// consent that the OS persists across launches (via the com.apple.macl extended
+// attribute on the file). That lets a key kept in a TCC-protected folder such as
+// ~/Documents, ~/Desktop, ~/Downloads or iCloud Drive load on later reconnects,
+// where a plain os.ReadFile of a hand-typed path is denied with EPERM. See the
+// "macOS TCC blocks reads of key files" note in docs/concepts/gotchas.md.
+func (a *App) PickPrivateKeyFile() string {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select private key",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Private Key Files (*.p8, *.pem, *.key)", Pattern: "*.p8;*.pem;*.key"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // PickDirectory opens a native folder-picker dialog and returns the selected path.
 // Returns an empty string if the user cancels.
 func (a *App) PickDirectory() string {

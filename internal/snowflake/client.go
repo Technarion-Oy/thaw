@@ -10,10 +10,12 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -3904,10 +3906,28 @@ func splitCommaList(s string) []string {
 	return out
 }
 
+// keyReadHint turns a private-key read failure into an actionable error. On
+// macOS a permission error is almost always TCC (Transparency, Consent &
+// Control) denying access to a protected folder (~/Documents, ~/Desktop,
+// ~/Downloads, iCloud Drive) rather than a genuine file-mode problem — the raw
+// driver error is a bare "operation not permitted" that gives no hint at the
+// real cause. goos is passed in (rather than read from runtime.GOOS directly) so
+// the branch is unit-testable on any platform. Non-permission errors and other
+// operating systems are returned unchanged.
+func keyReadHint(goos, path string, err error) error {
+	if goos == "darwin" && errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("macOS blocked access to this file's folder (%s). "+
+			"Re-select the key with Browse, grant Thaw access under System Settings → "+
+			"Privacy & Security → Files & Folders, or move the key to ~/.thaw or ~/.snowflake: %w",
+			path, err)
+	}
+	return err
+}
+
 func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, keyReadHint(runtime.GOOS, path, err)
 	}
 	block, _ := pem.Decode(data)
 	if block == nil {

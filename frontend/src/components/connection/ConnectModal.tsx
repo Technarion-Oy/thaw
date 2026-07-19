@@ -8,7 +8,7 @@ import { CloudServerOutlined, FolderOpenOutlined, SaveOutlined, CopyOutlined, De
 import UserAgreementModal from "./UserAgreementModal";
 import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
-  GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
+  GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath, PickPrivateKeyFile,
   SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, ClearDefaultProfile, RenameProfile,
 } from "../../../wailsjs/go/app/App";
 import { sfconfig } from "../../../wailsjs/go/models";
@@ -164,6 +164,19 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       }
     } catch (e) {
       console.error("Failed to pick config path", e);
+    }
+  };
+
+  // Selecting the key through the native panel (rather than typing a path) is
+  // what grants macOS path-scoped read consent, so a key in a TCC-protected
+  // folder such as ~/Documents loads on connect and later reconnects. See the
+  // macOS TCC note in docs/concepts/gotchas.md.
+  const pickPrivateKey = async () => {
+    try {
+      const path = await PickPrivateKeyFile();
+      if (path) form.setFieldValue("privateKeyPath", path);
+    } catch (e) {
+      console.error("Failed to pick private key", e);
     }
   };
 
@@ -641,8 +654,16 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                   name="privateKeyPath"
                   label="Private key path"
                   rules={[{ required: true }]}
+                  extra="On macOS, use Browse to pick a key in Documents / Desktop / Downloads — selecting it grants Thaw access that a typed path does not."
                 >
-                  <Input placeholder="/path/to/rsa_key.p8" />
+                  <Input
+                    placeholder="/path/to/rsa_key.p8"
+                    addonAfter={
+                      <Tooltip title="Browse for key file…">
+                        <FolderOpenOutlined onClick={pickPrivateKey} style={{ cursor: "pointer" }} />
+                      </Tooltip>
+                    }
+                  />
                 </Form.Item>
                 <Form.Item name="privateKeyPassphrase" label="Key passphrase (if encrypted)">
                   <Input.Password />
