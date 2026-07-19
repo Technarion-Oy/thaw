@@ -9,6 +9,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, StopOutlined, FontSizeOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
+import ObjectParametersModal from "../common/ObjectParametersModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import {
   GetObjectProperties,
@@ -74,6 +75,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
   const [params,     setParams]     = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError,  setLoadError]  = useState<string | null>(null);
   const [search,     setSearch]     = useState("");
+  const [showParams, setShowParams] = useState(false);
 
   // Rename state
   const [renaming,     setRenaming]     = useState(false);
@@ -209,6 +211,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
     : `${autoSuspendVal} s`;
 
   return (
+    <>
     <Modal
       open
       title={`Warehouse: ${name}`}
@@ -216,6 +219,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
       width={660}
       styles={{ body: { maxHeight: "75vh", overflowY: "auto" } }}
       footer={[
+        <Button key="params" onClick={() => setShowParams(true)} style={{ float: "left" }}>Parameters…</Button>,
         <Button key="copy" icon={<CopyOutlined />} disabled={!rows} onClick={copyAll}>Copy</Button>,
         <Button key="close" onClick={onClose}>Close</Button>,
       ]}
@@ -440,5 +444,14 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
         </>
       )}
     </Modal>
+    {showParams && (
+      <ObjectParametersModal
+        objectType="WAREHOUSE"
+        nameParts={[name]}
+        title={name}
+        onClose={() => setShowParams(false)}
+      />
+    )}
+    </>
   );
 }

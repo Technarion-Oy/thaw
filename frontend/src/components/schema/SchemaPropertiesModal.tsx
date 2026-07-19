@@ -13,6 +13,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
+import ObjectParametersModal from "../common/ObjectParametersModal";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import {
   SECTION_HEAD, LABEL_TD, q1, opts, paramValue,
@@ -50,6 +51,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const [siblings, setSiblings] = useState<string[]>([]);
   const [swapTarget, setSwapTarget] = useState<string | undefined>();
   const [swapBusy, setSwapBusy] = useState(false);
+  const [showParams, setShowParams] = useState(false);
 
   const reload = useCallback(async () => {
     // Keep prior data rendered while refetching so an inline edit doesn't collapse
@@ -272,6 +274,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   ]);
 
   return (
+    <>
     <Modal
       open
       title={
@@ -284,7 +287,12 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
         </Space>
       }
       onCancel={onClose}
-      footer={<Button onClick={onClose}>Close</Button>}
+      footer={[
+        <Button key="params" onClick={() => setShowParams(true)} style={{ float: "left" }}>
+          Parameters…
+        </Button>,
+        <Button key="close" onClick={onClose}>Close</Button>,
+      ]}
       width={720}
       styles={{ body: { maxHeight: "74vh", overflowY: "auto", paddingTop: 16 } }}
     >
@@ -578,5 +586,14 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
         </>
       )}
     </Modal>
+    {showParams && (
+      <ObjectParametersModal
+        objectType="SCHEMA"
+        nameParts={[db, schema]}
+        title={schemaRef}
+        onClose={() => setShowParams(false)}
+      />
+    )}
+    </>
   );
 }

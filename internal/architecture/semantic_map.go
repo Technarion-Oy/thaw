@@ -149,6 +149,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/authenticationpolicy/CreateAuthenticationPolicyModal.tsx",
         "frontend/src/components/authenticationpolicy/PolicyBagRows.tsx",
         "frontend/src/components/column/ColumnPropertiesModal.tsx",
+        "frontend/src/components/common/ObjectParametersModal.tsx",
         "frontend/src/components/contact/ContactPropertiesModal.tsx",
         "frontend/src/components/contact/CreateContactModal.tsx",
         "frontend/src/components/cortexsearchservice/CortexSearchServicePropertiesModal.tsx",

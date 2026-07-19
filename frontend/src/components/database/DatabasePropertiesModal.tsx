@@ -13,6 +13,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import TagsRow, { EditableTag } from "../shared/TagsRow";
+import ObjectParametersModal from "../common/ObjectParametersModal";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import {
   SECTION_HEAD, LABEL_TD, q1, opts, paramValue,
@@ -58,6 +59,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   // Replication / failover account list (comma-separated org.account identifiers).
   const [accounts, setAccounts] = useState("");
   const [ignoreEdition, setIgnoreEdition] = useState(false);
+  const [showParams, setShowParams] = useState(false);
   const [replBusy, setReplBusy] = useState<string | null>(null);
   // CONTACT <purpose> = <contact_name> editor (one pair at a time).
   const [contactPurpose, setContactPurpose] = useState("");
@@ -340,6 +342,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   ]);
 
   return (
+    <>
     <Modal
       open
       title={
@@ -352,7 +355,12 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
         </Space>
       }
       onCancel={onClose}
-      footer={<Button onClick={onClose}>Close</Button>}
+      footer={[
+        <Button key="params" onClick={() => setShowParams(true)} style={{ float: "left" }}>
+          Parameters…
+        </Button>,
+        <Button key="close" onClick={onClose}>Close</Button>,
+      ]}
       width={720}
       styles={{ body: { maxHeight: "74vh", overflowY: "auto", paddingTop: 16 } }}
     >
@@ -839,5 +847,14 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
         </>
       )}
     </Modal>
+    {showParams && (
+      <ObjectParametersModal
+        objectType="DATABASE"
+        nameParts={[db]}
+        title={dbRef}
+        onClose={() => setShowParams(false)}
+      />
+    )}
+    </>
   );
 }

@@ -22,10 +22,10 @@ func TestParseParameters(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 params (blank key dropped), got %d: %+v", len(got), got)
 	}
-	if got[0] != (SessionParam{Key: "AUTOCOMMIT", Value: "true", Type: "BOOLEAN", Description: "Controls autocommit"}) {
+	if got[0] != (SessionParam{Key: "AUTOCOMMIT", Value: "true", Type: "BOOLEAN", Level: "", Description: "Controls autocommit"}) {
 		t.Errorf("unexpected first param: %+v", got[0])
 	}
-	if got[1].Key != "TIMEZONE" || got[1].Value != "America/Los_Angeles" || got[1].Type != "STRING" {
+	if got[1].Key != "TIMEZONE" || got[1].Value != "America/Los_Angeles" || got[1].Type != "STRING" || got[1].Level != "ACCOUNT" {
 		t.Errorf("unexpected second param: %+v", got[1])
 	}
 }
