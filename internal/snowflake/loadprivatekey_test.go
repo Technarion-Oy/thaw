@@ -60,6 +60,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		{"PKCS#1", pkcs1, "", false},
 		{"encrypted PKCS#8 (Thaw openssl/ssh-keygen)", encPKCS8, pass, false},
 		{"encrypted PKCS#8, wrong passphrase", encPKCS8, "wrong", true},
+		{"encrypted PKCS#8, missing passphrase", encPKCS8, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

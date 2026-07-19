@@ -51,6 +51,18 @@ func TestRedactSQLSecrets(t *testing.T) {
 			wantGone:   []string{"a''b"},
 		},
 		{
+			name:       "dollar-quoted password",
+			in:         `CREATE USER u PASSWORD=$$hunter2$$`,
+			wantMasked: []string{"PASSWORD='***'"},
+			wantGone:   []string{"hunter2", "$$"},
+		},
+		{
+			name:       "dollar-quoted secret with embedded quotes and spaces",
+			in:         `CREATE SECRET s SECRET_STRING = $$ a'b "c" $$`,
+			wantMasked: []string{"SECRET_STRING = '***'"},
+			wantGone:   []string{`a'b "c"`},
+		},
+		{
 			name:       "no secret is left untouched",
 			in:         `SELECT * FROM t WHERE name = 'alice'`,
 			wantMasked: []string{"name = 'alice'"},

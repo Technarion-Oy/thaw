@@ -170,20 +170,49 @@ type sessionConnector struct {
 	db   string // active database
 	sc   string // active schema
 
-	// serialLogin serializes the underlying login handshake for authenticators
+	// loginGate serializes the underlying login handshake for authenticators
 	// that reuse a cached, sequentially-rotated credential — currently only
-	// username_password_mfa. The gosnowflake driver caches the MFA token but
-	// only serializes concurrent logins while the cache is COLD; once a token
-	// is cached, every new connection takes a fast path and reuses it
-	// concurrently. A warm-cache burst (the post-connect metadata listing, or
-	// DDL export's 32-wide pool) then has many logins present the same token at
-	// once — the server rejects the duplicates ("Authentication FAILED"), and
-	// on each failure the driver deletes and re-fetches the token, thrashing and
-	// risking the MFA rate limiter. Serializing the handshake makes token reuse
-	// sequential, as the cache is designed for. Non-MFA auth is unaffected. See
-	// issue #804.
-	serialLogin bool
-	loginMu     sync.Mutex
+	// username_password_mfa. It is nil for every other authenticator, which
+	// keeps full login concurrency. When non-nil it is a capacity-1 channel used
+	// as a *cancelable* mutex, shared process-wide across all Clients for the
+	// same account+user (see loginGateFor). Non-MFA auth is unaffected.
+	loginGate chan struct{}
+}
+
+// Login-handshake serialization for MFA auth. gosnowflake caches the MFA token
+// but only serializes concurrent logins while the cache is COLD; once a token
+// is cached, every new connection takes a fast path and reuses it concurrently.
+// A warm-cache burst (the post-connect metadata listing, DDL export's 32-wide
+// pool, or two tab pools growing at once) then has many logins present the same
+// token simultaneously — the server rejects the duplicates ("Authentication
+// FAILED"), and on each failure the driver deletes and re-fetches the token,
+// thrashing the cache, flooding the log, and risking the MFA rate limiter it was
+// meant to avoid. We serialize the handshake ourselves so reuse is sequential,
+// as the cache is designed for.
+//
+// The gate is keyed by account+user and shared across ALL Clients (tab pools,
+// the shared client, MCP) so the scope matches the driver's own process-global
+// cold-cache lock — two different pools growing at the same moment still cannot
+// race on the same user's cached token. See issue #804.
+var (
+	loginGatesMu sync.Mutex
+	loginGates   = map[string]chan struct{}{}
+)
+
+// loginGateFor returns the process-wide login gate for the given account+user,
+// creating it on first use. The gate is a capacity-1 channel acquired via a
+// select on ctx.Done() so serialization stays cancelable (a stuck MFA handshake,
+// which has a 3-minute timeout, must not pin queued Connects past their ctx).
+func loginGateFor(account, user string) chan struct{} {
+	key := strings.ToLower(strings.TrimSpace(account)) + "\x00" + strings.ToLower(strings.TrimSpace(user))
+	loginGatesMu.Lock()
+	defer loginGatesMu.Unlock()
+	gate, ok := loginGates[key]
+	if !ok {
+		gate = make(chan struct{}, 1)
+		loginGates[key] = gate
+	}
+	return gate
 }
 
 // Connect opens a new raw driver connection via the underlying gosnowflake
@@ -221,16 +250,22 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	return conn, nil
 }
 
-// connectBase performs the underlying login handshake, serialized under loginMu
-// when serialLogin is set (MFA auth) so concurrent connections reuse the cached
-// MFA token sequentially instead of racing on it. Only the handshake is guarded;
-// the USE role/warehouse/database/schema statements in Connect run unserialized.
+// connectBase performs the underlying login handshake, serialized through the
+// per-account+user loginGate when set (MFA auth) so concurrent connections reuse
+// the cached MFA token sequentially instead of racing on it. The gate acquire
+// honors ctx cancellation, so a queued Connect can still be aborted while it
+// waits. Only the handshake is guarded; the USE role/warehouse/database/schema
+// statements in Connect run unserialized.
 func (sc *sessionConnector) connectBase(ctx context.Context) (driver.Conn, error) {
-	if !sc.serialLogin {
+	if sc.loginGate == nil {
 		return sc.base.Connect(ctx)
 	}
-	sc.loginMu.Lock()
-	defer sc.loginMu.Unlock()
+	select {
+	case sc.loginGate <- struct{}{}:
+		defer func() { <-sc.loginGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return sc.base.Connect(ctx)
 }
 
@@ -416,10 +451,11 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// auto-enable this; Linux leaves it unset, so set it explicitly on all
 	// platforms. See issue #804.
 	if auth == sf.AuthTypeUsernamePasswordMFA {
-		//nolint:staticcheck // ClientRequestMfaToken is flagged "may be unexported"
-		// but is the driver's own documented switch (see auth_with_mfa_test.go);
-		// no alternative public API exists.
-		cfg.ClientRequestMfaToken = sf.ConfigBoolTrue
+		// staticcheck SA1019: the field is documented "Deprecated: may be
+		// unexported in a future release" — but it is still the driver's own
+		// documented switch for MFA-token caching (see gosnowflake
+		// auth_with_mfa_test.go) and no alternative public API exists.
+		cfg.ClientRequestMfaToken = sf.ConfigBoolTrue //nolint:staticcheck
 	}
 
 	if p.OktaURL != "" {
@@ -489,10 +525,12 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		wh:   strings.TrimSpace(p.Warehouse),
 		db:   strings.TrimSpace(p.Database), // initialize from profile so Connect() applies it
 		sc:   strings.TrimSpace(p.Schema),   // on connections created after pool recycles
-		// Serialize the login handshake for MFA auth so concurrent pool
-		// connections reuse the cached MFA token sequentially rather than racing
-		// on it (see sessionConnector.serialLogin and issue #804).
-		serialLogin: auth == sf.AuthTypeUsernamePasswordMFA,
+	}
+	// Serialize the login handshake for MFA auth so concurrent pool connections
+	// (across every Client for this account+user) reuse the cached MFA token
+	// sequentially rather than racing on it (see loginGateFor and issue #804).
+	if auth == sf.AuthTypeUsernamePasswordMFA {
+		sc.loginGate = loginGateFor(p.Account, p.User)
 	}
 
 	db := sql.OpenDB(sc)
@@ -3998,7 +4036,12 @@ func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 	//     youmark/pkcs8, which the internal/keypair side already speaks.
 	//   - Legacy PKCS#1 ("BEGIN RSA PRIVATE KEY" with a DEK-Info header),
 	//     handled by the deprecated-but-only stdlib path below.
-	if passphrase != "" && block.Type == "ENCRYPTED PRIVATE KEY" {
+	if block.Type == "ENCRYPTED PRIVATE KEY" {
+		if passphrase == "" {
+			// Without this the DER falls through to ParsePKCS8PrivateKey on still-
+			// encrypted bytes and surfaces an opaque asn1 error; be explicit.
+			return nil, fmt.Errorf("private key in %s is encrypted — a passphrase is required", path)
+		}
 		key, err := pkcs8.ParsePKCS8PrivateKeyRSA(block.Bytes, []byte(passphrase))
 		if err != nil {
 			return nil, fmt.Errorf("decrypt PKCS#8 private key in %s (wrong passphrase?): %w", path, err)

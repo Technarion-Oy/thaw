@@ -37,7 +37,10 @@ func (r *recordingConnector) Driver() driver.Driver { return nil }
 func peakConcurrency(t *testing.T, serialLogin bool) int32 {
 	t.Helper()
 	rec := &recordingConnector{}
-	conn := &sessionConnector{base: rec, serialLogin: serialLogin}
+	conn := &sessionConnector{base: rec}
+	if serialLogin {
+		conn.loginGate = make(chan struct{}, 1)
+	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -62,5 +65,28 @@ func TestSessionConnector_SerializesMFALogin(t *testing.T) {
 	}
 	if peak := peakConcurrency(t, false); peak <= 1 {
 		t.Errorf("non-serial: expected concurrent logins (peak > 1), got %d", peak)
+	}
+}
+
+// TestSessionConnector_LoginGateHonorsContext verifies the issue #804 finding-2
+// fix: a Connect queued behind a held login gate is released by ctx
+// cancellation rather than blocking until the in-flight handshake finishes.
+func TestSessionConnector_LoginGateHonorsContext(t *testing.T) {
+	conn := &sessionConnector{base: &recordingConnector{}, loginGate: make(chan struct{}, 1)}
+	conn.loginGate <- struct{}{} // hold the gate so the next acquire must wait
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled
+
+	done := make(chan error, 1)
+	go func() { _, err := conn.connectBase(ctx); done <- err }()
+
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("connectBase did not observe context cancellation while waiting on the login gate")
 	}
 }
