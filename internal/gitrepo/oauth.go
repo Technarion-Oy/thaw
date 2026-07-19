@@ -94,10 +94,15 @@ func GetProviderConfig(provider string) OAuthConfig {
 	}
 }
 
-func generateState() string {
+func generateState() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	// A short read would leave b all-zero, producing a predictable CSRF state.
+	// crypto/rand.Read effectively never fails on supported platforms, but the
+	// error must be surfaced rather than swallowed (issue #804 F3).
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate oauth state: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // PerformOAuthFlow runs the loopback OAuth flow. It does not open a browser
@@ -110,7 +115,10 @@ func PerformOAuthFlow(ctx context.Context, provider string, onURL func(string)) 
 		return "", fmt.Errorf("unsupported or unconfigured provider: %s", provider)
 	}
 
-	state := generateState()
+	state, err := generateState()
+	if err != nil {
+		return "", err
+	}
 	// Buffered (cap 1) so the HTTP callback handler can always send and return
 	// even if the select below already exited (e.g. ctx canceled) — otherwise the
 	// handler blocks forever and the deferred server.Shutdown deadlocks waiting on it.

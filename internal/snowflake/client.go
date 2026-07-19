@@ -25,6 +25,7 @@ import (
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
+	"github.com/youmark/pkcs8"
 
 	"thaw/internal/sqltok"
 )
@@ -370,6 +371,27 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		Params: map[string]*string{
 			"client_session_keep_alive": &keepAlive,
 		},
+	}
+
+	// MFA-token caching + concurrent-login serialization. Without this, every
+	// physical connection for an MFA-enrolled user fires its own MFA challenge;
+	// a burst (post-connect metadata listing, multiple editor tabs each with
+	// their own pool, or DDL export's 32-way fan-out) trips Snowflake's rate
+	// limiter — "394512 (08004): Too many failed MFA login attempts".
+	//
+	// ClientRequestMfaToken makes the driver (a) cache the MFA token in the OS
+	// credential store / Linux file cache and reuse it for subsequent logins,
+	// and (b) serialize concurrent logins for the same host+user so only the
+	// first one prompts and the rest await its cached token
+	// (isEligibleForParallelLogin in gosnowflake's auth.go, keyed on a
+	// process-global holder so every pool/tab client shares it). macOS/Windows
+	// auto-enable this; Linux leaves it unset, so set it explicitly on all
+	// platforms. See issue #804.
+	if auth == sf.AuthTypeUsernamePasswordMFA {
+		//nolint:staticcheck // ClientRequestMfaToken is flagged "may be unexported"
+		// but is the driver's own documented switch (see auth_with_mfa_test.go);
+		// no alternative public API exists.
+		cfg.ClientRequestMfaToken = sf.ConfigBoolTrue
 	}
 
 	if p.OktaURL != "" {
@@ -3933,15 +3955,33 @@ func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 	if block == nil {
 		return nil, fmt.Errorf("no PEM block found in %s", path)
 	}
-	var der []byte
-	if passphrase != "" {
-		//nolint:staticcheck // x509.DecryptPEMBlock is deprecated but intentional here
-		der, err = x509.DecryptPEMBlock(block, []byte(passphrase))
+
+	// Encrypted private keys come in two on-disk forms:
+	//   - Modern PKCS#8 ("BEGIN ENCRYPTED PRIVATE KEY", PBES2). This is what
+	//     Thaw's own generator emits (openssl pkcs8 -topk8 -passout, ssh-keygen)
+	//     and the format the Snowflake CLI writes. x509.DecryptPEMBlock does NOT
+	//     understand these — it only handles the legacy DEK-Info form — so a
+	//     passphrase-protected key produced by Thaw's own tooling could not be
+	//     loaded back for snowflake_jwt auth (issue #804 F2). Decrypt it with
+	//     youmark/pkcs8, which the internal/keypair side already speaks.
+	//   - Legacy PKCS#1 ("BEGIN RSA PRIVATE KEY" with a DEK-Info header),
+	//     handled by the deprecated-but-only stdlib path below.
+	if passphrase != "" && block.Type == "ENCRYPTED PRIVATE KEY" {
+		key, err := pkcs8.ParsePKCS8PrivateKeyRSA(block.Bytes, []byte(passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt PKCS#8 private key in %s (wrong passphrase?): %w", path, err)
+		}
+		return key, nil
+	}
+
+	der := block.Bytes
+	// x509.IsEncryptedPEMBlock/DecryptPEMBlock are deprecated (insecure by
+	// design) but remain the only stdlib path for legacy DEK-Info-encrypted PEM.
+	if passphrase != "" && x509.IsEncryptedPEMBlock(block) { //nolint:staticcheck
+		der, err = x509.DecryptPEMBlock(block, []byte(passphrase)) //nolint:staticcheck
 		if err != nil {
 			return nil, fmt.Errorf("decrypt PEM block: %w", err)
 		}
-	} else {
-		der = block.Bytes
 	}
 	key, err := x509.ParsePKCS8PrivateKey(der)
 	if err != nil {
