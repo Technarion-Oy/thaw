@@ -3,10 +3,16 @@
 package queryprofile
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"thaw/internal/snowflake"
 )
+
+// errTabularExec is a sentinel used to simulate a failed TABULAR EXPLAIN
+// execution in explainWithFallback tests.
+var errTabularExec = errors.New("tabular exec failed")
 
 // ── parseTabularExplainResult ────────────────────────────────────────────────
 
@@ -267,6 +273,77 @@ func TestLastPart(t *testing.T) {
 			t.Errorf("lastPart(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
+}
+
+// ── explainWithFallback ──────────────────────────────────────────────────────
+
+func TestExplainWithFallback(t *testing.T) {
+	// invalidJSON parses fine as a row but is not valid EXPLAIN JSON,
+	// so parseExplainResult fails and triggers the TABULAR fallback.
+	invalidJSON := &snowflake.QueryResult{
+		Columns: []string{"EXPLAIN"},
+		Rows:    [][]any{{"not valid json"}},
+	}
+	// validTabular parses cleanly via parseTabularExplainResult.
+	validTabular := &snowflake.QueryResult{
+		Columns: []string{"id", "operation", "objects"},
+		Rows:    [][]any{{int64(0), "TableScan", "DB.SCHEMA.T"}},
+	}
+	// invalidTabular is missing the required 'operation' column.
+	invalidTabular := &snowflake.QueryResult{
+		Columns: []string{"id", "objects"},
+		Rows:    [][]any{{int64(0), "DB.SCHEMA.T"}},
+	}
+
+	t.Run("JSON parse fails, TABULAR parse succeeds", func(t *testing.T) {
+		run := func(f snowflake.ExplainFormat) (*snowflake.QueryResult, error) {
+			if f == snowflake.ExplainJSON {
+				return invalidJSON, nil
+			}
+			return validTabular, nil
+		}
+		plan, err := explainWithFallback(run)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !plan.TabularFallback {
+			t.Error("expected TabularFallback = true")
+		}
+	})
+
+	t.Run("JSON parse fails, TABULAR exec fails wraps both", func(t *testing.T) {
+		run := func(f snowflake.ExplainFormat) (*snowflake.QueryResult, error) {
+			if f == snowflake.ExplainJSON {
+				return invalidJSON, nil
+			}
+			return nil, errTabularExec
+		}
+		_, err := explainWithFallback(run)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "JSON parse failed") ||
+			!strings.Contains(err.Error(), "TABULAR fallback also failed") {
+			t.Errorf("error does not wrap both failures: %v", err)
+		}
+	})
+
+	t.Run("JSON parse fails, TABULAR parse fails wraps both", func(t *testing.T) {
+		run := func(f snowflake.ExplainFormat) (*snowflake.QueryResult, error) {
+			if f == snowflake.ExplainJSON {
+				return invalidJSON, nil
+			}
+			return invalidTabular, nil
+		}
+		_, err := explainWithFallback(run)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "JSON parse failed") ||
+			!strings.Contains(err.Error(), "TABULAR parse also failed") {
+			t.Errorf("error does not wrap both failures: %v", err)
+		}
+	})
 }
 
 func TestGetDiagMessage(t *testing.T) {

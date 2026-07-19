@@ -170,7 +170,7 @@ func explainWithFallback(run func(snowflake.ExplainFormat) (*snowflake.QueryResu
 
 	plan, err = parseTabularExplainResult(result)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("queryprofile: JSON parse failed (%w), TABULAR parse also failed: %w", parseErr, err)
 	}
 	plan.TabularFallback = true
 	return plan, nil
