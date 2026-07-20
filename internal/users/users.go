@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"thaw/internal/snowflake"
-	"thaw/internal/sqltok"
 )
 
 // BuildAlterUserPropertySQL builds an ALTER USER ... SET / UNSET statement for a
@@ -128,10 +127,10 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 			}
 			rendered := make([]string, len(parts))
 			for i, p := range parts {
-				if p.quoted {
-					rendered[i] = snowflake.QuoteIdent(p.text)
+				if p.Quoted {
+					rendered[i] = snowflake.QuoteIdent(p.Text)
 				} else {
-					rendered[i] = snowflake.QuoteOrBare(p.text, false)
+					rendered[i] = snowflake.QuoteOrBare(p.Text, false)
 				}
 			}
 			return strings.Join(rendered, "."), nil
@@ -161,44 +160,12 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	}
 }
 
-// nsPart is one dotted segment of a namespace reference: its unquoted text and
-// whether the input wrapped it in double quotes (case-sensitive intent).
-type nsPart struct {
-	text   string
-	quoted bool
-}
-
 // splitNamespace splits a DATABASE / DATABASE.SCHEMA reference into its dotted
-// parts using the shared sqltok tokenizer (quote-aware, so `"MY.DB".PUB`
-// yields ["MY.DB", "PUB"]). Each returned part is unquoted via sqltok.Unquote
-// and non-empty, with a flag recording whether it was quoted — the caller
-// re-quotes accordingly. Trailing tokens, empty segments, and unterminated
-// quotes return an error.
-func splitNamespace(v string) ([]nsPart, error) {
-	trimmed := strings.TrimSpace(v)
-	tokens := sqltok.Tokenize(trimmed)
-	raw, next := sqltok.ReadIdentParts(tokens, trimmed, 0, 2)
-	// The whole input must be exactly one identifier path — reject leftovers
-	// ("DB.", third parts beyond maxParts, stray tokens).
-	if raw == nil || next >= len(tokens) || tokens[next].Kind != sqltok.EOF {
-		return nil, fmt.Errorf("invalid namespace %q", v)
-	}
-	parts := make([]nsPart, len(raw))
-	for i, p := range raw {
-		if strings.HasPrefix(p, `"`) {
-			// Quoted identifier: must be a terminated pair.
-			if len(p) < 2 || !strings.HasSuffix(p, `"`) {
-				return nil, fmt.Errorf("unbalanced quotes in %q", v)
-			}
-			parts[i] = nsPart{text: sqltok.Unquote(p), quoted: true}
-		} else {
-			parts[i] = nsPart{text: p, quoted: false}
-		}
-		if parts[i].text == "" {
-			return nil, fmt.Errorf("empty segment in %q", v)
-		}
-	}
-	return parts, nil
+// parts. It is a thin alias for the shared, quote-aware
+// snowflake.SplitQualifiedName (capped at the two parts a DEFAULT_NAMESPACE
+// value may have); see that function for the parsing and error rules.
+func splitNamespace(v string) ([]snowflake.IdentPart, error) {
+	return snowflake.SplitQualifiedName(v, 2)
 }
 
 // AlterProperty applies a single SET/UNSET property change to a user.

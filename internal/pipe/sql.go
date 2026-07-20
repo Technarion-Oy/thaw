@@ -32,13 +32,21 @@ type RefreshPipeConfig struct {
 
 // validateCopyStatement ensures rawStmt contains exactly one SQL statement and
 // that it begins with COPY INTO. Returns the trimmed statement on success.
+//
+// The COPY INTO check inspects the first two significant tokens rather than
+// matching a literal "COPY INTO " prefix: the check is fail-closed, so a
+// prefix match would falsely reject valid statements separated by a newline,
+// a tab, repeated spaces, or preceded by a leading comment.
 func validateCopyStatement(rawStmt string) (string, error) {
 	stmts := sqltok.Split(rawStmt)
 	if len(stmts) != 1 {
 		return "", fmt.Errorf("copy statement must contain exactly one SQL statement, got %d", len(stmts))
 	}
 	stmt := strings.TrimSpace(stmts[0])
-	if !strings.HasPrefix(strings.ToUpper(stmt), "COPY INTO ") {
+	toks := sqltok.SignificantTokens(stmt)
+	if len(toks) < 2 ||
+		!strings.EqualFold(toks[0].Text(stmt), "COPY") ||
+		!strings.EqualFold(toks[1].Text(stmt), "INTO") {
 		return "", fmt.Errorf("copy statement must start with COPY INTO")
 	}
 	return stmt, nil

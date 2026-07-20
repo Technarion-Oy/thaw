@@ -225,11 +225,8 @@ type StageFile struct {
 // stageName can be a fully qualified name (e.g. "@DB.SCHEMA.STAGE") or a relative
 // path (e.g. "@STAGE/path/"). pattern is an optional regex to filter results.
 func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName string, pattern string) ([]StageFile, error) {
-	// Ensure stageName starts with @
-	if !strings.HasPrefix(stageName, "@") {
-		stageName = "@" + stageName
-	}
-	if err := snowflake.ValidateStageRef(stageName); err != nil {
+	stageName, err := snowflake.NormalizeStageRef(stageName)
+	if err != nil {
 		return nil, err
 	}
 
@@ -243,40 +240,19 @@ func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName str
 		return nil, err
 	}
 
-	nameIdx := -1
-	sizeIdx := -1
-	md5Idx := -1
-	lastModIdx := -1
-
-	for i, col := range res.Columns {
-		switch strings.ToUpper(col) {
-		case "NAME":
-			nameIdx = i
-		case "SIZE":
-			sizeIdx = i
-		case "MD5":
-			md5Idx = i
-		case "LAST_MODIFIED":
-			lastModIdx = i
-		}
-	}
+	// StrVal returns "" for an absent (-1) column, so the cells are read
+	// unconditionally.
+	idxs := snowflake.ColumnIndexes(res, "name", "size", "md5", "last_modified")
 
 	var files []StageFile
 	for _, row := range res.Rows {
-		f := StageFile{}
-		if nameIdx != -1 {
-			f.Name = strVal(row, nameIdx)
+		f := StageFile{
+			Name:         snowflake.StrVal(row, idxs["name"]),
+			MD5:          snowflake.StrVal(row, idxs["md5"]),
+			LastModified: snowflake.StrVal(row, idxs["last_modified"]),
 		}
-		if sizeIdx != -1 {
-			if v, err2 := strconv.ParseInt(strVal(row, sizeIdx), 10, 64); err2 == nil {
-				f.Size = v
-			}
-		}
-		if md5Idx != -1 {
-			f.MD5 = strVal(row, md5Idx)
-		}
-		if lastModIdx != -1 {
-			f.LastModified = strVal(row, lastModIdx)
+		if v, err2 := strconv.ParseInt(snowflake.StrVal(row, idxs["size"]), 10, 64); err2 == nil {
+			f.Size = v
 		}
 		files = append(files, f)
 	}
@@ -284,29 +260,10 @@ func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName str
 	return files, nil
 }
 
-// strVal handles type assertions for interface{} row values to strings.
-func strVal(row []interface{}, idx int) string {
-	if idx < 0 || idx >= len(row) || row[idx] == nil {
-		return ""
-	}
-	switch v := row[idx].(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.
 func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
-	// Ensure stageName starts with @
-	if !strings.HasPrefix(stageName, "@") {
-		stageName = "@" + stageName
-	}
-
-	if err := snowflake.ValidateStageRef(stageName); err != nil {
+	stageName, err := snowflake.NormalizeStageRef(stageName)
+	if err != nil {
 		return err
 	}
 
@@ -328,17 +285,14 @@ func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath 
 		sql += " OVERWRITE = FALSE"
 	}
 
-	_, err := client.Execute(ctx, sql)
+	_, err = client.Execute(ctx, sql)
 	return err
 }
 
 // DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
 func DownloadFileFromStage(ctx context.Context, client *snowflake.Client, stageName string, localDirPath string, parallel int, pattern string) error {
-	// Ensure stageName starts with @
-	if !strings.HasPrefix(stageName, "@") {
-		stageName = "@" + stageName
-	}
-	if err := snowflake.ValidateStageRef(stageName); err != nil {
+	stageName, err := snowflake.NormalizeStageRef(stageName)
+	if err != nil {
 		return err
 	}
 
@@ -350,17 +304,14 @@ func DownloadFileFromStage(ctx context.Context, client *snowflake.Client, stageN
 		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
 	}
 
-	_, err := client.Execute(ctx, sql)
+	_, err = client.Execute(ctx, sql)
 	return err
 }
 
 // RemoveStageFiles deletes files from a stage using the REMOVE command.
 func RemoveStageFiles(ctx context.Context, client *snowflake.Client, stageName string, pattern string) error {
-	// Ensure stageName starts with @
-	if !strings.HasPrefix(stageName, "@") {
-		stageName = "@" + stageName
-	}
-	if err := snowflake.ValidateStageRef(stageName); err != nil {
+	stageName, err := snowflake.NormalizeStageRef(stageName)
+	if err != nil {
 		return err
 	}
 
@@ -369,6 +320,6 @@ func RemoveStageFiles(ctx context.Context, client *snowflake.Client, stageName s
 		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
 	}
 
-	_, err := client.Execute(ctx, sql)
+	_, err = client.Execute(ctx, sql)
 	return err
 }

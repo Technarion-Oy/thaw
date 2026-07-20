@@ -124,12 +124,25 @@ Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buil
 The MCP server's `execute_snowflake_sql` tool uses a three-layer gate (`internal/mcp/gate.go`) to validate every SQL statement before execution:
 
 1. **Single-statement check** — `SplitStatements(sql)` must return exactly 1 statement. Multi-statement SQL is rejected before any Snowflake round-trip.
-2. **USE statement check** — `isUSEStatement(sql)` rejects `USE ROLE/WAREHOUSE/DATABASE/SCHEMA` and `USE SECONDARY ROLES`. Context-switching is exposed only through dedicated trusted tools (`use_role`, `use_warehouse`, etc.) that can be individually omitted via session pinning.
+2. **USE statement check** — `isUSEStatement(sql)` rejects `USE ROLE/WAREHOUSE/DATABASE/SCHEMA` and `USE SECONDARY ROLES`. Detection is `sqltok.FirstToken(sql) == "USE"` (see *Parsing SQL text* below), so it is not defeated by a non-space separator or an unusual comment style. Context-switching is exposed only through dedicated trusted tools (`use_role`, `use_warehouse`, etc.) that can be individually omitted via session pinning.
 3. **EXPLAIN plan validation** — `EXPLAIN USING TABULAR <stmt>` is sent to Snowflake. Every operation in the returned plan must be in the `readOnlyOps` allow-list (default-deny). Any unknown operation (including future Snowflake additions) is rejected.
 
 The gate returns a `GateVerdict` struct with `Allowed`, `Operations`, `Rejected`, and `Reason` fields, providing structured feedback to the AI client on why a statement was rejected.
 
 **Key design decisions**: The gate accepts a `queryRunner` interface (not `*snowflake.Client` directly) so unit tests can use a fake implementation with canned results. The `readOnlyOps` map is intentionally conservative — it is better to over-reject than to let a mutation through. The gate is defense-in-depth; the real security boundary is the Snowflake role's grants.
+
+## Parsing SQL text
+
+**Never hand-roll SQL lexing.** Statement classification, identifier matching, and qualified-name splitting all go through `internal/sqltok` (or the `internal/snowflake` helpers built on it). A `strings.HasPrefix`/`ToUpper`/`Split` approximation reproduces only part of the grammar and drifts from it:
+
+| Instead of | Use | Why |
+|---|---|---|
+| `strings.HasPrefix(strings.ToUpper(sql), "USE ")` | `sqltok.FirstToken(sql) == "USE"` | The literal trailing space demands one ASCII space; a newline, tab, or `USE/*c*/ROLE` slips past. Hand-written comment stripping also misses Snowflake's `//` line comments and its **nested** `/* */` blocks. |
+| `strings.HasPrefix(up, "COPY INTO ")` | `sqltok.SignificantTokens(stmt)` then compare `toks[0]`/`toks[1]` | Same problem — and in a **fail-closed** check the failure inverts: valid statements are falsely rejected. |
+| `strings.Split(name, ".")` on a qualified name | `snowflake.SplitQualifiedName(name, maxParts)` → `[]IdentPart{Text, Quoted}` | Splitting on every dot mis-splits a quoted identifier that contains one: `"MY.DB".PUB` becomes three bogus parts. |
+| `strings.ToUpper(a) == strings.ToUpper(b)` on identifiers | `snowflake.IdentEqual(raw, name)` | Snowflake folds **bare** identifiers to uppercase but preserves the case of quoted ones, so uppercasing both sides wrongly matches a case-sensitive name — and never unescapes doubled quotes (`"my""repo"`). |
+
+The boundary: this applies to **SQL text** — statements, identifiers, qualified names. A strict, fail-closed validator over a non-SQL value format (e.g. `parseNumberList` in `internal/table/insert.go`, which parses a bracketed VECTOR literal `[1.0, 2.0]` with an anchored numeric regex) has no comments, string literals, or quoted identifiers in its grammar; plain string/regex code is correct there and a tokenizer rewrite would only add sign-stitching complexity.
 
 ## Mode-gated tool registration
 

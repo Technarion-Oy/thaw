@@ -5,6 +5,8 @@ package pipe
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/sqltok"
 )
 
 func TestValidateCopyStatement(t *testing.T) {
@@ -58,6 +60,33 @@ func TestValidateCopyStatement(t *testing.T) {
 			name:  "semicolon inside string is not a statement separator",
 			input: "COPY INTO t FROM @s FILE_FORMAT = (FIELD_DELIMITER = ';')",
 		},
+		// The COPY/INTO separator is whatever the tokenizer treats as trivia —
+		// these all falsely failed the old literal "COPY INTO " prefix match.
+		{
+			name:  "newline between COPY and INTO",
+			input: "COPY\nINTO t FROM @s",
+		},
+		{
+			name:  "double space between COPY and INTO",
+			input: "COPY  INTO t FROM @s",
+		},
+		{
+			name:  "tab between COPY and INTO",
+			input: "COPY\tINTO t FROM @s",
+		},
+		{
+			name:  "leading line comment",
+			input: "-- load\nCOPY INTO t FROM @s",
+		},
+		{
+			name:  "leading block comment",
+			input: "/* c */ COPY INTO t FROM @s",
+		},
+		{
+			name:    "COPY with no INTO",
+			input:   "COPY",
+			wantErr: "must start with COPY INTO",
+		},
 	}
 
 	for _, tc := range tests {
@@ -75,7 +104,11 @@ func TestValidateCopyStatement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !strings.HasPrefix(strings.ToUpper(got), "COPY INTO ") {
+			// The statement is returned trimmed but otherwise verbatim, so the
+			// COPY/INTO separator may be any trivia — assert on tokens, not a
+			// literal prefix.
+			toks := sqltok.SignificantTokens(got)
+			if len(toks) < 2 || !strings.EqualFold(toks[0].Text(got), "COPY") || !strings.EqualFold(toks[1].Text(got), "INTO") {
 				t.Fatalf("returned statement does not start with COPY INTO: %q", got)
 			}
 		})

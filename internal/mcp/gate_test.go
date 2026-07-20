@@ -76,11 +76,21 @@ func TestIsUSEStatement(t *testing.T) {
 		{"USE SCHEMA PUBLIC", true},
 		{"USE SECONDARY ROLES NONE", true},
 		{"  USE ROLE FOO  ", true},
-		// Leading comments should be stripped.
+		// Leading comments should be skipped.
 		{"/* bypass */ USE ROLE SYSADMIN", true},
 		{"-- comment\nUSE ROLE SYSADMIN", true},
 		{"/* a */ /* b */ USE ROLE X", true},
 		{"-- line1\n-- line2\nUSE DATABASE DB", true},
+		// Tokenizer-only cases: whitespace other than a space after USE,
+		// Snowflake's // line comments, nested block comments, and a comment
+		// used as the separator. All bypassed the old prefix match.
+		{"USE\nROLE SYSADMIN", true},
+		{"USE\tROLE SYSADMIN", true},
+		{"// comment\nUSE ROLE X", true},
+		{"USE/*c*/ROLE SYSADMIN", true},
+		{"/* outer /* inner */ */ USE ROLE X", true},
+		// A bare USE with no operand is rejected at this layer too.
+		{"USE", true},
 		// Non-USE statements.
 		{"SELECT 1", false},
 		{"CREATE TABLE t (id INT)", false},
@@ -363,33 +373,5 @@ func TestCheckExplainPlanError(t *testing.T) {
 	_, err := checkExplainPlan(context.Background(), runner, "SELECT BAD SYNTAX")
 	if err == nil {
 		t.Fatal("expected error propagation from EXPLAIN failure")
-	}
-}
-
-// ── stripLeadingComments ────────────────────────────────────────────────────
-
-func TestStripLeadingComments(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"no comment", "SELECT 1", "SELECT 1"},
-		{"line comment", "-- comment\nSELECT 1", "SELECT 1"},
-		{"block comment", "/* comment */ SELECT 1", "SELECT 1"},
-		{"multiple line comments", "-- a\n-- b\nSELECT 1", "SELECT 1"},
-		{"nested block comments", "/* a */ /* b */ SELECT 1", "SELECT 1"},
-		{"mixed", "-- line\n/* block */ SELECT 1", "SELECT 1"},
-		{"only comment", "-- just a comment", ""},
-		{"unclosed block", "/* unclosed", ""},
-		{"comment then USE", "/* x */ USE ROLE FOO", "USE ROLE FOO"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := stripLeadingComments(tc.in)
-			if got != tc.want {
-				t.Errorf("stripLeadingComments(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
 	}
 }

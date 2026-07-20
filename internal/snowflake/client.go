@@ -1512,21 +1512,78 @@ type GitTag struct {
 	Name string `json:"name"`
 }
 
+// splitStagePrefix splits a LIST NAME cell into the stage/repo prefix segment
+// and the storage path that follows it, at the first '/' that is not inside a
+// double-quoted identifier. It returns ok=false when the cell has no such
+// separator (a bare name with no path).
+//
+// A '"' opens a quoted identifier only in an identifier position — at the start
+// of the cell, or right after '@' or '.' — mirroring ValidateStageRef. That
+// keeps a quote appearing inside a filename from swallowing the rest of the
+// scan, while still letting a quoted stage name that contains a literal '/'
+// (e.g. `"my/stage"/file.txt`) split at the right place, which a plain
+// strings.Index(name, "/") cannot do.
+func splitStagePrefix(name string) (prefix, rest string, ok bool) {
+	inQuote := false
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if inQuote {
+			if c == '"' {
+				// "" inside a quoted identifier is an escaped quote, not the end.
+				if i+1 < len(name) && name[i+1] == '"' {
+					i++
+					continue
+				}
+				inQuote = false
+			}
+			continue
+		}
+		switch {
+		case c == '/':
+			return name[:i], name[i+1:], true
+		case c == '"' && (i == 0 || name[i-1] == '@' || name[i-1] == '.'):
+			inQuote = true
+		}
+	}
+	return name, "", false
+}
+
+// stagePrefixMatches reports whether prefix — the segment before the first
+// unquoted '/' of a LIST NAME cell — names the stage/repo stageName. The cell
+// may render the prefix as STAGE, "STAGE", @STAGE, or a qualified
+// DB.SCHEMA.STAGE (with any part quoted), so the prefix is split quote-aware and
+// only its final part is compared, under Snowflake's identifier folding rules:
+// a quoted part must match stageName exactly, a bare part matches
+// case-insensitively.
+//
+// The '@' sigil alone is not treated as proof of a stage prefix — the name after
+// it must still match stageName — so a path whose own first segment happens to
+// start with '@' is no longer stripped by mistake.
+func stagePrefixMatches(prefix, stageName string) bool {
+	prefix = strings.TrimPrefix(strings.TrimSpace(prefix), "@")
+	if prefix == "" {
+		return false
+	}
+	parts, err := SplitQualifiedName(prefix, 0)
+	if err != nil {
+		// Not a parseable identifier path (an unusual storage path) — compare
+		// the segment as a whole rather than silently declining to strip it.
+		return IdentEqual(prefix, stageName)
+	}
+	last := parts[len(parts)-1]
+	if last.Quoted {
+		return last.Text == stageName
+	}
+	return strings.EqualFold(last.Text, stageName)
+}
+
 // parseListEntries parses the result of a LIST @stage/path command into
 // directory-aware GitRepoEntry values. stageName is the unquoted object name
 // used to strip the stage/repo prefix from the NAME column. dirPath is the
 // normalized directory prefix (with trailing slash when non-empty).
 func parseListEntries(res *QueryResult, stageName, dirPath string) []GitRepoEntry {
-	nameIdx := -1
-	sizeIdx := -1
-	for i, col := range res.Columns {
-		switch strings.ToUpper(col) {
-		case "NAME":
-			nameIdx = i
-		case "SIZE":
-			sizeIdx = i
-		}
-	}
+	idxs := ColumnIndexes(res, "name", "size")
+	nameIdx, sizeIdx := idxs["name"], idxs["size"]
 	if nameIdx == -1 {
 		return []GitRepoEntry{}
 	}
@@ -1542,22 +1599,8 @@ func parseListEntries(res *QueryResult, stageName, dirPath string) []GitRepoEntr
 		// or even "@DB.SCHEMA.MYREPO/branches/main/file.txt".
 		// We want the relative path: "branches/main/file.txt".
 		relPath := fullName
-		if slashIdx := strings.Index(fullName, "/"); slashIdx >= 0 {
-			prefix := fullName[:slashIdx]
-			up := strings.ToUpper(prefix)
-			ur := strings.ToUpper(stageName)
-
-			// Determine if the part before the first slash is a stage prefix.
-			// It might be STAGE, "STAGE", @STAGE, or a qualified DB.SCHEMA.STAGE.
-			isPrefix := up == ur ||
-				up == `"`+ur+`"` ||
-				strings.HasPrefix(up, "@") ||
-				strings.HasSuffix(up, "."+ur) ||
-				strings.HasSuffix(up, ".\""+ur+`"`)
-
-			if isPrefix {
-				relPath = fullName[slashIdx+1:]
-			}
+		if prefix, rest, ok := splitStagePrefix(fullName); ok && stagePrefixMatches(prefix, stageName) {
+			relPath = rest
 		}
 
 		if !strings.HasPrefix(relPath, dirPath) {
@@ -2016,6 +2059,24 @@ func ValidateStageRef(stageName string) error {
 	return nil
 }
 
+// NormalizeStageRef prepares a caller-supplied stage reference for splicing into
+// SQL: it prefixes the '@' sigil when absent and then runs the reference through
+// ValidateStageRef, returning the normalized form. The two steps always belong
+// together — validation of a bare name would otherwise pass over a reference the
+// caller is about to '@'-prefix anyway — so this is the entry point for the
+// LIST/PUT/GET/REMOVE builders in internal/stage, which previously repeated the
+// ensure-'@'-then-validate pair at every call site. The returned string is empty
+// when the error is non-nil.
+func NormalizeStageRef(stageName string) (string, error) {
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+	if err := ValidateStageRef(stageName); err != nil {
+		return "", err
+	}
+	return stageName, nil
+}
+
 // buildStageRef assembles and validates a @<qualified>/<path> stage reference for
 // splicing raw into SQL. qualified is the already-quoted stage identifier
 // (Qualify output, or "~" for the user stage); path may be empty.
@@ -2375,12 +2436,31 @@ func isSystemRole(name string) bool {
 	return false
 }
 
-// colIndexMap returns a map of (lowercase column name → column index)
-// for the requested column names. Unknown columns map to -1.
+// ColumnIndexes maps each requested column name to its index in res, or to -1
+// when the column is absent. Matching is case-insensitive on both sides and the
+// returned map is keyed by the lower-cased name, so a caller reading a SHOW/LIST
+// result addresses columns by name instead of scanning res.Columns by hand:
+//
+//	idxs := snowflake.ColumnIndexes(res, "name", "size")
+//	name := snowflake.StrVal(row, idxs["name"])
+//
+// A nil res yields a map of all -1 entries, so callers can read cells
+// unconditionally (StrVal returns "" for a -1 index).
+func ColumnIndexes(res *QueryResult, names ...string) map[string]int {
+	var cols []string
+	if res != nil {
+		cols = res.Columns
+	}
+	return colIndexMap(cols, names...)
+}
+
+// colIndexMap maps each requested name (compared case-insensitively) to its
+// index in cols, or -1 when absent. The returned map is keyed by lower-cased
+// name; it is the []string-input core of the exported ColumnIndexes.
 func colIndexMap(cols []string, names ...string) map[string]int {
 	result := make(map[string]int, len(names))
 	for _, n := range names {
-		result[n] = -1
+		result[strings.ToLower(n)] = -1
 	}
 	for i, col := range cols {
 		lower := strings.ToLower(col)
@@ -2402,17 +2482,36 @@ func makeValPtrs(n int) ([]interface{}, []interface{}) {
 	return vals, ptrs
 }
 
-// strVal returns the string representation of vals[i], or "" if i < 0 or nil.
-func strVal(vals []interface{}, i int) string {
-	if i < 0 || i >= len(vals) {
+// StrVal returns the trimmed string representation of the i-th value of a
+// result row, or "" when i is out of range or the value is nil. A []byte cell
+// (which the driver may return for some column types) is decoded as text rather
+// than formatted as a byte-slice literal.
+//
+// It is the shared row-cell reader behind the SHOW/LIST/DESCRIBE parsers in this
+// package and in the domain packages that read a QueryResult directly (e.g.
+// internal/stage), which previously each carried their own copy.
+func StrVal(vals []interface{}, i int) string {
+	if i < 0 || i >= len(vals) || vals[i] == nil {
 		return ""
 	}
-	s := fmt.Sprintf("%v", vals[i])
-	if s == "<nil>" {
-		return ""
+	var s string
+	switch v := vals[i].(type) {
+	case string:
+		s = v
+	case []byte:
+		s = string(v)
+	default:
+		s = fmt.Sprintf("%v", v)
+		if s == "<nil>" {
+			return ""
+		}
 	}
 	return strings.TrimSpace(s)
 }
+
+// strVal is the package-internal spelling of StrVal, kept for the many
+// in-package call sites.
+func strVal(vals []interface{}, i int) string { return StrVal(vals, i) }
 
 // GetWarehouseDDL returns the DDL for a single warehouse using Snowflake's GET_DDL function.
 func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, error) {

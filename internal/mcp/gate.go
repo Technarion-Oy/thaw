@@ -73,43 +73,18 @@ func IsReadOnlyOp(op string) bool {
 	return readOnlyOps[op]
 }
 
-// isUSEStatement returns true if sql (after stripping leading SQL comments)
-// starts with "USE ". This is a best-effort early-rejection layer that
-// improves traceability — if a USE statement slips past (e.g. via an
-// unexpected comment syntax), layer 3 (EXPLAIN USING TABULAR) will still
-// catch it because Snowflake's EXPLAIN on a USE statement either errors or
-// produces non-read-only operations.
+// isUSEStatement returns true if the first significant token of sql is the USE
+// keyword. Detection runs through the shared tokenizer, so every comment style
+// Snowflake accepts (--, //, and nested /* */ blocks) and any whitespace or
+// comment separator between USE and its operand are handled uniformly. An
+// identifier that merely starts with "USE" (e.g. USELESS_FUNC) scans as a
+// single token and is therefore not matched.
+//
+// This is an early-rejection layer that improves traceability; layer 3 (EXPLAIN
+// USING TABULAR) remains the authoritative backstop, since Snowflake's EXPLAIN
+// on a USE statement either errors or produces non-read-only operations.
 func isUSEStatement(sql string) bool {
-	stripped := stripLeadingComments(sql)
-	upper := strings.ToUpper(strings.TrimSpace(stripped))
-	return strings.HasPrefix(upper, "USE ")
-}
-
-// stripLeadingComments removes leading line comments (--) and block comments
-// (/* */) from sql, returning the remainder. It does not handle nested block
-// comments (Snowflake doesn't support them either).
-func stripLeadingComments(sql string) string {
-	s := strings.TrimSpace(sql)
-	for len(s) > 0 {
-		if strings.HasPrefix(s, "--") {
-			// Line comment: skip to end of line.
-			if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-				s = strings.TrimSpace(s[idx+1:])
-			} else {
-				return "" // entire input is a line comment
-			}
-		} else if strings.HasPrefix(s, "/*") {
-			// Block comment: skip to closing */.
-			if idx := strings.Index(s, "*/"); idx >= 0 {
-				s = strings.TrimSpace(s[idx+2:])
-			} else {
-				return "" // unclosed block comment
-			}
-		} else {
-			break
-		}
-	}
-	return s
+	return sqltok.FirstToken(sql) == "USE"
 }
 
 // CheckGate runs the three-layer EXPLAIN precompilation gate:
