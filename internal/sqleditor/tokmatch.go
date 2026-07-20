@@ -3,6 +3,7 @@
 package sqleditor
 
 import (
+	"sort"
 	"strings"
 
 	sf "thaw/internal/snowflake"
@@ -95,6 +96,14 @@ func readIdentParts(sig []sqltok.Token, sql string, pos int) ([]string, int) {
 // kwAt checks if sig[pos] is a keyword/identifier matching kw (case-insensitive).
 func kwAt(sig []sqltok.Token, sql string, pos int, kw string) bool {
 	return pos < len(sig) && tokUpper(sig[pos], sql) == kw
+}
+
+// sigIndexAtOffset returns the index of the first significant token starting at
+// or after byte offset off, or len(sig) when there is none. It is the bridge
+// from a text-derived offset back into the token stream, so that what follows a
+// span can be inspected token-wise instead of by prefix-matching the raw text.
+func sigIndexAtOffset(sig []sqltok.Token, off int) int {
+	return sort.Search(len(sig), func(i int) bool { return sig[i].Start >= off })
 }
 
 // kwAtAny checks if sig[pos] matches any of kws. Returns the matched keyword or "".
@@ -222,9 +231,9 @@ func matchWordsAt(sig []sqltok.Token, sql string, pos int, words []string) bool 
 // TASK, FILE FORMAT, the policy family, …) — account-level objects (DATABASE,
 // WAREHOUSE, ROLE, integrations, …) are excluded there, so they never match.
 // Returns the raw ident path, the human-readable object type used in diagnostics,
-// and ok. It generalizes matchCreateTV, which is retained for table-only
-// CREATE-effect tracking.
-func matchCreateSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType string, ok bool) {
+// the index of the path's first token in sig, and ok. It generalizes
+// matchCreateTV, which is retained for table-only CREATE-effect tracking.
+func matchCreateSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType string, pathIdx int, ok bool) {
 	i := 0
 	if !kwAt(sig, sql, i, "CREATE") {
 		return
@@ -248,6 +257,7 @@ func matchCreateSchemaScoped(sig []sqltok.Token, sql string) (rawPath, objType s
 		return
 	}
 	i = skipIfNotExists(sig, sql, i)
+	pathIdx = i
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -284,7 +294,9 @@ func matchCreateDbSch(sig []sqltok.Token, sql string) (rawPath string, ok bool) 
 // matchCreateSchema matches:
 //
 //	CREATE [OR REPLACE] [TRANSIENT] SCHEMA [IF NOT EXISTS] <ident_path>
-func matchCreateSchema(sig []sqltok.Token, sql string) (rawPath string, ok bool) {
+//
+// pathIdx is the index of the path's first token in sig.
+func matchCreateSchema(sig []sqltok.Token, sql string) (rawPath string, pathIdx int, ok bool) {
 	i := 0
 	if !kwAt(sig, sql, i, "CREATE") {
 		return
@@ -302,6 +314,7 @@ func matchCreateSchema(sig []sqltok.Token, sql string) (rawPath string, ok bool)
 	}
 	i++
 	i = skipIfNotExists(sig, sql, i)
+	pathIdx = i
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return
@@ -404,8 +417,8 @@ func matchDropDB(sig []sqltok.Token, sql string) (rawPath string, hasIfExists, o
 }
 
 // matchDropSchema matches DROP SCHEMA [IF EXISTS] <ident_path> and returns
-// whether IF EXISTS was present.
-func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, hasIfExists, ok bool) {
+// whether IF EXISTS was present, plus the index of the path's first token in sig.
+func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, pathIdx int, hasIfExists, ok bool) {
 	i := 0
 	if !kwAt(sig, sql, i, "DROP") {
 		return
@@ -416,6 +429,7 @@ func matchDropSchema(sig []sqltok.Token, sql string) (rawPath string, hasIfExist
 	}
 	i++
 	i, hasIfExists = skipIfExists(sig, sql, i)
+	pathIdx = i
 	rawPath, _ = readIdentPath(sig, sql, i)
 	ok = rawPath != ""
 	return

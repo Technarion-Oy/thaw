@@ -36,7 +36,9 @@ type Object struct {
 }
 ```
 
-`Parse(sql string) Object` — regex `createRE` matches the CREATE preamble, then `extractIdent` tokenises the qualified name (up to three dot-separated parts) handling both quoted and unquoted identifiers.
+`Parse(sql string) Object` — classifies the statement over the `internal/sqltok` significant-token stream: `CREATE`, an optional `OR REPLACE`, any number of modifier keywords (`createModifiers`: TRANSIENT, SECURE, MATERIALIZED, …), then the object-type keyword (`createKinds`, plus the two-word `FILE FORMAT`). The name is read with `sqltok.ReadIdentParts` (up to three dot-separated parts, quoted or unquoted) after an optional `IF NOT EXISTS`.
+
+This replaced an anchored `^\s*create…` regex that could not see through comments, so `-- header\nCREATE TABLE t …` and `CREATE /* mod */ TABLE t …` both fell through to `KindUnknown` — header comments are normal in the user-authored migration scripts that `internal/migration` feeds to `Parse`, and those statements silently dropped out of kind-based handling.
 
 `(o *Object).FilePath() string` — returns the relative path using the default layout:
 ```

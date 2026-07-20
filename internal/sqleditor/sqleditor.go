@@ -3371,11 +3371,13 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 // text, suitable for autocomplete suggestions. It uses the existing
 // extractCTEProjections machinery with an empty global registry.
 func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
-	stripped := stripCommentsSQL(stmtText)
-	upper := strings.ToUpper(strings.TrimSpace(stripped))
-	if !strings.HasPrefix(upper, "WITH") {
+	// FirstToken skips leading comments and matches whole tokens, so a leading
+	// comment does not hide the WITH and an identifier like WITHDRAWALS does
+	// not look like one.
+	if sqltok.FirstToken(stmtText) != "WITH" {
 		return nil
 	}
+	stripped := stripCommentsSQL(stmtText)
 
 	projections := extractCTEProjections(stripped, make(map[string][]ColInfo))
 	if len(projections) == 0 {
@@ -3520,9 +3522,10 @@ func ExtractInEditorTableDefs(
 			continue
 		}
 
-		// Check if this is CTAS: text after closing paren starts with AS
-		afterParen := strings.TrimSpace(raw[parenStart+len(colsRaw):])
-		if strings.HasPrefix(strings.ToUpper(afterParen), "AS") {
+		// Check if this is CTAS: the first significant token after the closing
+		// paren is AS. Matching the token rather than a text prefix means a
+		// comment between ')' and AS does not hide it.
+		if kwAt(rawSig, raw, sigIndexAtOffset(rawSig, parenStart+len(colsRaw)), "AS") {
 			continue
 		}
 

@@ -15,7 +15,7 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 | File | Purpose |
 |---|---|
 | `sql.go` | `PipeConfig`, `RefreshPipeConfig`, `BuildCreatePipeSql`, `BuildRefreshPipeSql` |
-| `parse.go` | `FQNPart`, `ParseCopyIntoTargetParts`, `ParseCopyIntoTarget`, internal identifier parsers |
+| `parse.go` | `FQNPart`, `ParseCopyIntoTargetParts`, `ParseCopyIntoTarget` — token-based (`sqltok`) COPY INTO target extraction |
 | `copyhistory.go` | `GetCopyHistory(ctx, client, ...)` — fetches and filters copy history rows |
 | `sql_test.go` | Unit tests for the SQL builders |
 | `parse_test.go` | Unit tests for the DDL parser |
@@ -61,6 +61,8 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 `BuildCreatePipeSql` validates the `CopyStatement` via `validateCopyStatement` before embedding it: exactly one statement, must start with `COPY INTO`. An empty `CopyStatement` emits the placeholder `COPY INTO <table> FROM @<stage>` for the live preview.
 
 The `COPY INTO` check reads the first two significant tokens (`sqltok.SignificantTokens`) rather than matching a literal `"COPY INTO "` prefix. The check is fail-closed, so a prefix match rejected valid statements: any separator other than one ASCII space (`COPY\nINTO`, a tab, a double space) or a leading comment (`-- load\nCOPY INTO …`) failed validation.
+
+`ParseCopyIntoTargetParts` locates the target by scanning `sqltok.SignificantTokens` for a `COPY` token immediately followed by `INTO`, then reads the name with `sqltok.ReadIdentParts`. A substring search for `"COPY INTO"` was wrong in both directions: in `CREATE PIPE` DDL the `COMMENT` clause precedes `AS COPY INTO`, so `COMMENT='nightly copy into staging'` hijacked the parse and yielded a fragment of the comment as the table name, while `COPY\nINTO t` (any separator other than one space) failed outright.
 
 `ParseCopyIntoTargetParts` preserves the `Quoted` flag per identifier part so that `GetCopyHistory` can uppercase unquoted parts (Snowflake's `GET_DDL` may return them in any case) before passing them to `copy_history`. Quoted identifiers are left as-is to preserve case-sensitive names.
 

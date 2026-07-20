@@ -97,6 +97,7 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `internal/app` holds a `*Client` as the "shared" connection; tab sessions are separate `*Client` instances managed by `internal/app/app.go`.
 - `internal/mcp` creates its own dedicated `*Client` per MCP session (mirrors tab-session isolation).
 - Result-parsing helpers in `result.go` are used by every domain package that parses SHOW/DESCRIBE output.
+- **DDL text parsing goes through `internal/sqltok`, never substring search.** `parseProcedureDDL` (parameter list for `GetProcedureParams` / `GetFunctionInfo`), `hasReturnsTable` (UDTF vs. scalar detection), and `parseFinalizeFromDDLText` (task `FINALIZE = …`) all scan significant tokens, with `splitTokensByTopLevelComma` / `matchingRParen` as the token-level paren and comma helpers. A raw `strings.Index`/`Contains` scan matched inside comments, string literals, quoted identifiers, and dollar-quoted procedure bodies: a scalar UDF whose Python body mentioned "returns table" was misclassified as a UDTF, a `DEFAULT 'a,b'` parameter default mis-split the parameter list, and a `(` inside a quoted procedure name was taken for the start of that list.
 
 ## Gotchas
 
