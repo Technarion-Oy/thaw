@@ -886,41 +886,40 @@ func commonColumnNames(a, b []colDef) []string {
 
 // replaceDDLTableName rewrites the table identifier in a CREATE TABLE DDL so
 // it references db.schema.newName.
+//
+// The name is located over the token stream: the TABLE keyword token followed
+// by the (optionally qualified) identifier path is spliced by byte offsets, so
+// a quoted table name containing the word TABLE — or a comment mentioning it —
+// cannot shift the replacement. The DDL is returned unchanged when no
+// CREATE TABLE name can be found.
 func replaceDDLTableName(ddlText, db, schema, newName string) string {
 	newFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(newName)
 
-	parenIdx := strings.IndexByte(ddlText, '(')
-	if parenIdx < 0 {
-		return ddlText
-	}
-	header := ddlText[:parenIdx]
-	body := ddlText[parenIdx:]
-
-	upper := strings.ToUpper(header)
-	tablePos := strings.LastIndex(upper, "TABLE")
-	if tablePos < 0 {
-		return ddlText
-	}
-
-	i := tablePos + 5
-	for i < len(header) && (header[i] == ' ' || header[i] == '\t') {
-		i++
-	}
-	identStart := i
-
-	inQuote := false
-	for i < len(header) {
-		ch := header[i]
-		if ch == '"' {
-			inQuote = !inQuote
-		} else if !inQuote && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-			break
+	sig := sqltok.SignificantTokens(ddlText)
+	for i := range sig {
+		if !strings.EqualFold(sig[i].Text(ddlText), "TABLE") || sig[i].Kind != sqltok.Keyword {
+			continue
 		}
-		i++
+		start := skipIfNotExists(sig, ddlText, i+1)
+		_, next := sqltok.ReadIdentParts(sig, ddlText, start, 3)
+		if next == start {
+			return ddlText // no identifier after TABLE
+		}
+		return ddlText[:sig[start].Start] + newFQN + ddlText[sig[next-1].End:]
 	}
-	identEnd := i
+	return ddlText
+}
 
-	return header[:identStart] + newFQN + header[identEnd:] + body
+// skipIfNotExists returns the index just past an IF NOT EXISTS clause starting
+// at sig[i], or i when the clause is absent.
+func skipIfNotExists(sig []sqltok.Token, src string, i int) int {
+	if i+2 < len(sig) &&
+		strings.EqualFold(sig[i].Text(src), "IF") &&
+		strings.EqualFold(sig[i+1].Text(src), "NOT") &&
+		strings.EqualFold(sig[i+2].Text(src), "EXISTS") {
+		return i + 3
+	}
+	return i
 }
 
 // ─── Snowflake introspection helpers ─────────────────────────────────────────

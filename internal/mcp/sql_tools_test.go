@@ -56,43 +56,57 @@ func TestInjectLimit(t *testing.T) {
 			"basic select",
 			"SELECT * FROM t",
 			100,
-			"SELECT * FROM (SELECT * FROM t) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT * FROM t\n) AS _mcp_limit LIMIT 100",
 		},
 		{
 			"trailing semicolon",
 			"SELECT * FROM t;",
 			100,
-			"SELECT * FROM (SELECT * FROM t) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT * FROM t\n) AS _mcp_limit LIMIT 100",
 		},
 		{
 			"CTE",
 			"WITH cte AS (SELECT 1) SELECT * FROM cte",
 			50,
-			"SELECT * FROM (WITH cte AS (SELECT 1) SELECT * FROM cte) AS _mcp_limit LIMIT 50",
+			"SELECT * FROM (\nWITH cte AS (SELECT 1) SELECT * FROM cte\n) AS _mcp_limit LIMIT 50",
 		},
 		{
 			"existing limit",
 			"SELECT * FROM t LIMIT 5000",
 			100,
-			"SELECT * FROM (SELECT * FROM t LIMIT 5000) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT * FROM t LIMIT 5000\n) AS _mcp_limit LIMIT 100",
 		},
 		{
 			"subquery",
 			"SELECT * FROM (SELECT id FROM t)",
 			100,
-			"SELECT * FROM (SELECT * FROM (SELECT id FROM t)) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT * FROM (SELECT id FROM t)\n) AS _mcp_limit LIMIT 100",
 		},
 		{
 			"whitespace around semicolon",
 			"SELECT 1 ;  ",
 			100,
-			"SELECT * FROM (SELECT 1) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT 1\n) AS _mcp_limit LIMIT 100",
+		},
+		{
+			// The closing paren and LIMIT must not land inside the trailing
+			// line comment.
+			"trailing line comment",
+			"SELECT 1 -- note",
+			100,
+			"SELECT * FROM (\nSELECT 1 -- note\n) AS _mcp_limit LIMIT 100",
+		},
+		{
+			"trailing block comment",
+			"SELECT 1 /* note */",
+			100,
+			"SELECT * FROM (\nSELECT 1 /* note */\n) AS _mcp_limit LIMIT 100",
 		},
 		{
 			"order by not propagated to outer query",
 			"SELECT * FROM t ORDER BY created_at DESC",
 			100,
-			"SELECT * FROM (SELECT * FROM t ORDER BY created_at DESC) AS _mcp_limit LIMIT 100",
+			"SELECT * FROM (\nSELECT * FROM t ORDER BY created_at DESC\n) AS _mcp_limit LIMIT 100",
 		},
 	}
 	for _, tc := range cases {

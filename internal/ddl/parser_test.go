@@ -5,6 +5,8 @@ package ddl
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/sqltok"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -86,9 +88,21 @@ func TestSplitParamList(t *testing.T) {
 	}
 }
 
-// ─── tokeniseQualifiedIdent ───────────────────────────────────────────────────
+// ─── qualified identifier reading ─────────────────────────────────────────────
 
-func TestTokeniseQualifiedIdent(t *testing.T) {
+// identParts reads a qualified name from the start of s exactly the way Parse
+// does — over the sqltok token stream, capped at three parts, with quoted
+// identifiers unquoted.
+func identParts(s string) []string {
+	sig := sqltok.SignificantTokens(s)
+	parts, _ := sqltok.ReadIdentParts(sig, s, 0, 3)
+	for i, p := range parts {
+		parts[i] = sqltok.Unquote(p)
+	}
+	return parts
+}
+
+func TestQualifiedIdentParts(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     string
@@ -212,9 +226,10 @@ func TestTokeniseQualifiedIdent(t *testing.T) {
 			wantParts: nil,
 		},
 		{
+			// A quoted empty name is one token, so it reads as one empty part.
 			name:      "empty quoted identifier",
 			input:     `""`,
-			wantParts: nil, // empty string part is discarded
+			wantParts: []string{""},
 		},
 
 		// ── mixed quoted / unquoted parts ────────────────────────────────────
@@ -288,23 +303,21 @@ func TestTokeniseQualifiedIdent(t *testing.T) {
 			wantParts: []string{"   "},
 		},
 
-		// ── empty middle part is silently skipped but loop continues ───────────
+		// ── empty middle part is preserved as an empty part ───────────────────
 		{
-			// After "A" the dot is consumed, then "" is empty so not appended,
-			// then the NEXT dot IS present (rs[6]=='.' after pos 4-5 for "")
-			// so the loop continues and picks up "C".  Result: ["A", "C"].
-			name:      "empty middle part skipped but next dot still consumed",
+			// Each quoted name is its own token, so the empty middle name is
+			// kept in position rather than collapsing the path.
+			name:      "empty middle part kept",
 			input:     `"A"."". "C"`,
-			wantParts: []string{"A", "C"},
+			wantParts: []string{"A", "", "C"},
 		},
 
-		// ── leading dot: empty unquoted prefix consumed, rest parsed ──────────
+		// ── leading dot: not an identifier path ──────────────────────────────
 		{
-			// Unquoted loop immediately stops at '.', empty part discarded, dot
-			// is consumed, and parsing continues — yielding ["SCH", "TBL"].
-			name:      "leading dot: empty unquoted prefix consumed, rest parsed",
+			// A path must start on an identifier; a leading dot yields nothing.
+			name:      "leading dot yields no parts",
 			input:     `."SCH"."TBL"`,
-			wantParts: []string{"SCH", "TBL"},
+			wantParts: nil,
 		},
 
 		// ── very long quoted name ─────────────────────────────────────────────
@@ -317,9 +330,9 @@ func TestTokeniseQualifiedIdent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parts, _ := tokeniseQualifiedIdent(tt.input)
+			parts := identParts(tt.input)
 			if len(parts) != len(tt.wantParts) {
-				t.Fatalf("tokeniseQualifiedIdent(%q) = %v, want %v", tt.input, parts, tt.wantParts)
+				t.Fatalf("identParts(%q) = %v, want %v", tt.input, parts, tt.wantParts)
 			}
 			for i := range tt.wantParts {
 				if parts[i] != tt.wantParts[i] {

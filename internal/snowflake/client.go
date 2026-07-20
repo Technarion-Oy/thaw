@@ -2965,87 +2965,106 @@ type ProcParam struct {
 	DataType string `json:"dataType"`
 }
 
-// splitByTopLevelComma splits s at commas that are not nested inside parentheses,
-// so that types like NUMBER(38,0) are kept intact.
-func splitByTopLevelComma(s string) []string {
-	var parts []string
+// splitTokensByTopLevelComma splits toks at Comma tokens that are not nested
+// inside parentheses, so that types like NUMBER(38,0) are kept intact. Because
+// it works on tokens, a comma inside a string literal (e.g. DEFAULT 'a,b') or
+// a quoted identifier is not a separator.
+func splitTokensByTopLevelComma(toks []sqltok.Token) [][]sqltok.Token {
+	var segments [][]sqltok.Token
 	depth, start := 0, 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
+	for i, t := range toks {
+		switch t.Kind {
+		case sqltok.LParen:
 			depth++
-		case ')':
+		case sqltok.RParen:
 			depth--
-		case ',':
+		case sqltok.Comma:
 			if depth == 0 {
-				parts = append(parts, strings.TrimSpace(s[start:i]))
+				segments = append(segments, toks[start:i])
 				start = i + 1
 			}
 		}
 	}
-	if rest := strings.TrimSpace(s[start:]); rest != "" {
-		parts = append(parts, rest)
+	if start < len(toks) {
+		segments = append(segments, toks[start:])
 	}
-	return parts
+	return segments
 }
 
-// parseProcedureDDL extracts the parameter list from a CREATE PROCEDURE DDL
-// string. It finds the opening parenthesis of the parameter list, locates its
-// matching close, then splits the content into name/type pairs.
+// matchingRParen returns the index of the RParen token that closes the LParen
+// at toks[open], or -1 when it is unbalanced.
+func matchingRParen(toks []sqltok.Token, open int) int {
+	depth := 0
+	for i := open; i < len(toks); i++ {
+		switch toks[i].Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// parseProcedureDDL extracts the parameter list from a CREATE PROCEDURE or
+// CREATE FUNCTION DDL string. It finds the opening parenthesis of the
+// parameter list, locates its matching close, then splits the content into
+// name/type pairs.
 //
 // Snowflake DDL format (simplified):
 //
 //	CREATE OR REPLACE PROCEDURE "DB"."SCHEMA"."NAME"(param1 TYPE, param2 TYPE)
 //	RETURNS ... LANGUAGE ... AS '...';
+//
+// The scan runs over the [sqltok] token stream, so a parenthesis inside a
+// quoted procedure name, a comma inside a string-literal default, and the word
+// DEFAULT inside such a literal are all inert.
 func parseProcedureDDL(ddl string) []ProcParam {
-	start := strings.Index(ddl, "(")
-	if start < 0 {
-		return nil
-	}
-	// Walk forward to find the matching closing paren.
-	depth, end := 0, -1
-	for i := start; i < len(ddl); i++ {
-		switch ddl[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				end = i
-			}
-		}
-		if end >= 0 {
+	sig := sqltok.SignificantTokens(ddl)
+
+	open := -1
+	for i, t := range sig {
+		if t.Kind == sqltok.LParen {
+			open = i
 			break
 		}
 	}
-	if end < 0 {
+	if open < 0 {
 		return nil
 	}
-	paramStr := strings.TrimSpace(ddl[start+1 : end])
-	if paramStr == "" {
+	end := matchingRParen(sig, open)
+	if end < 0 {
 		return nil
 	}
 
 	var params []ProcParam
-	for _, part := range splitByTopLevelComma(paramStr) {
-		part = strings.TrimSpace(part)
-		if part == "" {
+	for _, seg := range splitTokensByTopLevelComma(sig[open+1 : end]) {
+		// Drop any DEFAULT clause (e.g. "amount NUMBER DEFAULT 0").
+		for i, t := range seg {
+			if t.Kind.IsIdentLike() && strings.EqualFold(t.Text(ddl), "DEFAULT") {
+				seg = seg[:i]
+				break
+			}
+		}
+		if len(seg) == 0 {
 			continue
 		}
-		// Remove any DEFAULT clause (e.g. "amount NUMBER DEFAULT 0").
-		if i := strings.Index(strings.ToUpper(part), " DEFAULT "); i >= 0 {
-			part = strings.TrimSpace(part[:i])
-		}
-		// First whitespace-separated token is the parameter name; the rest is the type.
-		spaceIdx := strings.IndexAny(part, " \t")
-		if spaceIdx < 0 {
-			// Only a bare type with no name — use a placeholder.
-			params = append(params, ProcParam{Name: "param", DataType: part})
+		// "name TYPE" — a name is present only when a type name follows it.
+		// A bare type such as NUMBER(38,0) starts with its own token followed
+		// by '(' , so it gets the placeholder name.
+		if len(seg) >= 2 && seg[1].Kind.IsIdentLike() {
+			params = append(params, ProcParam{
+				Name:     seg[0].Text(ddl),
+				DataType: ddl[seg[1].Start:seg[len(seg)-1].End],
+			})
 			continue
 		}
 		params = append(params, ProcParam{
-			Name:     part[:spaceIdx],
-			DataType: strings.TrimSpace(part[spaceIdx+1:]),
+			Name:     "param",
+			DataType: ddl[seg[0].Start:seg[len(seg)-1].End],
 		})
 	}
 	return params
@@ -3410,12 +3429,28 @@ func (c *Client) GetFunctionInfo(ctx context.Context, database, schema, name, ar
 	if err != nil {
 		return nil, err
 	}
-	// A UDTF always has RETURNS TABLE(...) in its DDL; scalar functions never do.
-	isTable := strings.Contains(strings.ToUpper(ddl), "RETURNS TABLE")
 	return &FunctionInfo{
 		Params:          parseProcedureDDL(ddl),
-		IsTableFunction: isTable,
+		IsTableFunction: hasReturnsTable(ddl),
 	}, nil
+}
+
+// hasReturnsTable reports whether ddl declares RETURNS TABLE(...), which marks
+// a table function (UDTF); scalar functions never do.
+//
+// The check scans significant tokens rather than the raw text, so the phrase
+// occurring inside a comment or inside a dollar-quoted Python/JS body (where a
+// docstring mentioning "returns table" is common) does not misclassify a
+// scalar UDF.
+func hasReturnsTable(ddl string) bool {
+	sig := sqltok.SignificantTokens(ddl)
+	for i := 0; i+1 < len(sig); i++ {
+		if sig[i].Kind.IsIdentLike() && strings.EqualFold(sig[i].Text(ddl), "RETURNS") &&
+			sig[i+1].Kind.IsIdentLike() && strings.EqualFold(sig[i+1].Text(ddl), "TABLE") {
+			return true
+		}
+	}
+	return false
 }
 
 // showInSchema runs a SHOW command and collects results as SnowflakeObjects.
@@ -3658,22 +3693,26 @@ func parseFinalizeFromRelJSON(v interface{}) string {
 
 // parseFinalizeFromDDLText extracts the FINALIZE = ... value from task DDL
 // text, e.g. from GET_DDL('TASK', ...) output.
+//
+// The scan runs over significant tokens, so the word FINALIZE inside a
+// comment, a string literal, or the task body does not produce a bogus value.
 func parseFinalizeFromDDLText(ddl string) string {
-	upper := strings.ToUpper(ddl)
-	idx := strings.Index(upper, "FINALIZE")
-	if idx < 0 {
-		return ""
+	sig := sqltok.SignificantTokens(ddl)
+	for i := 0; i+2 < len(sig); i++ {
+		if !sig[i].Kind.IsIdentLike() || !strings.EqualFold(sig[i].Text(ddl), "FINALIZE") {
+			continue
+		}
+		if sig[i+1].Kind != sqltok.Operator || sig[i+1].Text(ddl) != "=" {
+			return ""
+		}
+		// The value may be a qualified task name (DB.SCHEMA.TASK); trailing
+		// ';' and ',' are their own tokens and so are already excluded.
+		if path, _, ok := sqltok.ReadIdentPath(sig, ddl, i+2, 3); ok {
+			return path
+		}
+		return sig[i+2].Text(ddl)
 	}
-	rest := strings.TrimSpace(ddl[idx+len("FINALIZE"):])
-	if len(rest) == 0 || rest[0] != '=' {
-		return ""
-	}
-	rest = strings.TrimSpace(rest[1:])
-	end := strings.IndexAny(rest, " \t\n\r")
-	if end < 0 {
-		end = len(rest)
-	}
-	return strings.TrimRight(rest[:end], ";,")
+	return ""
 }
 
 // ListBasicObjects returns the "basic" objects inside a schema by running a

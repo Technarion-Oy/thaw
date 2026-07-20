@@ -495,6 +495,57 @@ func TestParse_Kinds(t *testing.T) {
 			sql:      "",
 			wantKind: KindUnknown,
 		},
+
+		// ── comments around the CREATE header ────────────────────────────────
+		// User-authored migration scripts routinely carry header comments; the
+		// old anchored regex could not see through them and dropped the
+		// statement to KindUnknown.
+		{
+			name:     "leading line comment",
+			sql:      "-- header\nCREATE TABLE t (i INT)",
+			wantKind: KindTable, wantName: "t",
+		},
+		{
+			name:     "leading block comment",
+			sql:      "/* header */ CREATE TABLE t (i INT)",
+			wantKind: KindTable, wantName: "t",
+		},
+		{
+			name:     "comment between CREATE and the kind keyword",
+			sql:      "CREATE /* mod */ TABLE t (i INT)",
+			wantKind: KindTable, wantName: "t",
+		},
+		{
+			name:     "comment between the kind keyword and the name",
+			sql:      "CREATE TABLE -- name follows\n\"DB\".\"SCH\".\"TBL\" (i INT)",
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "TBL",
+		},
+		{
+			name:     "comment inside OR REPLACE",
+			sql:      "CREATE OR /* x */ REPLACE MATERIALIZED VIEW v AS SELECT 1",
+			wantKind: KindView, wantName: "v",
+		},
+		{
+			name:     "leading comment before file format",
+			sql:      "-- fmt\nCREATE OR REPLACE FILE FORMAT \"DB\".\"SCH\".\"FF\" TYPE = CSV",
+			wantKind: KindFileFormat, wantDB: "DB", wantSch: "SCH", wantName: "FF",
+		},
+		{
+			name:      "leading comment before function keeps the arg signature",
+			sql:       "-- udf\nCREATE FUNCTION f(X FLOAT) RETURNS FLOAT AS $$ X $$",
+			wantKind:  KindFunction, wantName: "f",
+			wantArgSig: "FLOAT",
+		},
+		{
+			name:     "comment-only statement is unknown",
+			sql:      "-- just a comment",
+			wantKind: KindUnknown,
+		},
+		{
+			name:     "CREATE with an unrecognized kind is unknown",
+			sql:      "CREATE WAREHOUSE wh",
+			wantKind: KindUnknown,
+		},
 	}
 
 	for _, tt := range tests {

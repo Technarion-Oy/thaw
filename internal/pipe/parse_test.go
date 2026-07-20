@@ -244,6 +244,62 @@ FILE_FORMAT = (type = 'JSON');`,
 	}
 }
 
+// TestParseCopyIntoTargetTokenBoundaries covers the cases where the previous
+// substring search for "COPY INTO" picked the wrong occurrence or missed the
+// real one.
+func TestParseCopyIntoTargetTokenBoundaries(t *testing.T) {
+	tests := []struct {
+		name       string
+		ddl        string
+		wantDB     string
+		wantSchema string
+		wantTable  string
+	}{
+		{
+			// The COMMENT clause precedes AS COPY INTO in CREATE PIPE DDL, so
+			// a comment mentioning "copy into" used to hijack the parse.
+			name:      "copy into inside the COMMENT string literal",
+			ddl:       `CREATE PIPE mypipe COMMENT='nightly copy into staging' AS COPY INTO real_target FROM @s`,
+			wantTable: "real_target",
+		},
+		{
+			name:      "copy into inside a line comment",
+			ddl:       "CREATE PIPE p\n-- copy into old_target\nAS COPY INTO real_target FROM @s",
+			wantTable: "real_target",
+		},
+		{
+			name:      "copy into inside a block comment",
+			ddl:       "CREATE PIPE p /* copy into old_target */ AS COPY INTO real_target FROM @s",
+			wantTable: "real_target",
+		},
+		{
+			name:      "newline between COPY and INTO",
+			ddl:       "CREATE PIPE p AS COPY\nINTO t FROM @s",
+			wantTable: "t",
+		},
+		{
+			name:       "comment between the target parts",
+			ddl:        "COPY INTO db. /* c */ sch.tbl FROM @s",
+			wantDB:     "db",
+			wantSchema: "sch",
+			wantTable:  "tbl",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, schema, table, err := ParseCopyIntoTarget(tt.ddl)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if db != tt.wantDB || schema != tt.wantSchema || table != tt.wantTable {
+				t.Errorf("got (%q, %q, %q), want (%q, %q, %q)",
+					db, schema, table, tt.wantDB, tt.wantSchema, tt.wantTable)
+			}
+		})
+	}
+}
+
 // TestParseCopyIntoTargetParts verifies that quoting metadata is preserved so
 // the caller can uppercase unquoted parts for canonical Snowflake resolution.
 func TestParseCopyIntoTargetParts(t *testing.T) {

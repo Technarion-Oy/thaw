@@ -5,7 +5,8 @@ package pipe
 import (
 	"fmt"
 	"strings"
-	"unicode"
+
+	"thaw/internal/sqltok"
 )
 
 // FQNPart is one component of a dot-separated Snowflake fully qualified name,
@@ -23,49 +24,43 @@ type FQNPart struct {
 // pipe DDL and returns up to three identifier parts (db, schema, table) with
 // their quoting status.
 //
-// The search for COPY INTO is case-insensitive. For quoted identifiers the
-// inner "" escape sequences are resolved to a single ". Unquoted identifiers
-// are returned as-is (GET_DDL may return them in any case).
+// The DDL is tokenized with [sqltok], so a COPY INTO occurring inside a comment
+// or a string literal — e.g. the COMMENT clause that precedes AS COPY INTO in
+// CREATE PIPE DDL — is not mistaken for the real target, and any amount of
+// whitespace (including newlines) may separate COPY from INTO.
+//
+// For quoted identifiers the inner "" escape sequences are resolved to a
+// single ". Unquoted identifiers are returned as-is (GET_DDL may return them
+// in any case).
 func ParseCopyIntoTargetParts(ddl string) ([]FQNPart, error) {
-	// Locate COPY INTO (case-insensitive).
-	upper := strings.ToUpper(ddl)
-	idx := strings.Index(upper, "COPY INTO")
-	if idx < 0 {
-		return nil, fmt.Errorf("COPY INTO not found in pipe DDL")
-	}
-	rest := ddl[idx+len("COPY INTO"):]
+	tokens := sqltok.SignificantTokens(ddl)
 
-	// Skip leading whitespace.
-	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
-	if rest == "" {
-		return nil, fmt.Errorf("no table name found after COPY INTO")
-	}
-
-	// Parse up to 3 dot-separated identifier parts.
-	var parts []FQNPart
-	for {
-		val, remaining, quoted, err := parseIdentPartWithQuoting(rest)
-		if err != nil {
-			return nil, fmt.Errorf("parsing COPY INTO target: %w", err)
+	for i := 0; i+1 < len(tokens); i++ {
+		if !isWord(tokens[i], ddl, "COPY") || !isWord(tokens[i+1], ddl, "INTO") {
+			continue
 		}
-		parts = append(parts, FQNPart{Value: val, Quoted: quoted})
-		rest = remaining
-
-		// Stop unless the very next char is a dot.
-		trimmed := strings.TrimLeftFunc(rest, unicode.IsSpace)
-		if len(trimmed) == 0 || trimmed[0] != '.' {
-			break
+		raw, _ := sqltok.ReadIdentParts(tokens, ddl, i+2, 3)
+		if len(raw) == 0 {
+			return nil, fmt.Errorf("no table name found after COPY INTO")
 		}
-		rest = trimmed[1:] // consume the dot
-		if len(parts) == 3 {
-			break // safety guard
+		parts := make([]FQNPart, 0, len(raw))
+		for _, p := range raw {
+			parts = append(parts, FQNPart{
+				Value:  sqltok.Unquote(p),
+				Quoted: strings.HasPrefix(p, `"`),
+			})
 		}
+		return parts, nil
 	}
 
-	if len(parts) < 1 || len(parts) > 3 {
-		return nil, fmt.Errorf("unexpected identifier part count %d", len(parts))
-	}
-	return parts, nil
+	return nil, fmt.Errorf("COPY INTO not found in pipe DDL")
+}
+
+// isWord reports whether tok is an identifier-like token whose text equals
+// word, case-insensitively. String literals, comments, and dollar-quoted
+// bodies are single tokens of a different kind, so they never match.
+func isWord(tok sqltok.Token, src, word string) bool {
+	return tok.Kind.IsIdentLike() && strings.EqualFold(tok.Text(src), word)
 }
 
 // ParseCopyIntoTarget is a convenience wrapper around ParseCopyIntoTargetParts
@@ -88,62 +83,4 @@ func ParseCopyIntoTarget(ddl string) (db, schema, table string, err error) {
 	default: // 3
 		return parts[0].Value, parts[1].Value, parts[2].Value, nil
 	}
-}
-
-// parseIdentPartWithQuoting consumes one identifier (quoted or unquoted) from s
-// and returns the value, the remaining string, whether it was quoted, and any error.
-func parseIdentPartWithQuoting(s string) (ident, rest string, quoted bool, err error) {
-	if s == "" {
-		return "", "", false, fmt.Errorf("empty input while parsing identifier")
-	}
-	if s[0] == '"' {
-		ident, rest, err = parseQuotedIdent(s)
-		return ident, rest, true, err
-	}
-	ident, rest, err = parseUnquotedIdent(s)
-	return ident, rest, false, err
-}
-
-// parseQuotedIdent consumes a double-quoted identifier, treating "" as an
-// escaped double-quote inside the value.
-func parseQuotedIdent(s string) (ident, rest string, err error) {
-	if len(s) < 2 || s[0] != '"' {
-		return "", "", fmt.Errorf("expected quoted identifier, got: %.20q", s)
-	}
-	var sb strings.Builder
-	i := 1 // skip opening "
-	for i < len(s) {
-		if s[i] == '"' {
-			if i+1 < len(s) && s[i+1] == '"' {
-				// Escaped double-quote inside a quoted identifier.
-				sb.WriteByte('"')
-				i += 2
-			} else {
-				// Closing quote.
-				i++
-				break
-			}
-		} else {
-			sb.WriteByte(s[i])
-			i++
-		}
-	}
-	return sb.String(), s[i:], nil
-}
-
-// parseUnquotedIdent consumes an unquoted identifier, stopping at '.', '(',
-// ';', or any whitespace character.
-func parseUnquotedIdent(s string) (ident, rest string, err error) {
-	i := 0
-	for i < len(s) {
-		c := rune(s[i])
-		if c == '.' || c == '(' || c == ';' || unicode.IsSpace(c) {
-			break
-		}
-		i++
-	}
-	if i == 0 {
-		return "", "", fmt.Errorf("empty unquoted identifier near: %.20q", s)
-	}
-	return s[:i], s[i:], nil
 }

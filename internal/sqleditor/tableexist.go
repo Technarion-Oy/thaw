@@ -134,7 +134,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
-		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok {
+		if rawPath, objType, _, ok := matchCreateSchemaScoped(sig, raw); ok {
 			if parts := extractIdentParts(rawPath, ic); len(parts) > 0 {
 				regByKind(scriptCreatedByKind, objType, parts)
 				unregByKind(scriptDroppedByKind, objType, parts)
@@ -203,9 +203,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// ── CREATE <schema-scoped object> ─────────────────────────────
 		// TABLE, VIEW, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, … all live in a
 		// schema, so an unqualified name needs an active database + schema.
-		if rawPath, objType, ok := matchCreateSchemaScoped(sig, raw); ok {
+		if rawPath, objType, pathIdx, ok := matchCreateSchemaScoped(sig, raw); ok {
 			parts := extractIdentParts(rawPath, ic)
-			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
+			rawParts, _ := readIdentParts(sig, raw, pathIdx)
 
 			switch len(parts) {
 			case 1:
@@ -268,9 +268,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── CREATE SCHEMA ─────────────────────────────────────────────
-		if rawPath, ok := matchCreateSchema(sig, raw); ok {
+		if rawPath, pathIdx, ok := matchCreateSchema(sig, raw); ok {
 			parts := extractIdentParts(rawPath, ic)
-			rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
+			rawParts, _ := readIdentParts(sig, raw, pathIdx)
 			switch len(parts) {
 			case 1:
 				if !hasSessionDB && !scriptHasActiveDB {
@@ -310,10 +310,10 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 
 		// ── DROP SCHEMA ───────────────────────────────────────────────
-		if rawPath, hasIfExists, ok := matchDropSchema(sig, raw); ok {
+		if rawPath, pathIdx, hasIfExists, ok := matchDropSchema(sig, raw); ok {
 			if !hasIfExists {
 				parts := extractIdentParts(rawPath, ic)
-				rawParts, _ := readIdentParts(sig, raw, findPathStartInSig(sig, raw, rawPath))
+				rawParts, _ := readIdentParts(sig, raw, pathIdx)
 				var targetDB, targetSch string
 				if len(parts) >= 2 {
 					targetDB = parts[0]
@@ -773,30 +773,6 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-// findPathStartInSig finds the position in sig where the given rawPath begins.
-// This is used to call readIdentParts for getting raw token texts.
-func findPathStartInSig(sig []sqltok.Token, sql, rawPath string) int {
-	if rawPath == "" {
-		return 0
-	}
-	for i, tok := range sig {
-		if isIdent(tok) && tok.Start == strings.Index(sql, rawPath) {
-			return i
-		}
-	}
-	// Fallback: scan for the path start byte offset
-	pathStart := strings.Index(sql, rawPath)
-	if pathStart < 0 {
-		return 0
-	}
-	for i, tok := range sig {
-		if tok.Start == pathStart {
-			return i
-		}
-	}
-	return 0
-}
 
 func isIn(m map[string]struct{}, key string) bool {
 	_, ok := m[key]

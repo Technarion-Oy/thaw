@@ -364,12 +364,56 @@ func TestReplaceDDLTableName(t *testing.T) {
 			want:    `CREATE OR REPLACE TABLE "MYDB"."PUBLIC"."new_table" (col TEXT)`,
 		},
 		{
-			name:    "no_parens_unchanged",
+			// No column-list parens: the token scan still finds the name,
+			// where the old '(' -anchored splice gave up and left the
+			// original name in place.
+			name:    "no_parens",
 			ddl:     `CREATE TABLE no_parens`,
 			db:      "DB",
 			schema:  "SCH",
 			newName: "x",
-			want:    `CREATE TABLE no_parens`,
+			want:    `CREATE TABLE "DB"."SCH"."x"`,
+		},
+		{
+			name:    "ctas_no_column_list",
+			ddl:     `CREATE TABLE old_name AS SELECT * FROM src`,
+			db:      "DB",
+			schema:  "SCH",
+			newName: "tmp",
+			want:    `CREATE TABLE "DB"."SCH"."tmp" AS SELECT * FROM src`,
+		},
+		{
+			// "TABLE" inside the quoted name must not anchor the splice.
+			name:    "quoted_name_containing_table_keyword",
+			ddl:     `CREATE TABLE "ORDERS TABLE" (i INT)`,
+			db:      "DB",
+			schema:  "SCH",
+			newName: "NEW",
+			want:    `CREATE TABLE "DB"."SCH"."NEW" (i INT)`,
+		},
+		{
+			name:    "if_not_exists",
+			ddl:     `CREATE TABLE IF NOT EXISTS old_name (i INT)`,
+			db:      "DB",
+			schema:  "SCH",
+			newName: "NEW",
+			want:    `CREATE TABLE IF NOT EXISTS "DB"."SCH"."NEW" (i INT)`,
+		},
+		{
+			name:    "leading_comment_mentioning_table",
+			ddl:     "-- rebuild the TABLE orders\nCREATE TABLE old_name (i INT)",
+			db:      "DB",
+			schema:  "SCH",
+			newName: "NEW",
+			want:    "-- rebuild the TABLE orders\nCREATE TABLE \"DB\".\"SCH\".\"NEW\" (i INT)",
+		},
+		{
+			name:    "no_table_keyword_unchanged",
+			ddl:     `CREATE VIEW v AS SELECT 1`,
+			db:      "DB",
+			schema:  "SCH",
+			newName: "x",
+			want:    `CREATE VIEW v AS SELECT 1`,
 		},
 		{
 			name:    "newname_with_special_chars",

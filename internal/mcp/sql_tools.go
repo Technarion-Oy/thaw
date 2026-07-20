@@ -51,10 +51,16 @@ type useSchemaInput struct {
 // injectLimit wraps the query with a LIMIT clause to prevent full-table scans.
 // It strips a trailing semicolon before wrapping and produces:
 //
-//	SELECT * FROM (<query>) AS _mcp_limit LIMIT <limit>
+//	SELECT * FROM (
+//	<query>
+//	) AS _mcp_limit LIMIT <limit>
 //
 // Snowflake's optimizer flattens trivial subqueries, so this does not add
 // meaningful overhead.
+//
+// The inner query is placed on its own line: a query ending in a trailing
+// "--" line comment would otherwise swallow the closing parenthesis and the
+// LIMIT clause, turning a valid query into a syntax error.
 //
 // Note: ORDER BY in the inner query is not guaranteed to be preserved by the
 // outer SELECT — standard SQL does not require subquery ordering to propagate.
@@ -64,7 +70,7 @@ func injectLimit(sql string, limit int) string {
 	trimmed := strings.TrimSpace(sql)
 	trimmed = strings.TrimSuffix(trimmed, ";")
 	trimmed = strings.TrimSpace(trimmed)
-	return fmt.Sprintf("SELECT * FROM (%s) AS _mcp_limit LIMIT %d", trimmed, limit)
+	return fmt.Sprintf("SELECT * FROM (\n%s\n) AS _mcp_limit LIMIT %d", trimmed, limit)
 }
 
 // executeSQLPipeline implements the SQL execution pipeline for the MCP
