@@ -542,7 +542,7 @@ func TestParse_Kinds(t *testing.T) {
 			wantKind: KindUnknown,
 		},
 		{
-			name:     "CREATE with an unrecognised kind is unknown",
+			name:     "CREATE with an unrecognized kind is unknown",
 			sql:      "CREATE WAREHOUSE wh",
 			wantKind: KindUnknown,
 		},
