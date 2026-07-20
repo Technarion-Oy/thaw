@@ -61,7 +61,7 @@ type StageFile struct {
 
 | Function | SQL issued | Notes |
 |----------|-----------|-------|
-| `ListStageFiles(ctx, client, stageName, pattern)` | `LIST @stage [PATTERN='...']` | Prepends `@` if absent; returns `[]StageFile` |
+| `ListStageFiles(ctx, client, stageName, pattern)` | `LIST @stage [PATTERN='...']` | Prepends `@` if absent (via `snowflake.NormalizeStageRef`); reads the result columns with the shared `snowflake.ColumnIndexes` + `snowflake.StrVal`; returns `[]StageFile` |
 | `UploadFileToStage(ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)` | `PUT 'file://...' @stage ...` | Internal stages only |
 | `DownloadFileFromStage(ctx, client, stageName, localDirPath, parallel, pattern)` | `GET @stage 'file://...' ...` | Internal stages only |
 | `RemoveStageFiles(ctx, client, stageName, pattern)` | `REMOVE @stage [PATTERN='...']` | Optional regex pattern |
@@ -93,8 +93,11 @@ prefixes) uses the `ListStageEntries` IPC method, which delegates to
   influenced — free-typed in the upload dialog, or a file/dir name from
   `LIST @stage` that anyone with write access to the backing storage can plant. All
   four functions (`UploadFileToStage`, `DownloadFileFromStage`, `RemoveStageFiles`,
-  `ListStageFiles`) run it through `snowflake.ValidateStageRef` (shared with the
-  git/stage LIST + file-read/execute paths in `internal/snowflake`), a scan that
+  `ListStageFiles`) run it through `snowflake.NormalizeStageRef` — the shared
+  ensure-`@`-then-`ValidateStageRef` pair (the two always belong together, so the
+  helper lives next to `ValidateStageRef` in `internal/snowflake` rather than being
+  repeated at each call site here). `ValidateStageRef` is shared with the
+  git/stage LIST + file-read/execute paths in `internal/snowflake`; it is a scan that
   rejects `;`, `'`, whitespace, and `--` in the unquoted portion of the reference. Quotes are honored as
   quoted-identifier delimiters **only in identifier position** (start, or after `@`
   or `.`), so a legitimately quoted identifier such as `"my;stage"` is allowed, but a

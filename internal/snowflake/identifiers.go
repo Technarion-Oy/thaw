@@ -103,13 +103,80 @@ func QualifyOrBare(db, schema, name string, caseSensitive bool) string {
 	return QuoteIdent(db) + "." + QuoteIdent(schema) + "." + QuoteOrBare(name, caseSensitive)
 }
 
+// IdentPart is one dotted segment of a qualified Snowflake name: its logical
+// (unquoted, unescaped) text and whether the source wrapped it in double
+// quotes. Quoted signals case-sensitive intent, so a caller re-rendering the
+// name emits QuoteIdent for a quoted part and QuoteOrBare for a bare one.
+type IdentPart struct {
+	Text   string
+	Quoted bool
+}
+
+// SplitQualifiedName splits a qualified Snowflake reference (DATABASE,
+// DATABASE.SCHEMA, DB.SCHEMA.OBJECT, …) into its dotted parts using the shared
+// sqltok tokenizer. Because the split is quote-aware, a quoted identifier
+// containing a literal dot stays one part — `"MY.DB".PUB` yields
+// ["MY.DB", "PUB"] — unlike strings.Split(s, "."), which produces three bogus
+// segments. Each part's Text is unquoted via sqltok.Unquote (doubled quotes
+// collapsed) and guaranteed non-empty.
+//
+// maxParts caps how many dotted parts are consumed; maxParts <= 0 means
+// unbounded. The whole input must be exactly one identifier path: leftover
+// tokens (a trailing dot, parts beyond maxParts, any stray token), empty
+// segments, and unterminated quotes all return an error.
+//
+// This is the shared, quote-correct alternative to strings.Split on a qualified
+// name; use it wherever a DB/SCHEMA/OBJECT reference is parsed.
+func SplitQualifiedName(s string, maxParts int) ([]IdentPart, error) {
+	trimmed := strings.TrimSpace(s)
+	tokens := sqltok.Tokenize(trimmed)
+	raw, next := sqltok.ReadIdentParts(tokens, trimmed, 0, maxParts)
+	if raw == nil || next >= len(tokens) || tokens[next].Kind != sqltok.EOF {
+		return nil, fmt.Errorf("invalid qualified name %q", s)
+	}
+	parts := make([]IdentPart, len(raw))
+	for i, p := range raw {
+		if strings.HasPrefix(p, `"`) {
+			// Quoted identifier: must be a terminated pair.
+			if len(p) < 2 || !strings.HasSuffix(p, `"`) {
+				return nil, fmt.Errorf("unbalanced quotes in %q", s)
+			}
+			parts[i] = IdentPart{Text: sqltok.Unquote(p), Quoted: true}
+		} else {
+			parts[i] = IdentPart{Text: p, Quoted: false}
+		}
+		if parts[i].Text == "" {
+			return nil, fmt.Errorf("empty segment in %q", s)
+		}
+	}
+	return parts, nil
+}
+
+// IdentEqual reports whether the raw identifier text raw — as it appears in a
+// SQL or metadata string, possibly double-quoted — refers to the same object as
+// the logical (already unquoted) name. It applies Snowflake's identifier
+// folding rules: a quoted raw is unescaped and compared exactly (quoting is how
+// case is preserved), while a bare raw is compared case-insensitively (Snowflake
+// uppercases unquoted identifiers, so MyTable, MYTABLE and mytable are one name).
+//
+// Use it instead of comparing strings.ToUpper on both sides, which wrongly folds
+// a case-sensitive quoted name and never unescapes doubled quotes.
+func IdentEqual(raw, name string) bool {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, `"`) && strings.HasSuffix(raw, `"`) && len(raw) >= 2 {
+		return sqltok.Unquote(raw) == name
+	}
+	return strings.EqualFold(raw, name)
+}
+
 // splitIdent splits a (possibly quoted, possibly multi-part) identifier string
 // into its component parts, stripping surrounding double-quotes from each part.
 // It is the rough parsing inverse of Qualify: Qualify("DB","S","T") builds
 // `"DB"."S"."T"`, splitIdent turns it back into ["DB","S","T"]. The split is on
 // every "." regardless of quoting, so a quoted part that itself contains a dot
 // is not preserved — callers pass identifiers whose component dots are already
-// delimited (e.g. tokens from sqltok.ReadIdentPath).
+// delimited (e.g. tokens from sqltok.ReadIdentPath). For an arbitrary
+// user-supplied qualified name, use the quote-aware SplitQualifiedName instead.
 func splitIdent(s string) []string {
 	var parts []string
 	for _, p := range strings.Split(s, ".") {

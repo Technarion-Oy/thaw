@@ -60,6 +60,8 @@ Owns three distinct concerns that are tied together by the pipe object lifecycle
 
 `BuildCreatePipeSql` validates the `CopyStatement` via `validateCopyStatement` before embedding it: exactly one statement, must start with `COPY INTO`. An empty `CopyStatement` emits the placeholder `COPY INTO <table> FROM @<stage>` for the live preview.
 
+The `COPY INTO` check reads the first two significant tokens (`sqltok.SignificantTokens`) rather than matching a literal `"COPY INTO "` prefix. The check is fail-closed, so a prefix match rejected valid statements: any separator other than one ASCII space (`COPY\nINTO`, a tab, a double space) or a leading comment (`-- load\nCOPY INTO …`) failed validation.
+
 `ParseCopyIntoTargetParts` preserves the `Quoted` flag per identifier part so that `GetCopyHistory` can uppercase unquoted parts (Snowflake's `GET_DDL` may return them in any case) before passing them to `copy_history`. Quoted identifiers are left as-is to preserve case-sensitive names.
 
 ## Gotchas
