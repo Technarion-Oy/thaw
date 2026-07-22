@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -150,6 +149,10 @@ func ListDir(dir string) ([]FileEntry, error) {
 // (opens the parent directory since most Linux file managers don't support select).
 // The path must be inside or equal to allowedRoot. Unlike mutating operations,
 // reveal is read-only so allowing the root itself is safe.
+//
+// The actual OS invocation lives in revealInFileManager, which is implemented per
+// platform (reveal_windows.go vs reveal_other.go): Windows Explorer needs a
+// syscall.SysProcAttr{CmdLine} workaround that only exists on Windows builds.
 func RevealInFinder(path, allowedRoot string) error {
 	if err := validateInsideOrEqual(path, allowedRoot); err != nil {
 		return err
@@ -158,17 +161,7 @@ func RevealInFinder(path, allowedRoot string) error {
 	if err != nil {
 		return err
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", "-R", abs).Start()
-	case "windows":
-		// explorer treats commas as argument delimiters, so the path must be
-		// quoted within the /select, argument. Go's syscall.EscapeArg does not
-		// handle this explorer-specific behavior.
-		return exec.Command("explorer", fmt.Sprintf(`/select,"%s"`, abs)).Start()
-	default: // linux and others
-		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
-	}
+	return revealInFileManager(abs)
 }
 
 // RuntimeOS returns the current OS identifier (darwin, windows, linux).

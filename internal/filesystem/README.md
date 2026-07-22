@@ -17,6 +17,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 | `fs.go` | Core CRUD helpers: `ReadFile`, `ReadFileHead`, `WriteFile`, `WriteFileAtomic` (temp-file + rename; shared atomic writer used by `config.Save`, `gitrepo`, and `sfconfig` so a concurrent/second-process reader never sees a torn file), `ListDir`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`, `DuplicateFile`, `CopyFile`, and the path-validation internals. |
 | `watcher.go` | `Watcher` struct (`rjeczalik/notify`-based): a single recursive watch over the whole tree, 200 ms debounce per directory, `FSChangeEvent`. Applies user-configurable `WatchOptions` (exclude globs, a distinct-directory cap) by dropping matching events post-hoc. |
 | `fdlimit_unix.go` / `fdlimit_windows.go` | `RaiseFDLimit()` — bumps the process file-descriptor soft limit toward the hard limit (`RLIMIT_NOFILE` via `setrlimit`; no-op on Windows). Opt-in mitigation for FD-hungry workspaces, invoked by `StartFileWatcher` when enabled. |
+| `reveal_windows.go` / `reveal_other.go` | Platform implementations of `revealInFileManager(abs)`, the OS half of `RevealInFinder`. Windows needs `syscall.SysProcAttr{CmdLine}` to hand Explorer an unescaped `/select,"…"` argument (issue #294), which only exists on Windows builds; the `!windows` file covers macOS (`open -R`) and Linux (`xdg-open`). |
 | `export.go` | `WriteBinaryFile` (base64-decode then write, used for Excel export) and `SanitizeFilename`. |
 | `search.go` | `SearchFiles`: recursive file-content search (substring or regex), capped at 200 results. |
 
@@ -32,7 +33,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 | `RaiseFDLimit()` | Raises `RLIMIT_NOFILE` soft→hard; returns `(soft, hard, err)`. No-op on Windows. |
 | `SearchMatch` | `{ path, lineNumber, lineContent, matchStart, matchEnd }` returned by `SearchFiles`. |
 | `SearchFiles(dir, query, useRegex)` | Walks `dir` recursively, skipping hidden directories, returns up to 200 matches. |
-| `RevealInFinder(path, allowedRoot)` | Opens the native file manager: `open -R` (macOS), `explorer /select,` (Windows), `xdg-open` (Linux). |
+| `RevealInFinder(path, allowedRoot)` | Validates `path` inside `allowedRoot`, then delegates to the platform-specific `revealInFileManager`: `open -R` (macOS), `explorer /select,` (Windows), `xdg-open` (Linux). |
 
 ## Patterns & integration
 
@@ -52,6 +53,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 
 - Path validation uses `filepath.EvalSymlinks` on the existing ancestor, not the full target path (which may not exist yet). There is a narrow TOCTOU window between validation and the actual OS call — acceptable on a single-user desktop app.
 - Case-only renames (e.g. `File.sql` → `file.sql`) are handled via `os.SameFile` so they work correctly on both case-sensitive and case-insensitive filesystems.
+- **Windows Explorer `/select` cannot be fixed by quoting inside an `Args` string.** Go's `os/exec` runs every `Args` entry through `syscall.EscapeArg`, which backslash-escapes quotes; Explorer's non-standard parser has no `\"` escape, so the corrupted path makes it "open one level up" (issue #294). The only reliable fixes bypass `EscapeArg`: set `SysProcAttr.CmdLine` (what `reveal_windows.go` does) or call the Win32 `SHOpenFolderAndSelectItems` shell API. Because `SysProcAttr` fields are OS-specific, `revealInFileManager` must live in a `//go:build windows` file. This is verifiable only on real Windows — CI cross-compiles but never executes it (manual-verification checklist: issue #840).
 - The recursive watch reports events for the **entire** tree, including hidden directories. Hidden entries (any path component starting with `.`) are therefore filtered out per-event in `handleEvent`, not excluded from the watch itself.
 - macOS FSEvents reports **canonical** paths (e.g. `/private/var/…` for a `/var/…` symlink). `NewWatcher` resolves the root with `EvalSymlinks` and translates event paths back into the caller's namespace before emitting, so emitted `Dir` values match the path the caller passed in.
 - On Linux, `rjeczalik/notify` still uses inotify (one watch per directory); a very large tree can exhaust the inotify watch limit. The macOS/Windows backends are recursive and do not have this limit.
