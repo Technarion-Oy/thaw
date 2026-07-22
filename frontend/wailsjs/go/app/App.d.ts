@@ -742,6 +742,8 @@ export function GetTopologicalOrder(arg1:string,arg2:string,arg3:string):Promise
 
 export function GetUserDDL(arg1:string):Promise<string>;
 
+export function GetUserPolicyReferences(arg1:string):Promise<snowflake.QueryResult>;
+
 export function GetUserTagReferences(arg1:string):Promise<snowflake.QueryResult>;
 
 export function GetWarehouseDDL(arg1:string):Promise<string>;

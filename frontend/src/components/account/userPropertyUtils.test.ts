@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { describe, it, expect } from "vitest";
-import { quoteIdent, nameOptionsFromShow, userTagsToEditable, parseMfaMethods } from "./userPropertyUtils";
+import { quoteIdent, nameOptionsFromShow, userTagsToEditable, parseMfaMethods, parsePolicyReferences } from "./userPropertyUtils";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 // Minimal QueryResult shim — only columns/rows are read by the parsers.
@@ -82,5 +82,29 @@ describe("parseMfaMethods", () => {
     expect(parseMfaMethods(qr(["name", "type"], [["", "TOTP"]]))).toEqual([]);
     expect(parseMfaMethods(qr(["type"], [["TOTP"]]))).toEqual([]);
     expect(parseMfaMethods(null)).toEqual([]);
+  });
+});
+
+describe("parsePolicyReferences", () => {
+  it("maps the three managed policy kinds to quoted FQN + label, skipping others", () => {
+    const res = qr(
+      ["policy_db", "policy_schema", "policy_name", "policy_kind", "policy_status"],
+      [
+        ["DB", "SEC", "CORP_AUTH", "AUTHENTICATION_POLICY", "ACTIVE"],
+        ["DB", "SEC", "Pw_Pol", "PASSWORD_POLICY", "ACTIVE"],
+        ["DB", "SEC", "SESS", "SESSION_POLICY", "ACTIVE"],
+        ["DB", "SEC", "NETPOL", "NETWORK_POLICY", "ACTIVE"],
+      ],
+    );
+    expect(parsePolicyReferences(res)).toEqual([
+      { kind: "AUTHENTICATION", fqn: `"DB"."SEC"."CORP_AUTH"`, label: "DB.SEC.CORP_AUTH" },
+      { kind: "PASSWORD", fqn: `"DB"."SEC"."Pw_Pol"`, label: "DB.SEC.Pw_Pol" },
+      { kind: "SESSION", fqn: `"DB"."SEC"."SESS"`, label: "DB.SEC.SESS" },
+    ]);
+  });
+
+  it("returns [] when the kind/name columns are absent or input is null", () => {
+    expect(parsePolicyReferences(qr(["policy_name"], [["X"]]))).toEqual([]);
+    expect(parsePolicyReferences(null)).toEqual([]);
   });
 });

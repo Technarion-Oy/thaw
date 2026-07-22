@@ -2,21 +2,21 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, Tag, message } from "antd";
-import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined } from "@ant-design/icons";
+import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
   SetUserPolicy, UnsetUserPolicy, SetUserTags, UnsetUserTags,
   ListUserMfaMethods, RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
   ListAccountAuthenticationPolicies, ListAccountPasswordPolicies, ListAccountSessionPolicies,
-  ListSecurityIntegrations, ListAccountTags, GetUserTagReferences,
+  ListSecurityIntegrations, ListAccountTags, GetUserTagReferences, GetUserPolicyReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import TagsRow, { type EditableTag } from "../shared/TagsRow";
 import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";
 import {
-  type NameOption, type MfaMethod,
-  nameOptionsFromShow, userTagsToEditable, parseMfaMethods,
+  type NameOption, type MfaMethod, type PolicyKind, type PolicyRef,
+  PolicyKindLabel, nameOptionsFromShow, userTagsToEditable, parseMfaMethods, parsePolicyReferences,
 } from "./userPropertyUtils";
 
 const { Text } = Typography;
@@ -162,92 +162,100 @@ function PasswordRow({ onSave, search }: { onSave: (val: string) => Promise<void
   );
 }
 
-// ─── Helper: access-policy row ───────────────────────────────────────────────
+// ─── Helper: access-policy manager ───────────────────────────────────────────
+
+const POLICY_KINDS: PolicyKind[] = ["AUTHENTICATION", "PASSWORD", "SESSION"];
 
 /**
- * One row per attachable policy kind (Authentication / Password / Session). The
- * policy is picked from a searchable dropdown of every policy of that kind in the
- * account (`ListAccount*Policies`); the option value is the quoted FQN passed to
- * SetUserPolicy. A FORCE toggle detaches any same-kind policy already attached.
- * Assignments aren't reported by SHOW USERS, so there's no current-value display.
- * Routes through SetUserPolicy / UnsetUserPolicy → users.BuildSet/UnsetPolicySQL.
+ * Access-policy manager modelled on the tag editor: the policies currently
+ * attached to the user (`GetUserPolicyReferences` → INFORMATION_SCHEMA.
+ * POLICY_REFERENCES, since DESCRIBE USER omits them) render as removable chips,
+ * and an add row picks a kind + a policy (from `ListAccount*Policies`, value =
+ * quoted FQN) with an optional FORCE. Each kind allows at most one policy, so
+ * adding with a kind that's already attached needs FORCE (or first remove the
+ * chip). Routes through SetUserPolicy / UnsetUserPolicy.
  */
-function PolicyRow({
-  name, label, kind, options, onReload, search,
+function PolicyManager({
+  name, refs, optionsByKind, onReload, search,
 }: {
   name: string;
-  label: string;
-  kind: "AUTHENTICATION" | "PASSWORD" | "SESSION";
-  options: { value: string; label: string }[];
+  refs: PolicyRef[];
+  optionsByKind: Record<PolicyKind, { value: string; label: string }[]>;
   onReload: () => Promise<void>;
   search?: string;
 }) {
-  const [val, setVal]     = useState("");
+  const [kind, setKind]   = useState<PolicyKind>("AUTHENTICATION");
+  const [pol, setPol]     = useState("");
   const [force, setForce] = useState(false);
-  const [busy, setBusy]   = useState(false);
-  if (search && !`${label} policy`.toLowerCase().includes(search.toLowerCase())) return null;
+  const [busy, setBusy]   = useState<string>("");
+  if (search && !"access policies authentication password session".includes(search.toLowerCase())) return null;
 
-  const set = async () => {
-    setBusy(true);
+  const add = async () => {
+    setBusy("add");
     try {
-      await SetUserPolicy(name, kind, val, force);
-      message.success(`${label} policy set on ${name}`);
-      setVal("");
+      await SetUserPolicy(name, kind, pol, force);
+      message.success(`${PolicyKindLabel[kind]} policy set on ${name}`);
+      setPol("");
       await onReload();
     } catch (e) {
       message.error(friendlyError(e), 6);
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   };
 
-  const unset = () => {
+  const remove = (ref: PolicyRef) => {
     Modal.confirm({
-      title: `Unset ${label.toLowerCase()} policy on ${name}?`,
-      content: "This detaches the policy currently attached to the user, if any.",
+      title: `Unset ${PolicyKindLabel[ref.kind].toLowerCase()} policy on ${name}?`,
+      content: `This detaches ${ref.label} from the user.`,
       okText: "Unset",
       okButtonProps: { danger: true },
       onOk: async () => {
-        setBusy(true);
+        setBusy(ref.kind);
         try {
-          await UnsetUserPolicy(name, kind);
-          message.success(`${label} policy unset on ${name}`);
+          await UnsetUserPolicy(name, ref.kind);
+          message.success(`${PolicyKindLabel[ref.kind]} policy unset on ${name}`);
           await onReload();
         } catch (e) {
           message.error(friendlyError(e), 6);
         } finally {
-          setBusy(false);
+          setBusy("");
         }
       },
     });
   };
 
+  const opts = optionsByKind[kind] ?? [];
+
   return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>{label} policy</td>
-      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          <Select
-            size="small"
-            showSearch
-            allowClear
-            value={val || undefined}
-            onChange={(v) => setVal(v ?? "")}
-            placeholder={options.length ? "select policy…" : "no policies visible"}
-            options={options}
-            filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-            style={{ minWidth: 220 }}
-          />
-          <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)} style={{ fontSize: 12 }}>
-            FORCE
-          </Checkbox>
-          <Button size="small" type="primary" icon={<CheckOutlined />} loading={busy} disabled={!val.trim()} onClick={set}>
-            Set
-          </Button>
-          <Button size="small" danger loading={busy} onClick={unset}>Unset</Button>
-        </div>
-      </td>
-    </tr>
+    <div style={{ padding: "2px 0 6px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {refs.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none attached)</Text>}
+        {refs.map((r) => (
+          <Tag key={`${r.kind}:${r.fqn}`} closable onClose={(e) => { e.preventDefault(); remove(r); }}>
+            {PolicyKindLabel[r.kind]}: {r.label}
+          </Tag>
+        ))}
+      </div>
+      <Space wrap>
+        <Select
+          size="small" value={kind} onChange={(v) => { setKind(v); setPol(""); }}
+          options={POLICY_KINDS.map((k) => ({ value: k, label: PolicyKindLabel[k] }))} style={{ width: 150 }}
+        />
+        <Select
+          size="small" showSearch allowClear value={pol || undefined} onChange={(v) => setPol(v ?? "")}
+          placeholder={opts.length ? "select policy…" : "no policies visible"} options={opts}
+          filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+          style={{ minWidth: 200 }}
+        />
+        <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)} style={{ fontSize: 12 }}>
+          FORCE
+        </Checkbox>
+        <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy === "add"} disabled={!pol.trim()} onClick={add}>
+          Add
+        </Button>
+      </Space>
+    </div>
   );
 }
 
@@ -452,6 +460,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   const [sessionPolicyOpts, setSessionPolicyOpts] = useState<{ value: string; label: string }[]>([]);
   const [tagNameOpts, setTagNameOpts]   = useState<NameOption[]>([]);
   const [userTags, setUserTags]         = useState<EditableTag[]>([]);
+  const [policyRefs, setPolicyRefs]     = useState<PolicyRef[]>([]);
 
   // Reload the tags currently applied to the user (removable chips). Best-effort:
   // account-level TAG_REFERENCES needs a current database, so this may return
@@ -461,6 +470,16 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
       setUserTags(userTagsToEditable(await GetUserTagReferences(name)));
     } catch {
       setUserTags([]);
+    }
+  }, [name]);
+
+  // Reload the policies attached to the user (removable chips) via
+  // POLICY_REFERENCES — DESCRIBE USER omits them. Best-effort, same as tags.
+  const reloadPolicies = useCallback(async () => {
+    try {
+      setPolicyRefs(parsePolicyReferences(await GetUserPolicyReferences(name)));
+    } catch {
+      setPolicyRefs([]);
     }
   }, [name]);
 
@@ -487,6 +506,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { reloadTags(); }, [reloadTags]);
+  useEffect(() => { reloadPolicies(); }, [reloadPolicies]);
   // Populate the picker lists once per open — all best-effort.
   useEffect(() => {
     ListRoles().then((r) => setRoleNames(r ?? [])).catch(() => setRoleNames([]));
@@ -658,16 +678,18 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
           <div style={SECTION_HEAD}><Space size={6}><SafetyOutlined />Access policies</Space></div>
           {!search && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
-              Attach an authentication, password, or session policy. Use <b>FORCE</b> to replace a
-              same-kind policy already attached. Current assignments aren't shown here (SHOW USERS
-              omits them) — inspect with <code>DESCRIBE USER</code> or <code>POLICY_REFERENCES</code>.
+              Attached authentication / password / session policies show as chips — click the × to detach.
+              Add one by picking a kind and policy; a kind allows one policy, so use <b>FORCE</b> to replace
+              an attached one. Current assignments are read live from <code>POLICY_REFERENCES</code>.
             </div>
           )}
-          <table style={tableStyle}><tbody>
-            <PolicyRow name={name} label="Authentication" kind="AUTHENTICATION" options={authPolicyOpts}    onReload={load} search={search} />
-            <PolicyRow name={name} label="Password"       kind="PASSWORD"       options={pwPolicyOpts}      onReload={load} search={search} />
-            <PolicyRow name={name} label="Session"        kind="SESSION"        options={sessionPolicyOpts} onReload={load} search={search} />
-          </tbody></table>
+          <PolicyManager
+            name={name}
+            refs={policyRefs}
+            optionsByKind={{ AUTHENTICATION: authPolicyOpts, PASSWORD: pwPolicyOpts, SESSION: sessionPolicyOpts }}
+            onReload={reloadPolicies}
+            search={search}
+          />
 
           {(!search || "tags".includes(search.toLowerCase())) && (
             <>

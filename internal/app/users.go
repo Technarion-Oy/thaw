@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"thaw/internal/apperrors"
@@ -10,6 +11,28 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/users"
 )
+
+// accountLevelFuncDatabase picks a database to host an INFORMATION_SCHEMA table
+// function call for an account-level object (USER): the session's current
+// database, or any accessible database when none is selected — common for admins
+// who connect without one. The result of these account-level functions
+// (TAG_REFERENCES / POLICY_REFERENCES for a USER) is database-independent, so the
+// choice only affects where the call runs. Returns an error when no database is
+// accessible at all; callers treat that as "nothing to show" and still allow
+// SET/UNSET.
+func accountLevelFuncDatabase(ctx context.Context, client *snowflake.Client) (string, error) {
+	if db := client.GetCachedSessionContext().Database; db != "" {
+		return db, nil
+	}
+	dbs, err := client.ListDatabases(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(dbs) == 0 {
+		return "", fmt.Errorf("no accessible database")
+	}
+	return dbs[0], nil
+}
 
 // ListUsers returns all users visible to the current role.
 // Returns an error if the role lacks the required privilege.
@@ -142,16 +165,9 @@ func (a *App) GetUserTagReferences(name string) (*snowflake.QueryResult, error) 
 		return nil, apperrors.ErrNotConnected
 	}
 	ctx := a.fctx(FeatureUsersRoles)
-	db := client.GetCachedSessionContext().Database
-	if db == "" {
-		dbs, err := client.ListDatabases(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(dbs) == 0 {
-			return nil, fmt.Errorf("no accessible database to read user tags")
-		}
-		db = dbs[0]
+	db, err := accountLevelFuncDatabase(ctx, client)
+	if err != nil {
+		return nil, err
 	}
 	sql := fmt.Sprintf(
 		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
@@ -163,6 +179,35 @@ func (a *App) GetUserTagReferences(name string) (*snowflake.QueryResult, error) 
 		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
 	// QuerySingle (not Execute): its doc recommends it for TABLE() function calls,
 	// matching sibling readers like GetAuthenticationPolicyReferences.
+	return client.QuerySingle(ctx, sql)
+}
+
+// GetUserPolicyReferences returns the policies attached to the given user via the
+// INFORMATION_SCHEMA.POLICY_REFERENCES table function (REF_ENTITY_DOMAIN 'USER').
+// Like GetUserTagReferences it reflects changes immediately (no ACCOUNT_USAGE
+// latency) and, since USER is account-level, runs against a resolved database
+// (see accountLevelFuncDatabase). Columns: POLICY_DB / POLICY_SCHEMA /
+// POLICY_NAME / POLICY_KIND (AUTHENTICATION_POLICY / PASSWORD_POLICY /
+// SESSION_POLICY / …) / POLICY_STATUS. It backs the current-assignments chips in
+// the user properties modal's Access policies section — DESCRIBE USER does not
+// report attached policies, so this table function is the immediate-consistency
+// source. Any failure is treated by the UI as "no policies shown" while SET/UNSET
+// still work.
+func (a *App) GetUserPolicyReferences(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	ctx := a.fctx(FeatureUsersRoles)
+	db, err := accountLevelFuncDatabase(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(
+		"SELECT POLICY_DB, POLICY_SCHEMA, POLICY_NAME, POLICY_KIND, POLICY_STATUS "+
+			"FROM TABLE(%s.INFORMATION_SCHEMA.POLICY_REFERENCES(REF_ENTITY_NAME => '%s', REF_ENTITY_DOMAIN => 'USER')) "+
+			"ORDER BY POLICY_KIND, POLICY_NAME",
+		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
 	return client.QuerySingle(ctx, sql)
 }
 

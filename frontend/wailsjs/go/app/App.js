@@ -1338,6 +1338,10 @@ export function GetUserDDL(arg1) {
   return window['go']['app']['App']['GetUserDDL'](arg1);
 }
 
+export function GetUserPolicyReferences(arg1) {
+  return window['go']['app']['App']['GetUserPolicyReferences'](arg1);
+}
+
 export function GetUserTagReferences(arg1) {
   return window['go']['app']['App']['GetUserTagReferences'](arg1);
 }

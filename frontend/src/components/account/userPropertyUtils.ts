@@ -58,6 +58,49 @@ export function userTagsToEditable(res: snowflake.QueryResult | null): EditableT
   });
 }
 
+// The three attachable user policy kinds. The value is the keyword passed to
+// SetUserPolicy/UnsetUserPolicy; PolicyKindLabel is the human label.
+export type PolicyKind = "AUTHENTICATION" | "PASSWORD" | "SESSION";
+
+export const PolicyKindLabel: Record<PolicyKind, string> = {
+  AUTHENTICATION: "Authentication",
+  PASSWORD: "Password",
+  SESSION: "Session",
+};
+
+// POLICY_REFERENCES' POLICY_KIND column → our kind keyword (other kinds, e.g.
+// NETWORK_POLICY / MASKING_POLICY, are managed elsewhere and skipped).
+const POLICY_KIND_MAP: Record<string, PolicyKind> = {
+  AUTHENTICATION_POLICY: "AUTHENTICATION",
+  PASSWORD_POLICY: "PASSWORD",
+  SESSION_POLICY: "SESSION",
+};
+
+// One policy currently attached to the user. fqn is the quoted FQN (handed to
+// UnsetUserPolicy's kind and shown as the chip); label is the readable name.
+export interface PolicyRef { kind: PolicyKind; fqn: string; label: string }
+
+// parsePolicyReferences maps a GetUserPolicyReferences result
+// (POLICY_DB / POLICY_SCHEMA / POLICY_NAME / POLICY_KIND) into the attached
+// authentication/password/session policies, skipping any other policy kind.
+export function parsePolicyReferences(res: snowflake.QueryResult | null): PolicyRef[] {
+  const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
+  const ci = (n: string) => cols.indexOf(n);
+  const dbI = ci("policy_db"), scI = ci("policy_schema"), nmI = ci("policy_name"), kI = ci("policy_kind");
+  if (nmI < 0 || kI < 0) return [];
+  const out: PolicyRef[] = [];
+  for (const r of res?.rows ?? []) {
+    const kind = POLICY_KIND_MAP[String(r[kI] ?? "").toUpperCase()];
+    if (!kind) continue;
+    const db = dbI >= 0 && r[dbI] != null ? String(r[dbI]) : "";
+    const sc = scI >= 0 && r[scI] != null ? String(r[scI]) : "";
+    const nm = String(r[nmI] ?? "");
+    const parts = [db, sc, nm].filter(Boolean);
+    out.push({ kind, fqn: parts.map(quoteIdent).join("."), label: parts.join(".") });
+  }
+  return out;
+}
+
 // One enrolled MFA factor from SHOW MFA METHODS FOR USER. `name` is the
 // system-generated identifier passed to RemoveUserMfaMethod (NOT the type).
 export interface MfaMethod { name: string; type: string; comment: string; lastUsed: string }
