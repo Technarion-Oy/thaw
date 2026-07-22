@@ -88,6 +88,9 @@ function KeyPairSlotRow({
             <Button size="small" icon={<KeyOutlined />} onClick={onOpen}>
               {hasKey ? "Replace…" : "Set…"}
             </Button>
+            {/* Also offered when degraded: the role can't DESCRIBE USER, so a
+                key may be set even though the fingerprint reads "unknown" —
+                let the admin UNSET defensively rather than hiding the option. */}
             {(hasKey || degraded) && (
               <Button size="small" danger icon={<DeleteOutlined />} loading={removing} onClick={remove}>
                 Remove
@@ -327,6 +330,10 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
               client to the new private key, then remove <b>Key 1</b>.
             </div>
           )}
+          {/* _FP and _LAST_SET_TIME (both slots) are real DESCRIBE USER
+              properties, merged into the map by GetObjectProperties; when the
+              role can't DESCRIBE USER they're absent and the rows fall back to
+              the degraded / "not set" states. */}
           <table style={tableStyle}><tbody>
             <KeyPairSlotRow
               name={name} slot="RSA_PUBLIC_KEY" label="Key 1" search={search}
