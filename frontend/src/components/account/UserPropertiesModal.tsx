@@ -373,17 +373,33 @@ function DelegatedAuthRows({ name, roleOptions, integrationOptions, onReload, se
     }
   };
 
-  const remove = async () => {
-    setBusy("remove");
-    try {
-      await RemoveUserDelegatedAuth(name, role, integration);
-      message.success(`Delegated authorization removed for ${name}`);
-      await onReload();
-    } catch (e) {
-      message.error(friendlyError(e), 6);
-    } finally {
-      setBusy("");
-    }
+  // Remove is confirmed like the other destructive actions — and with the role
+  // left blank the statement detaches EVERY delegated authorization for the
+  // integration (across all roles), so the copy calls that out explicitly.
+  const remove = () => {
+    const all = !role.trim();
+    Modal.confirm({
+      title: all
+        ? `Remove all delegated authorizations for ${integration}?`
+        : `Remove delegated authorization of ${role} for ${integration}?`,
+      content: all
+        ? `This detaches every delegated authorization for security integration ${integration}, across all roles — not just this user.`
+        : `This detaches ${role}'s delegated authorization from security integration ${integration}.`,
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy("remove");
+        try {
+          await RemoveUserDelegatedAuth(name, role, integration);
+          message.success(`Delegated authorization removed for ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setBusy("");
+        }
+      },
+    });
   };
 
   const roleOpts = roleOptions.map((r) => ({ value: r, label: r }));
