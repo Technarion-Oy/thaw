@@ -167,7 +167,20 @@ export default function MCPSessionsModal({ onClose }: Props) {
           message={
             mcpLocked
               ? "MCP Server has been disabled by an administrator policy on this machine."
-              : "MCP Server is disabled. Enable it under View \u2192 Enabled Features\u2026"
+              : "MCP Server is turned off"
+          }
+          description={mcpLocked ? undefined : "Turn it on to start sessions."}
+          action={
+            mcpLocked ? undefined : (
+              <Button
+                size="small"
+                onClick={() =>
+                  window.dispatchEvent(new Event("thaw:open-feature-flags"))
+                }
+              >
+                Enabled Features…
+              </Button>
+            )
           }
           style={{ marginBottom: 12 }}
         />
