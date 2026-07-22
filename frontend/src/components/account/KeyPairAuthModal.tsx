@@ -138,9 +138,12 @@ export default function KeyPairAuthModal({
   const handleApply = () => {
     if (!effectiveKey) return;
     if (slotHasKey) {
+      // Worded to also cover the DESCRIBE-degraded case, where slotHasKey is
+      // set defensively and we can't be sure a key is present — "may already"
+      // rather than asserting one exists.
       Modal.confirm({
         title: `Replace ${SLOT_LABEL[slot]} on ${username}?`,
-        content: "This user already has a public key in this slot. Applying will " +
+        content: "This user may already have a public key in this slot. Applying will " +
           "overwrite it — anyone still authenticating with the old key will be locked out.",
         okText: "Replace",
         okButtonProps: { danger: true },

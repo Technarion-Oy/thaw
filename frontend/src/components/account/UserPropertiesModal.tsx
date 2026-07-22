@@ -38,6 +38,13 @@ function KeyPairSlotRow({
   if (search && !hay.includes(search.toLowerCase())) return null;
 
   const hasKey = fp.trim() !== "";
+  // In DESCRIBE-degraded mode fp is always "" — a key may still be set, we just
+  // can't see it. Treat the slot as possibly-occupied so the "Replace…" label
+  // and the overwrite confirmation are never silently skipped (locking out the
+  // old private key without warning). We deliberately don't lean on the
+  // aggregate SHOW USERS HAS_RSA_PUBLIC_KEY here: it doesn't say which slot, so
+  // trusting it could still skip the confirmation for a genuinely-set slot.
+  const mayHaveKey = hasKey || degraded;
 
   const remove = () => {
     Modal.confirm({
@@ -86,12 +93,12 @@ function KeyPairSlotRow({
           </div>
           <Space size={4}>
             <Button size="small" icon={<KeyOutlined />} onClick={onOpen}>
-              {hasKey ? "Replace…" : "Set…"}
+              {mayHaveKey ? "Replace…" : "Set…"}
             </Button>
             {/* Also offered when degraded: the role can't DESCRIBE USER, so a
                 key may be set even though the fingerprint reads "unknown" —
                 let the admin UNSET defensively rather than hiding the option. */}
-            {(hasKey || degraded) && (
+            {mayHaveKey && (
               <Button size="small" danger icon={<DeleteOutlined />} loading={removing} onClick={remove}>
                 Remove
               </Button>
@@ -371,7 +378,13 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
         <KeyPairAuthModal
           username={name}
           slot={keyModal}
-          slotHasKey={val(keyModal === "RSA_PUBLIC_KEY" ? "RSA_PUBLIC_KEY_FP" : "RSA_PUBLIC_KEY_2_FP").trim() !== ""}
+          // hasKey || degraded: mirror KeyPairSlotRow — when the role can't
+          // DESCRIBE USER the fingerprint is blank but a key may be set, so
+          // treat the slot as occupied and force the overwrite confirmation.
+          slotHasKey={
+            val(keyModal === "RSA_PUBLIC_KEY" ? "RSA_PUBLIC_KEY_FP" : "RSA_PUBLIC_KEY_2_FP").trim() !== "" ||
+            m["__DESCRIBE_DEGRADED__"] === "1"
+          }
           onApplied={load}
           onClose={() => setKeyModal(null)}
         />
