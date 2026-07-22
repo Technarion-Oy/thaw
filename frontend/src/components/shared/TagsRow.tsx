@@ -37,13 +37,17 @@ interface Props {
   // dropdown restricted to those values (matching the ColumnPropertiesModal tag
   // editor) so a value the tag rejects can't be submitted.
   nameOptions?: { value: string; label: string; allowedValues?: string[] }[];
+  // Drops the leading "Tags" label cell and spans the full row — for callers that
+  // already label the editor with a section header (e.g. UserPropertiesModal's
+  // two-column layout). Omit to keep the labelled two-cell row.
+  hideLabel?: boolean;
 }
 
 // Shared inline tag editor row for the object properties modals: shows the
 // current tags as chips (removable ones closable), plus a name/value pair and
 // an Add Tag button. Both add and remove surface failures inline. When
 // nameOptions is passed the name field is a searchable dropdown.
-export default function TagsRow({ tags, onSetTag, onUnsetTag, nameOptions }: Props) {
+export default function TagsRow({ tags, onSetTag, onUnsetTag, nameOptions, hideLabel }: Props) {
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -83,8 +87,8 @@ export default function TagsRow({ tags, onSetTag, onUnsetTag, nameOptions }: Pro
 
   return (
     <tr>
-      <td style={LABEL_TD}>Tags</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "top" }}>
+      {!hideLabel && <td style={LABEL_TD}>Tags</td>}
+      <td colSpan={hideLabel ? 2 : 1} style={{ padding: "6px 0", fontSize: 12, verticalAlign: "top" }}>
         <Space direction="vertical" size={6} style={{ width: "100%" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {tags.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none)</Text>}
@@ -106,7 +110,7 @@ export default function TagsRow({ tags, onSetTag, onUnsetTag, nameOptions }: Pro
               );
             })}
           </div>
-          <Space>
+          <Space wrap>
             {nameOptions ? (
               <Select
                 size="small"

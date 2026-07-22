@@ -176,19 +176,17 @@ const POLICY_KINDS: PolicyKind[] = ["AUTHENTICATION", "PASSWORD", "SESSION"];
  * chip). Routes through SetUserPolicy / UnsetUserPolicy.
  */
 function PolicyManager({
-  name, refs, optionsByKind, onReload, search,
+  name, refs, optionsByKind, onReload,
 }: {
   name: string;
   refs: PolicyRef[];
   optionsByKind: Record<PolicyKind, { value: string; label: string }[]>;
   onReload: () => Promise<void>;
-  search?: string;
 }) {
   const [kind, setKind]   = useState<PolicyKind>("AUTHENTICATION");
   const [pol, setPol]     = useState("");
   const [force, setForce] = useState(false);
   const [busy, setBusy]   = useState<string>("");
-  if (search && !"access policies authentication password session".includes(search.toLowerCase())) return null;
 
   const add = async () => {
     setBusy("add");
@@ -237,16 +235,16 @@ function PolicyManager({
           </Tag>
         ))}
       </div>
-      <Space wrap>
+      <Space wrap size={6}>
         <Select
           size="small" value={kind} onChange={(v) => { setKind(v); setPol(""); }}
-          options={POLICY_KINDS.map((k) => ({ value: k, label: PolicyKindLabel[k] }))} style={{ width: 150 }}
+          options={POLICY_KINDS.map((k) => ({ value: k, label: PolicyKindLabel[k] }))} style={{ width: 130 }}
         />
         <Select
           size="small" showSearch allowClear value={pol || undefined} onChange={(v) => setPol(v ?? "")}
           placeholder={opts.length ? "select policy…" : "no policies visible"} options={opts}
           filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-          style={{ minWidth: 200 }}
+          style={{ width: 170 }}
         />
         <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)} style={{ fontSize: 12 }}>
           FORCE
@@ -542,6 +540,10 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
 
   const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: 12 };
 
+  // Search visibility for the side-by-side Access policies / Tags columns.
+  const showPolicies = !search || "access policies authentication password session".includes(search.toLowerCase());
+  const showTags     = !search || "tags".includes(search.toLowerCase());
+
   return (
     <Modal
       open
@@ -554,7 +556,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
       }
       onCancel={onClose}
       footer={<Button onClick={onClose}>Close</Button>}
-      width={640}
+      width={760}
       styles={{ body: { paddingTop: 12, maxHeight: "72vh", overflowY: "auto" } }}
     >
       {loadError && (
@@ -675,36 +677,45 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             />
           </tbody></table>
 
-          <div style={SECTION_HEAD}><Space size={6}><SafetyOutlined />Access policies</Space></div>
-          {!search && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
-              Attached authentication / password / session policies show as chips — click the × to detach.
-              Add one by picking a kind and policy; a kind allows one policy, so use <b>FORCE</b> to replace
-              an attached one. Current assignments are read live from <code>POLICY_REFERENCES</code>.
+          {/* Access policies and Tags share a row — both are chip editors, and
+              stacking them full-width wasted horizontal space. Each column
+              collapses out when a search filters it away. */}
+          {(showPolicies || showTags) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+              {showPolicies && (
+                <div>
+                  <div style={SECTION_HEAD}><Space size={6}><SafetyOutlined />Access policies</Space></div>
+                  {!search && (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+                      Attached policies show as chips — click × to detach. Add one per kind;
+                      use <b>FORCE</b> to replace. Read live from <code>POLICY_REFERENCES</code>.
+                    </div>
+                  )}
+                  <PolicyManager
+                    name={name}
+                    refs={policyRefs}
+                    optionsByKind={{ AUTHENTICATION: authPolicyOpts, PASSWORD: pwPolicyOpts, SESSION: sessionPolicyOpts }}
+                    onReload={reloadPolicies}
+                  />
+                </div>
+              )}
+              {showTags && (
+                <div>
+                  <div style={SECTION_HEAD}><Space size={6}><TagsOutlined />Tags</Space></div>
+                  {/* Shared object-store tag editor (label hidden — the section
+                      header already labels it): chips + account-tag dropdown. */}
+                  <table style={tableStyle}><tbody>
+                    <TagsRow
+                      hideLabel
+                      tags={userTags}
+                      nameOptions={tagNameOpts}
+                      onSetTag={async (tagName, tagValue) => { await SetUserTags(name, [{ name: tagName, value: tagValue }]); await reloadTags(); }}
+                      onUnsetTag={async (key) => { await UnsetUserTags(name, [key]); await reloadTags(); }}
+                    />
+                  </tbody></table>
+                </div>
+              )}
             </div>
-          )}
-          <PolicyManager
-            name={name}
-            refs={policyRefs}
-            optionsByKind={{ AUTHENTICATION: authPolicyOpts, PASSWORD: pwPolicyOpts, SESSION: sessionPolicyOpts }}
-            onReload={reloadPolicies}
-            search={search}
-          />
-
-          {(!search || "tags".includes(search.toLowerCase())) && (
-            <>
-              <div style={SECTION_HEAD}><Space size={6}><TagsOutlined />Tags</Space></div>
-              {/* Shared object-store tag editor: current tags render as chips you
-                  click to remove; the name field is a dropdown of account tags. */}
-              <table style={tableStyle}><tbody>
-                <TagsRow
-                  tags={userTags}
-                  nameOptions={tagNameOpts}
-                  onSetTag={async (tagName, tagValue) => { await SetUserTags(name, [{ name: tagName, value: tagValue }]); await reloadTags(); }}
-                  onUnsetTag={async (key) => { await UnsetUserTags(name, [key]); await reloadTags(); }}
-                />
-              </tbody></table>
-            </>
           )}
 
           <div style={SECTION_HEAD}><Space size={6}><ApiOutlined />Delegated authorization</Space></div>
