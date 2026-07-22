@@ -95,7 +95,6 @@ the watcher and silently freeze tab refresh.
 Custom DOM events handled here:
 - `thaw:execute-in-tab` — emitted by `queryStore.executeInNewTab` to ask
   `QueryPage` to run the query through the full pipeline.
-- `load-query` — emitted by `QueryHistoryModal` to set SQL in the active tab.
 - `thaw:connect` — triggered when `runQuery` is called while disconnected,
   causing the connect modal to open.
 - `thaw:session-config-saved` — re-reads session init mode after config save.

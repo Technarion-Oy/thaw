@@ -25,6 +25,7 @@ import { GetQueryHistory, ListUsers, GetCurrentUser } from "../../../wailsjs/go/
 import QueryProfileModal from "../results/QueryProfileModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
+import { useQueryStore } from "../../store/queryStore";
 import { useSessionStore } from "../../store/sessionStore";
 import type { queryhistory } from "../../../wailsjs/go/models";
 
@@ -284,7 +285,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
   }, [isConnected, filterType]);
 
   const loadInEditor = (sql: string) => {
-    window.dispatchEvent(new CustomEvent("load-query", { detail: { sql } }));
+    useQueryStore.getState().loadInNewTab(sql);
     onClose();
   };
 
