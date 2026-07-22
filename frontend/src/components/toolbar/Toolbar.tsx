@@ -162,7 +162,7 @@ export default function Toolbar({
                 <Button className="thaw-tb-vstack-icon" aria-label="New notebook"
                   icon={<BookOutlined />} onClick={onNewNotebook} />
               </Tooltip>
-              <Tooltip title="Save (\u2318S)">
+              <Tooltip title="Save (⌘S)">
                 <Button className="thaw-tb-vstack-icon" aria-label="Save"
                   icon={<SaveOutlined />} onClick={onSave} />
               </Tooltip>
@@ -178,7 +178,7 @@ export default function Toolbar({
               <Button className="thaw-tb-icon-btn" aria-label="New notebook"
                 icon={<BookOutlined />} onClick={onNewNotebook} />
             </Tooltip>
-            <Tooltip title="Save (\u2318S)">
+            <Tooltip title="Save (⌘S)">
               <Button className="thaw-tb-icon-btn" aria-label="Save"
                 icon={<SaveOutlined />} onClick={onSave} />
             </Tooltip>
@@ -296,7 +296,7 @@ export default function Toolbar({
                   }}
                 >
                   <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                    {params.account} \u00B7 {params.user}
+                    {params.account} · {params.user}
                   </Tag>
                 </Dropdown>
               </>

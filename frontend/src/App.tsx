@@ -231,10 +231,12 @@ export default function App() {
     return () => { (offCheck as () => void)(); (offSetup as () => void)(); };
   }, []);
 
-  // Listen for "Feature Flags…" menu event.
+  // Listen for "Feature Flags…" menu event and in-app requests to open it.
   useEffect(() => {
     const off = EventsOn("menu:feature-flags", () => setFeatureFlagsOpen(true));
-    return () => off();
+    const open = () => setFeatureFlagsOpen(true);
+    window.addEventListener("thaw:open-feature-flags", open);
+    return () => { off(); window.removeEventListener("thaw:open-feature-flags", open); };
   }, []);
 
   // Listen for "Notebook Preferences…" menu event.

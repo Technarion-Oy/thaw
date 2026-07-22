@@ -163,7 +163,18 @@ export default function MCPSessionsModal({ onClose }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="MCP Server is disabled. Enable it under View \u2192 Enabled Features\u2026 (an IT administrator may have locked this)."
+          message="MCP Server is turned off"
+          description="Turn it on to start sessions."
+          action={
+            <Button
+              size="small"
+              onClick={() =>
+                window.dispatchEvent(new Event("thaw:open-feature-flags"))
+              }
+            >
+              Enabled Features…
+            </Button>
+          }
           style={{ marginBottom: 12 }}
         />
       )}
