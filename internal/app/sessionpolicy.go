@@ -86,3 +86,16 @@ func (a *App) GetSessionPolicyReferences(database, schema, name string) (*snowfl
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
 	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }
+
+// ListAccountSessionPolicies returns every session policy in the account via
+// SHOW SESSION POLICIES IN ACCOUNT (name, database_name, schema_name, …). It
+// backs the session-policy picker in the user properties modal, mirroring
+// ListAccountMaskingPolicies. The command requires privileges on the policies,
+// so accounts without governance access may see only a subset.
+func (a *App) ListAccountSessionPolicies() (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.QuerySingle(a.fctx(FeatureUsersRoles), "SHOW SESSION POLICIES IN ACCOUNT")
+}

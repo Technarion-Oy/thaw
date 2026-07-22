@@ -3,11 +3,36 @@
 package app
 
 import (
+	"context"
+	"fmt"
+
 	"thaw/internal/apperrors"
 	"thaw/internal/keypair"
 	"thaw/internal/snowflake"
 	"thaw/internal/users"
 )
+
+// accountLevelFuncDatabase picks a database to host an INFORMATION_SCHEMA table
+// function call for an account-level object (USER): the session's current
+// database, or any accessible database when none is selected — common for admins
+// who connect without one. The result of these account-level functions
+// (TAG_REFERENCES / POLICY_REFERENCES for a USER) is database-independent, so the
+// choice only affects where the call runs. Returns an error when no database is
+// accessible at all; callers treat that as "nothing to show" and still allow
+// SET/UNSET.
+func accountLevelFuncDatabase(ctx context.Context, client *snowflake.Client) (string, error) {
+	if db := client.GetCachedSessionContext().Database; db != "" {
+		return db, nil
+	}
+	dbs, err := client.ListDatabases(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(dbs) == 0 {
+		return "", fmt.Errorf("no accessible database")
+	}
+	return dbs[0], nil
+}
 
 // ListUsers returns all users visible to the current role.
 // Returns an error if the role lacks the required privilege.
@@ -38,6 +63,191 @@ func (a *App) AlterUserProperty(name, property, value string) error {
 		return apperrors.ErrNotConnected
 	}
 	return users.AlterProperty(a.fctx(FeatureUsersRoles), client, name, property, value)
+}
+
+// ResetUserPassword runs ALTER USER … RESET PASSWORD and returns Snowflake's
+// status message, which carries the generated single-use password reset URL the
+// admin must relay to the user. Each call issues a fresh one-time link.
+func (a *App) ResetUserPassword(name string) (string, error) {
+	client := a.currentClient()
+	if client == nil {
+		return "", apperrors.ErrNotConnected
+	}
+	return users.ResetPassword(a.fctx(FeatureUsersRoles), client, name)
+}
+
+// RenameUser runs ALTER USER … RENAME TO. newName is typed free-hand (bare names
+// fold; a name needing quoting must be typed quoted).
+func (a *App) RenameUser(name, newName string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.Rename(a.fctx(FeatureUsersRoles), client, name, newName)
+}
+
+// AbortAllUserQueries runs ALTER USER … ABORT ALL QUERIES, canceling every
+// running and queued query for the user across all sessions.
+func (a *App) AbortAllUserQueries(name string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.AbortAllQueries(a.fctx(FeatureUsersRoles), client, name)
+}
+
+// ListUserMfaMethods returns the MFA methods enrolled for the given user via
+// SHOW MFA METHODS FOR USER <name> (columns: name, type, comment, last_used,
+// created_on). It backs the MFA-method removal list in the user properties
+// modal — the `name` column is the system-generated identifier passed to
+// RemoveUserMfaMethod, not the factor `type`. The FOR USER clause requires the
+// ACCOUNTADMIN role; the privilege error surfaces to the UI rather than being
+// pre-checked.
+func (a *App) ListUserMfaMethods(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	query := fmt.Sprintf("SHOW MFA METHODS FOR USER %s", snowflake.QuoteIdent(name))
+	return client.QuerySingle(a.fctx(FeatureUsersRoles), query)
+}
+
+// RemoveUserMfaMethod runs ALTER USER … REMOVE MFA METHOD <method>. method is the
+// system-generated identifier from the `name` column of ListUserMfaMethods (not
+// the factor type).
+func (a *App) RemoveUserMfaMethod(name, method string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.RemoveMfaMethod(a.fctx(FeatureUsersRoles), client, name, method)
+}
+
+// SetUserPolicy runs ALTER USER … SET { AUTHENTICATION | PASSWORD | SESSION }
+// POLICY <policy_name> [ FORCE ]. kind is the policy kind; force detaches any
+// same-kind policy already attached before attaching the new one.
+func (a *App) SetUserPolicy(name, kind, policyName string, force bool) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.SetPolicy(a.fctx(FeatureUsersRoles), client, name, kind, policyName, force)
+}
+
+// UnsetUserPolicy runs ALTER USER … UNSET { AUTHENTICATION | PASSWORD | SESSION }
+// POLICY.
+func (a *App) UnsetUserPolicy(name, kind string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.UnsetPolicy(a.fctx(FeatureUsersRoles), client, name, kind)
+}
+
+// GetUserTagReferences returns the tags applied directly to the given user via
+// the INFORMATION_SCHEMA.TAG_REFERENCES table function (object domain USER).
+// Unlike the ACCOUNT_USAGE.TAG_REFERENCES view this reflects changes immediately
+// (no propagation latency), so it backs the removable-chip tag editor in the
+// user properties modal — mirroring App.GetModelTags.
+//
+// USER is an account-level object, so the reference is a bare user name and the
+// results aren't scoped to any database — but an INFORMATION_SCHEMA table
+// function still has to run inside *some* database. The session's current
+// database is used when set; otherwise (common for account admins who connect
+// without selecting one) any accessible database is picked, since the account-
+// level result is identical regardless of which database's INFORMATION_SCHEMA
+// hosts the call. When no database is accessible at all an error is returned —
+// the caller treats that (and any other failure) as "no tags shown" and still
+// allows SET/UNSET TAG.
+func (a *App) GetUserTagReferences(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	ctx := a.fctx(FeatureUsersRoles)
+	db, err := accountLevelFuncDatabase(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(
+		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
+			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'USER')) "+
+			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
+		// EscapeTextLit (not EscapeStringLit): QuoteIdent doubles " but not \, so a
+		// backslash in an identifier must be doubled to survive the single-quoted
+		// literal rather than being read as a Snowflake escape sequence.
+		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
+	// QuerySingle (not Execute): its doc recommends it for TABLE() function calls,
+	// matching sibling readers like GetAuthenticationPolicyReferences.
+	return client.QuerySingle(ctx, sql)
+}
+
+// GetUserPolicyReferences returns the policies attached to the given user via the
+// INFORMATION_SCHEMA.POLICY_REFERENCES table function (REF_ENTITY_DOMAIN 'USER').
+// Like GetUserTagReferences it reflects changes immediately (no ACCOUNT_USAGE
+// latency) and, since USER is account-level, runs against a resolved database
+// (see accountLevelFuncDatabase). Columns: POLICY_DB / POLICY_SCHEMA /
+// POLICY_NAME / POLICY_KIND (AUTHENTICATION_POLICY / PASSWORD_POLICY /
+// SESSION_POLICY / …) / POLICY_STATUS. It backs the current-assignments chips in
+// the user properties modal's Access policies section — DESCRIBE USER does not
+// report attached policies, so this table function is the immediate-consistency
+// source. Any failure is treated by the UI as "no policies shown" while SET/UNSET
+// still work.
+func (a *App) GetUserPolicyReferences(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	ctx := a.fctx(FeatureUsersRoles)
+	db, err := accountLevelFuncDatabase(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(
+		"SELECT POLICY_DB, POLICY_SCHEMA, POLICY_NAME, POLICY_KIND, POLICY_STATUS "+
+			"FROM TABLE(%s.INFORMATION_SCHEMA.POLICY_REFERENCES(REF_ENTITY_NAME => '%s', REF_ENTITY_DOMAIN => 'USER')) "+
+			"ORDER BY POLICY_KIND, POLICY_NAME",
+		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
+	return client.QuerySingle(ctx, sql)
+}
+
+// SetUserTags runs ALTER USER … SET TAG <t1> = '<v1>' [ , … ].
+func (a *App) SetUserTags(name string, tags []users.TagPair) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.SetTags(a.fctx(FeatureUsersRoles), client, name, tags)
+}
+
+// UnsetUserTags runs ALTER USER … UNSET TAG <t1> [ , … ].
+func (a *App) UnsetUserTags(name string, tagNames []string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.UnsetTags(a.fctx(FeatureUsersRoles), client, name, tagNames)
+}
+
+// AddUserDelegatedAuth runs ALTER USER … ADD DELEGATED AUTHORIZATION OF ROLE
+// <role> TO SECURITY INTEGRATION <integration>.
+func (a *App) AddUserDelegatedAuth(name, role, integration string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.AddDelegatedAuth(a.fctx(FeatureUsersRoles), client, name, role, integration)
+}
+
+// RemoveUserDelegatedAuth runs ALTER USER … REMOVE DELEGATED … FROM SECURITY
+// INTEGRATION <integration>. An empty role removes every delegated authorization
+// for the integration (the AUTHORIZATIONS form); a role removes just that one.
+func (a *App) RemoveUserDelegatedAuth(name, role, integration string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.RemoveDelegatedAuth(a.fctx(FeatureUsersRoles), client, name, role, integration)
 }
 
 // CheckAvailableKeyTools returns the list of available key generation methods.

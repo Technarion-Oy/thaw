@@ -53,3 +53,16 @@ func (a *App) GetPasswordPolicyReferences(database, schema, name string) (*snowf
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
 	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }
+
+// ListAccountPasswordPolicies returns every password policy in the account via
+// SHOW PASSWORD POLICIES IN ACCOUNT (name, database_name, schema_name, …). It
+// backs the password-policy picker in the user properties modal, mirroring
+// ListAccountMaskingPolicies. The command requires privileges on the policies,
+// so accounts without governance access may see only a subset.
+func (a *App) ListAccountPasswordPolicies() (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.QuerySingle(a.fctx(FeatureUsersRoles), "SHOW PASSWORD POLICIES IN ACCOUNT")
+}

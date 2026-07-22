@@ -6840,6 +6840,25 @@ export namespace updater {
 
 }
 
+export namespace users {
+	
+	export class TagPair {
+	    name: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.value = source["value"];
+	    }
+	}
+
+}
+
 export namespace view {
 	
 	export class ViewConfig {

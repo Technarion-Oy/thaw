@@ -11,8 +11,14 @@ import {
   StopOutlined,
   CheckCircleOutlined,
   SearchOutlined,
+  KeyOutlined,
+  EditOutlined,
+  CloseCircleOutlined,
 } from "@ant-design/icons";
-import { ListUsers, ExecuteQuery, AlterUserProperty } from "../../../wailsjs/go/app/App";
+import {
+  ListUsers, ExecuteQuery, AlterUserProperty,
+  ResetUserPassword, RenameUser, AbortAllUserQueries,
+} from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
 import type { snowflake } from "../../../wailsjs/go/models";
 import UserPropertiesModal from "./UserPropertiesModal";
@@ -36,6 +42,9 @@ export default function UserManagementPanel() {
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null);
   const [editUser,       setEditUser]       = useState<snowflake.SnowflakeUser | null>(null);
   const [showCreate,     setShowCreate]     = useState(false);
+  const [renameUser,     setRenameUser]     = useState<snowflake.SnowflakeUser | null>(null);
+  const [renameValue,    setRenameValue]    = useState("");
+  const [renaming,       setRenaming]       = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -115,6 +124,86 @@ export default function UserManagementPanel() {
         }
       },
     });
+  };
+
+  const handleResetPassword = (user: snowflake.SnowflakeUser) => {
+    setCtxMenu(null);
+    Modal.confirm({
+      title: `Reset password for ${user.name}?`,
+      content: "Generates a single-use password reset URL and invalidates the current password.",
+      okText: "Reset",
+      onOk: async () => {
+        try {
+          // RESET PASSWORD returns a status row containing the generated
+          // single-use reset URL — surface it copyably rather than dropping it,
+          // since re-running the statement issues a fresh link and invalidates
+          // this one.
+          const msg = await ResetUserPassword(user.name);
+          if (msg && msg.trim()) {
+            Modal.info({
+              title: `Password reset for ${user.name}`,
+              width: 560,
+              content: (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                    Give this single-use link to the user. It isn't shown again, and resetting the password again invalidates it.
+                  </Text>
+                  <Typography.Paragraph
+                    copyable={{ text: msg }}
+                    style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}
+                  >
+                    {msg}
+                  </Typography.Paragraph>
+                </div>
+              ),
+            });
+          } else {
+            message.success(`Password reset for ${user.name}`);
+          }
+        } catch (e) {
+          message.error(friendlyError(e));
+        }
+      },
+    });
+  };
+
+  const handleAbortQueries = (user: snowflake.SnowflakeUser) => {
+    setCtxMenu(null);
+    Modal.confirm({
+      title: `Abort all queries for ${user.name}?`,
+      content: "Cancels every running and queued query the user has across all sessions.",
+      okText: "Abort",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await AbortAllUserQueries(user.name);
+          message.success(`Aborted all queries for ${user.name}`);
+        } catch (e) {
+          message.error(friendlyError(e));
+        }
+      },
+    });
+  };
+
+  const openRename = (user: snowflake.SnowflakeUser) => {
+    setCtxMenu(null);
+    setRenameValue(user.name);
+    setRenameUser(user);
+  };
+
+  const doRename = async () => {
+    if (!renameUser) return;
+    setRenaming(true);
+    try {
+      await RenameUser(renameUser.name, renameValue.trim());
+      message.success(`Renamed ${renameUser.name} → ${renameValue.trim()}`);
+      setRenameUser(null);
+      load();
+    } catch (e) {
+      message.error(friendlyError(e));
+    } finally {
+      setRenaming(false);
+    }
   };
 
   const menuItem = (
@@ -204,8 +293,9 @@ export default function UserManagementPanel() {
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              // Clamp inside viewport (Properties / Enable–Disable / Drop)
-              const menuW = 200, menuH = 110;
+              // Clamp inside viewport (Properties / Enable–Disable / Reset /
+              // Rename / Abort / Drop)
+              const menuW = 200, menuH = 210;
               const x = Math.min(e.clientX, window.innerWidth  - menuW - 8);
               const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
               setCtxMenu({ x, y, user: u });
@@ -266,6 +356,10 @@ export default function UserManagementPanel() {
             () => handleToggleDisable(ctxMenu.user),
           )}
           <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+          {menuItem("Reset password…", <KeyOutlined style={{ fontSize: 12 }} />, () => handleResetPassword(ctxMenu.user))}
+          {menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, () => openRename(ctxMenu.user))}
+          {menuItem("Abort all queries…", <CloseCircleOutlined style={{ fontSize: 12 }} />, () => handleAbortQueries(ctxMenu.user))}
+          <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
           {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, () => handleDrop(ctxMenu.user), "#f85149")}
         </div>
       )}
@@ -276,6 +370,30 @@ export default function UserManagementPanel() {
           name={editUser.name}
           onClose={() => { setEditUser(null); load(); }}
         />
+      )}
+
+      {/* Rename modal */}
+      {renameUser && (
+        <Modal
+          open
+          title={`Rename user ${renameUser.name}`}
+          okText="Rename"
+          confirmLoading={renaming}
+          okButtonProps={{ disabled: !renameValue.trim() || renameValue.trim() === renameUser.name }}
+          onOk={doRename}
+          onCancel={() => setRenameUser(null)}
+        >
+          <Text style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 8 }}>
+            A bare name folds to uppercase; quote it (e.g. <code>"NewName"</code>) to keep exact case.
+          </Text>
+          <Input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onPressEnter={() => renameValue.trim() && renameValue.trim() !== renameUser.name && doRename()}
+            placeholder="new user name"
+          />
+        </Modal>
       )}
 
       {/* Create modal */}

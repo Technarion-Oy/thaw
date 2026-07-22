@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, Alert, message } from "antd";
-import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, Tag, message } from "antd";
+import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
+  SetUserPolicy, UnsetUserPolicy, SetUserTags, UnsetUserTags,
+  ListUserMfaMethods, RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
+  ListAccountAuthenticationPolicies, ListAccountPasswordPolicies, ListAccountSessionPolicies,
+  ListSecurityIntegrations, ListAccountTags, GetUserTagReferences, GetUserPolicyReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
+import TagsRow, { type EditableTag } from "../shared/TagsRow";
 import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";
+import {
+  type NameOption, type MfaMethod, type PolicyKind, type PolicyRef,
+  PolicyKindLabel, nameOptionsFromShow, userTagsToEditable, parseMfaMethods, parsePolicyReferences,
+} from "./userPropertyUtils";
 
 const { Text } = Typography;
 
@@ -153,6 +162,286 @@ function PasswordRow({ onSave, search }: { onSave: (val: string) => Promise<void
   );
 }
 
+// ─── Helper: access-policy manager ───────────────────────────────────────────
+
+const POLICY_KINDS: PolicyKind[] = ["AUTHENTICATION", "PASSWORD", "SESSION"];
+
+/**
+ * Access-policy manager modelled on the tag editor: the policies currently
+ * attached to the user (`GetUserPolicyReferences` → INFORMATION_SCHEMA.
+ * POLICY_REFERENCES, since DESCRIBE USER omits them) render as removable chips,
+ * and an add row picks a kind + a policy (from `ListAccount*Policies`, value =
+ * quoted FQN) with an optional FORCE. Each kind allows at most one policy, so
+ * adding with a kind that's already attached needs FORCE (or first remove the
+ * chip). Routes through SetUserPolicy / UnsetUserPolicy.
+ */
+function PolicyManager({
+  name, refs, optionsByKind, onReload,
+}: {
+  name: string;
+  refs: PolicyRef[];
+  optionsByKind: Record<PolicyKind, { value: string; label: string }[]>;
+  onReload: () => Promise<void>;
+}) {
+  const [kind, setKind]   = useState<PolicyKind>("AUTHENTICATION");
+  const [pol, setPol]     = useState("");
+  const [force, setForce] = useState(false);
+  const [busy, setBusy]   = useState<string>("");
+
+  const add = async () => {
+    setBusy("add");
+    try {
+      await SetUserPolicy(name, kind, pol, force);
+      message.success(`${PolicyKindLabel[kind]} policy set on ${name}`);
+      setPol("");
+      await onReload();
+    } catch (e) {
+      message.error(friendlyError(e), 6);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = (ref: PolicyRef) => {
+    Modal.confirm({
+      title: `Unset ${PolicyKindLabel[ref.kind].toLowerCase()} policy on ${name}?`,
+      content: `This detaches ${ref.label} from the user.`,
+      okText: "Unset",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(ref.kind);
+        try {
+          await UnsetUserPolicy(name, ref.kind);
+          message.success(`${PolicyKindLabel[ref.kind]} policy unset on ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setBusy("");
+        }
+      },
+    });
+  };
+
+  const opts = optionsByKind[kind] ?? [];
+
+  return (
+    <div style={{ padding: "2px 0 6px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {refs.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>(none attached)</Text>}
+        {refs.map((r) => (
+          <Tag key={`${r.kind}:${r.fqn}`} closable onClose={(e) => { e.preventDefault(); remove(r); }}>
+            {PolicyKindLabel[r.kind]}: {r.label}
+          </Tag>
+        ))}
+      </div>
+      <Space wrap size={6}>
+        <Select
+          size="small" value={kind} onChange={(v) => { setKind(v); setPol(""); }}
+          options={POLICY_KINDS.map((k) => ({ value: k, label: PolicyKindLabel[k] }))} style={{ width: 130 }}
+        />
+        <Select
+          size="small" showSearch allowClear value={pol || undefined} onChange={(v) => setPol(v ?? "")}
+          placeholder={opts.length ? "select policy…" : "no policies visible"} options={opts}
+          filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+          style={{ width: 170 }}
+        />
+        <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)} style={{ fontSize: 12 }}>
+          FORCE
+        </Checkbox>
+        <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy === "add"} disabled={!pol.trim()} onClick={add}>
+          Add
+        </Button>
+      </Space>
+    </div>
+  );
+}
+
+// ─── Helper: MFA method removal row ──────────────────────────────────────────
+
+/**
+ * Lists the user's enrolled MFA methods (`SHOW MFA METHODS FOR USER`) as
+ * removable rows, and removes one (`ALTER USER … REMOVE MFA METHOD <name>`) so
+ * the user can re-enroll. The removal identifier is the system-generated `name`
+ * column — not the factor `type` (which is display-only) — so a fixed
+ * TOTP/PASSKEY/DUO button set would target the wrong thing. Bypass windows are
+ * still set via MINS_TO_BYPASS_MFA in the Security section; this is the
+ * destructive per-factor removal. SHOW MFA METHODS FOR USER needs ACCOUNTADMIN,
+ * so a load failure is shown as a faint caveat rather than a loud error.
+ */
+function MfaRemoveRow({ name, search }: { name: string; search?: string }) {
+  const [methods, setMethods] = useState<MfaMethod[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [busy, setBusy]       = useState<string>("");
+
+  const reload = useCallback(async () => {
+    setLoadErr(null);
+    try {
+      setMethods(parseMfaMethods(await ListUserMfaMethods(name)));
+    } catch (e) {
+      setMethods([]);
+      setLoadErr(friendlyError(e));
+    }
+  }, [name]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (search && !"mfa methods".includes(search.toLowerCase())) return null;
+
+  const remove = (m: MfaMethod) => {
+    Modal.confirm({
+      title: `Remove ${m.type || "MFA"} method from ${name}?`,
+      content: "The user loses this factor and must re-enroll it.",
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(m.name);
+        try {
+          await RemoveUserMfaMethod(name, m.name);
+          message.success(`Removed ${m.type || "MFA method"} from ${name}`);
+          await reload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setBusy("");
+        }
+      },
+    });
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>MFA methods</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+        {methods === null ? (
+          <Spin size="small" />
+        ) : loadErr ? (
+          <span style={{ fontSize: 11, fontStyle: "italic", color: "var(--text-faint)" }}>
+            unavailable — {loadErr}
+          </span>
+        ) : methods.length === 0 ? (
+          <span style={{ fontSize: 12, fontStyle: "italic", color: "var(--text-faint)" }}>no enrolled methods</span>
+        ) : (
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {methods.map((m) => (
+              <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Tag style={{ margin: 0 }}>{m.type || "MFA"}</Tag>
+                {m.comment && <span style={{ fontSize: 12, color: "var(--text)" }}>{m.comment}</span>}
+                {m.lastUsed && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>last used {m.lastUsed}</span>}
+                <Button size="small" danger icon={<DeleteOutlined />} loading={busy === m.name} onClick={() => remove(m)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </Space>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ─── Helper: delegated-authorization rows ────────────────────────────────────
+
+/**
+ * Manages delegated authorizations that let a security integration act on the
+ * user's behalf for a role. Add attaches ROLE→INTEGRATION; Remove detaches one
+ * role (or, with the role left blank, every delegated authorization for the
+ * integration). Routes through Add/RemoveUserDelegatedAuth →
+ * users.Build{Add,Remove}DelegatedAuthSQL.
+ */
+function DelegatedAuthRows({ name, roleOptions, integrationOptions, onReload, search }: {
+  name: string;
+  roleOptions: string[];
+  integrationOptions: string[];
+  onReload: () => Promise<void>;
+  search?: string;
+}) {
+  const [role, setRole]       = useState("");
+  const [integration, setInt] = useState("");
+  const [busy, setBusy]       = useState<string>("");
+  if (search && !"delegated authorization role security integration".includes(search.toLowerCase())) return null;
+
+  const add = async () => {
+    setBusy("add");
+    try {
+      await AddUserDelegatedAuth(name, role, integration);
+      message.success(`Delegated authorization added for ${name}`);
+      await onReload();
+    } catch (e) {
+      message.error(friendlyError(e), 6);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Remove is confirmed like the other destructive actions — and with the role
+  // left blank the statement detaches EVERY delegated authorization for the
+  // integration (across all roles), so the copy calls that out explicitly.
+  const remove = () => {
+    const all = !role.trim();
+    Modal.confirm({
+      title: all
+        ? `Remove all delegated authorizations for ${integration}?`
+        : `Remove delegated authorization of ${role} for ${integration}?`,
+      content: all
+        ? `This detaches every delegated authorization for security integration ${integration}, across all roles — not just this user.`
+        : `This detaches ${role}'s delegated authorization from security integration ${integration}.`,
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy("remove");
+        try {
+          await RemoveUserDelegatedAuth(name, role, integration);
+          message.success(`Delegated authorization removed for ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setBusy("");
+        }
+      },
+    });
+  };
+
+  const roleOpts = roleOptions.map((r) => ({ value: r, label: r }));
+  const intOpts  = integrationOptions.map((i) => ({ value: i, label: i }));
+  const filterByLabel = (input: string, opt?: { label?: string }) =>
+    (opt?.label ?? "").toLowerCase().includes(input.toLowerCase());
+
+  return (
+    <>
+      <tr>
+        <td style={LABEL_TD}>Role</td>
+        <td style={{ padding: "6px 0" }}>
+          <Select
+            size="small" showSearch allowClear value={role || undefined}
+            onChange={(v) => setRole(v ?? "")} options={roleOpts} filterOption={filterByLabel}
+            placeholder="role (leave empty to remove all)" style={{ minWidth: 260 }}
+          />
+        </td>
+      </tr>
+      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+        <td style={LABEL_TD}>Security integration</td>
+        <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <Select
+              size="small" showSearch allowClear value={integration || undefined}
+              onChange={(v) => setInt(v ?? "")} options={intOpts} filterOption={filterByLabel}
+              placeholder={intOpts.length ? "select integration…" : "no integrations visible"}
+              style={{ minWidth: 200 }}
+            />
+            <Button size="small" type="primary" loading={busy === "add"} disabled={!role.trim() || !integration.trim()} onClick={add}>
+              Add
+            </Button>
+            <Button size="small" danger loading={busy === "remove"} disabled={!integration.trim()} onClick={remove}>
+              Remove
+            </Button>
+          </div>
+        </td>
+      </tr>
+    </>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -176,6 +465,37 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   const [dsr, setDsr]             = useState("");
   // Which RSA public-key slot's KeyPairAuthModal is open (null = none).
   const [keyModal, setKeyModal]   = useState<KeySlot | null>(null);
+  // Picker lists for the policy / delegated-auth / tag dropdowns and the current
+  // user-tag chips — all best-effort (empty on failure; the actions still work).
+  const [roleNames, setRoleNames]       = useState<string[]>([]);
+  const [integrationNames, setIntNames] = useState<string[]>([]);
+  const [authPolicyOpts, setAuthPolicyOpts]       = useState<{ value: string; label: string }[]>([]);
+  const [pwPolicyOpts, setPwPolicyOpts]           = useState<{ value: string; label: string }[]>([]);
+  const [sessionPolicyOpts, setSessionPolicyOpts] = useState<{ value: string; label: string }[]>([]);
+  const [tagNameOpts, setTagNameOpts]   = useState<NameOption[]>([]);
+  const [userTags, setUserTags]         = useState<EditableTag[]>([]);
+  const [policyRefs, setPolicyRefs]     = useState<PolicyRef[]>([]);
+
+  // Reload the tags currently applied to the user (removable chips). Best-effort:
+  // account-level TAG_REFERENCES needs a current database, so this may return
+  // nothing — SET/UNSET still work regardless.
+  const reloadTags = useCallback(async () => {
+    try {
+      setUserTags(userTagsToEditable(await GetUserTagReferences(name)));
+    } catch {
+      setUserTags([]);
+    }
+  }, [name]);
+
+  // Reload the policies attached to the user (removable chips) via
+  // POLICY_REFERENCES — DESCRIBE USER omits them. Best-effort, same as tags.
+  const reloadPolicies = useCallback(async () => {
+    try {
+      setPolicyRefs(parsePolicyReferences(await GetUserPolicyReferences(name)));
+    } catch {
+      setPolicyRefs([]);
+    }
+  }, [name]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -199,6 +519,18 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   }, [name]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { reloadTags(); }, [reloadTags]);
+  useEffect(() => { reloadPolicies(); }, [reloadPolicies]);
+  // Populate the picker lists once per open — all best-effort.
+  useEffect(() => {
+    ListRoles().then((r) => setRoleNames(r ?? [])).catch(() => setRoleNames([]));
+    ListSecurityIntegrations()
+      .then((i) => setIntNames((i ?? []).map((x) => x.name))).catch(() => setIntNames([]));
+    ListAccountAuthenticationPolicies().then((r) => setAuthPolicyOpts(nameOptionsFromShow(r))).catch(() => setAuthPolicyOpts([]));
+    ListAccountPasswordPolicies().then((r) => setPwPolicyOpts(nameOptionsFromShow(r))).catch(() => setPwPolicyOpts([]));
+    ListAccountSessionPolicies().then((r) => setSessionPolicyOpts(nameOptionsFromShow(r))).catch(() => setSessionPolicyOpts([]));
+    ListAccountTags().then((r) => setTagNameOpts(nameOptionsFromShow(r))).catch(() => setTagNameOpts([]));
+  }, [name]);
 
   // Lazy option loaders for the warehouse/role dropdowns — fetched by EditRow
   // the first time the row enters edit mode, not on every modal open.
@@ -224,6 +556,10 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
 
   const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: 12 };
 
+  // Search visibility for the side-by-side Access policies / Tags columns.
+  const showPolicies = !search || "access policies authentication password session".includes(search.toLowerCase());
+  const showTags     = !search || "tags".includes(search.toLowerCase());
+
   return (
     <Modal
       open
@@ -236,7 +572,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
       }
       onCancel={onClose}
       footer={<Button onClick={onClose}>Close</Button>}
-      width={640}
+      width={760}
       styles={{ body: { paddingTop: 12, maxHeight: "72vh", overflowY: "auto" } }}
     >
       {loadError && (
@@ -328,6 +664,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <EditRow label="Mins to unlock"     value={numVal("MINS_TO_UNLOCK")}     type="number" allowEmpty search={search} hint="Clear to reset"               onSave={save("minsToUnlock")} />
             <EditRow label="Mins to bypass MFA" value={numVal("MINS_TO_BYPASS_MFA")} type="number" allowEmpty search={search} hint="Requires MFA enrolment; clear to reset" onSave={save("minsToBypassMfa")} />
             <PasswordRow search={search} onSave={async (v) => { await AlterUserProperty(name, "password", v); await load(); }} />
+            <MfaRemoveRow name={name} search={search} />
           </tbody></table>
 
           <div style={SECTION_HEAD}>Key pair authentication</div>
@@ -354,6 +691,58 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
               degraded={m["__DESCRIBE_DEGRADED__"] === "1"}
               onReload={load} onOpen={() => setKeyModal("RSA_PUBLIC_KEY_2")}
             />
+          </tbody></table>
+
+          {/* Access policies and Tags share a row — both are chip editors, and
+              stacking them full-width wasted horizontal space. Each column
+              collapses out when a search filters it away. */}
+          {(showPolicies || showTags) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+              {showPolicies && (
+                <div>
+                  <div style={SECTION_HEAD}><Space size={6}><SafetyOutlined />Access policies</Space></div>
+                  {!search && (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+                      Attached policies show as chips — click × to detach. Add one per kind;
+                      use <b>FORCE</b> to replace. Read live from <code>POLICY_REFERENCES</code>.
+                    </div>
+                  )}
+                  <PolicyManager
+                    name={name}
+                    refs={policyRefs}
+                    optionsByKind={{ AUTHENTICATION: authPolicyOpts, PASSWORD: pwPolicyOpts, SESSION: sessionPolicyOpts }}
+                    onReload={reloadPolicies}
+                  />
+                </div>
+              )}
+              {showTags && (
+                <div>
+                  <div style={SECTION_HEAD}><Space size={6}><TagsOutlined />Tags</Space></div>
+                  {/* Shared object-store tag editor (label hidden — the section
+                      header already labels it): chips + account-tag dropdown. */}
+                  <table style={tableStyle}><tbody>
+                    <TagsRow
+                      hideLabel
+                      tags={userTags}
+                      nameOptions={tagNameOpts}
+                      onSetTag={async (tagName, tagValue) => { await SetUserTags(name, [{ name: tagName, value: tagValue }]); await reloadTags(); }}
+                      onUnsetTag={async (key) => { await UnsetUserTags(name, [key]); await reloadTags(); }}
+                    />
+                  </tbody></table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={SECTION_HEAD}><Space size={6}><ApiOutlined />Delegated authorization</Space></div>
+          {!search && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+              Let a security integration act on the user's behalf for a role. Leave the role blank
+              and click <b>Remove</b> to detach every delegated authorization for the integration.
+            </div>
+          )}
+          <table style={tableStyle}><tbody>
+            <DelegatedAuthRows name={name} roleOptions={roleNames} integrationOptions={integrationNames} onReload={load} search={search} />
           </tbody></table>
 
           <div style={SECTION_HEAD}>Info</div>
