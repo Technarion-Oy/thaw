@@ -25,6 +25,7 @@ never inline in a component.
 - **Booleans** (`disabled`, `mustChangePassword`) — `TRUE`/`FALSE` only; no UNSET. MFA is deliberately not managed here (`DISABLE_MFA` is a legacy Duo-era property with contested support); use `minsToUnlock`/`minsToBypassMfa` or `ALTER USER … REMOVE MFA METHOD` via the SQL editor.
 - **Enums** — `type` (`PERSON`/`SERVICE`/`LEGACY_SERVICE`, empty → `UNSET`); `defaultSecondaryRoles` (`ALL` → `('ALL')`, `NONE` → `()`, empty → `UNSET`).
 - **`password`** — set-only, never trimmed (spaces are legal), empty is an error.
+- **RSA public keys** (`rsaPublicKey` → `RSA_PUBLIC_KEY`, `rsaPublicKey2` → `RSA_PUBLIC_KEY_2`) — the two key-pair-auth slots. The value is the stripped base64 payload; all whitespace/newlines are stripped so a copy-pasted multi-line key works, and a full PEM (any `-----BEGIN/-----END-----` line present) is **rejected** so header/footer text can't be interpolated into the SQL literal. Escaped with `QuoteStringLit` (single-quote doubling — base64 has no backslashes). Empty → `UNSET` (removes the key, locking out that private key). This is the single builder for key registration; `internal/keypair` only *generates* keys.
 
 ## Gotchas
 

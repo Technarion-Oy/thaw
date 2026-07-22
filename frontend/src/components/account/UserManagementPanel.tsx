@@ -11,7 +11,6 @@ import {
   StopOutlined,
   CheckCircleOutlined,
   SearchOutlined,
-  KeyOutlined,
 } from "@ant-design/icons";
 import { ListUsers, ExecuteQuery, AlterUserProperty } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
@@ -19,7 +18,6 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import UserPropertiesModal from "./UserPropertiesModal";
 import { friendlyError } from "../common/PropertyRows";
 import CreateUserModal from "./CreateUserModal";
-import KeyPairAuthModal from "./KeyPairAuthModal";
 
 const { Text } = Typography;
 
@@ -38,7 +36,6 @@ export default function UserManagementPanel() {
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null);
   const [editUser,       setEditUser]       = useState<snowflake.SnowflakeUser | null>(null);
   const [showCreate,     setShowCreate]     = useState(false);
-  const [keyPairUser,    setKeyPairUser]    = useState<string | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -207,8 +204,8 @@ export default function UserManagementPanel() {
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              // Clamp inside viewport
-              const menuW = 200, menuH = 140;
+              // Clamp inside viewport (Properties / Enable–Disable / Drop)
+              const menuW = 200, menuH = 110;
               const x = Math.min(e.clientX, window.innerWidth  - menuW - 8);
               const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
               setCtxMenu({ x, y, user: u });
@@ -268,11 +265,6 @@ export default function UserManagementPanel() {
               : <StopOutlined style={{ fontSize: 12 }} />,
             () => handleToggleDisable(ctxMenu.user),
           )}
-          {menuItem(
-            "Configure Key Pair Auth…",
-            <KeyOutlined style={{ fontSize: 12 }} />,
-            () => { setCtxMenu(null); setKeyPairUser(ctxMenu.user.name); },
-          )}
           <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
           {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, () => handleDrop(ctxMenu.user), "#f85149")}
         </div>
@@ -291,14 +283,6 @@ export default function UserManagementPanel() {
         <CreateUserModal
           onClose={() => setShowCreate(false)}
           onSuccess={() => { setShowCreate(false); load(); }}
-        />
-      )}
-
-      {/* Key pair auth modal */}
-      {keyPairUser && (
-        <KeyPairAuthModal
-          username={keyPairUser}
-          onClose={() => setKeyPairUser(null)}
         />
       )}
     </div>

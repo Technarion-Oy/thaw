@@ -193,11 +193,3 @@ func stripPEMContent(pemStr string) string {
 	}
 	return strings.Join(lines, "")
 }
-
-// BuildSetUserPublicKeySQL builds the ALTER USER ... SET RSA_PUBLIC_KEY statement
-// that registers an RSA public key with a Snowflake user.
-func BuildSetUserPublicKeySQL(username, publicKey string) string {
-	esc := strings.ReplaceAll(username, `"`, `""`)
-	sq := strings.ReplaceAll(publicKey, "'", "''")
-	return fmt.Sprintf(`ALTER USER "%s" SET RSA_PUBLIC_KEY='%s'`, esc, sq)
-}

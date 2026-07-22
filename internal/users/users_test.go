@@ -55,6 +55,18 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		// password — set-only, never trimmed, never UNSET
 		{"password", " p'w ", `ALTER USER "ALICE" SET PASSWORD = ' p''w '`, false},
 		{"password", "", "", true},
+		// RSA public keys — stripped base64 SET, empty → UNSET, both slots
+		{"rsaPublicKey", "MIIBIjANBgkq", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIBIjANBgkq'`, false},
+		{"rsaPublicKey", "", `ALTER USER "ALICE" UNSET RSA_PUBLIC_KEY`, false},
+		{"rsaPublicKey2", "MIIBIjANBgkq", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY_2 = 'MIIBIjANBgkq'`, false},
+		{"rsaPublicKey2", "", `ALTER USER "ALICE" UNSET RSA_PUBLIC_KEY_2`, false},
+		// whitespace/newlines inside a pasted key are stripped
+		{"rsaPublicKey", "MIIBIjAN\n  BgkqhkiG\n", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIBIjANBgkqhkiG'`, false},
+		// single-quote doubling (base64 never contains one, but the escape must hold)
+		{"rsaPublicKey", "MIIB'key", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIB''key'`, false},
+		// full-PEM input is rejected — the -----BEGIN/-----END lines would break the literal
+		{"rsaPublicKey", "-----BEGIN PUBLIC KEY-----\nMIIBIjAN\n-----END PUBLIC KEY-----", "", true},
+		{"rsaPublicKey2", "-----BEGIN PUBLIC KEY-----\nMIIBIjAN\n-----END PUBLIC KEY-----", "", true},
 		// unknown
 		{"nope", "x", "", true},
 	}

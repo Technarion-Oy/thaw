@@ -2,14 +2,103 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Spin, Button, Input, Space, Typography, Alert, message } from "antd";
-import { UserOutlined, CheckOutlined, SearchOutlined } from "@ant-design/icons";
+import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
+import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";
 
 const { Text } = Typography;
+
+// ─── Helper: RSA public-key slot row ─────────────────────────────────────────
+
+/**
+ * One row per RSA public-key slot (Key 1 / Key 2). Shows the current
+ * fingerprint and last-set time from DESCRIBE USER, or "not set" — and, when the
+ * role can't DESCRIBE USER (degraded), a caveat instead of implying "not set".
+ * Set/Replace opens KeyPairAuthModal targeting this slot; Remove UNSETs it.
+ */
+function KeyPairSlotRow({
+  name, slot, label, fp, lastSet, degraded, onReload, onOpen, search,
+}: {
+  name: string;
+  slot: KeySlot;
+  label: string;
+  fp: string;
+  lastSet: string;
+  degraded: boolean;
+  onReload: () => Promise<void>;
+  onOpen: () => void;
+  search?: string;
+}) {
+  const [removing, setRemoving] = useState(false);
+  const hay = `${label} rsa public key fingerprint`.toLowerCase();
+  if (search && !hay.includes(search.toLowerCase())) return null;
+
+  const hasKey = fp.trim() !== "";
+
+  const remove = () => {
+    Modal.confirm({
+      title: `Remove ${label} from ${name}?`,
+      content: "This UNSETs the RSA public key in this slot. Anyone still " +
+        "authenticating with the matching private key will be locked out.",
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setRemoving(true);
+        try {
+          await AlterUserProperty(name, SLOT_PROPERTY[slot], "");
+          message.success(`Removed ${label} from ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setRemoving(false);
+        }
+      },
+    });
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            {degraded && !hasKey ? (
+              <span style={{ fontSize: 11, fontStyle: "italic", color: "var(--text-faint)" }}>
+                unknown — your role can't DESCRIBE USER
+              </span>
+            ) : hasKey ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <span style={{ fontFamily: "monospace", fontSize: 11, wordBreak: "break-all", color: "var(--text)" }}>
+                  {fp}
+                </span>
+                {lastSet && (
+                  <span style={{ fontSize: 10, color: "var(--text-muted)" }}>set {lastSet}</span>
+                )}
+              </div>
+            ) : (
+              <span style={{ fontSize: 12, fontStyle: "italic", color: "var(--text-faint)" }}>not set</span>
+            )}
+          </div>
+          <Space size={4}>
+            <Button size="small" icon={<KeyOutlined />} onClick={onOpen}>
+              {hasKey ? "Replace…" : "Set…"}
+            </Button>
+            {(hasKey || degraded) && (
+              <Button size="small" danger icon={<DeleteOutlined />} loading={removing} onClick={remove}>
+                Remove
+              </Button>
+            )}
+          </Space>
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 // ─── Helper: password reset row ──────────────────────────────────────────────
 
@@ -75,6 +164,8 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   // "ALL" | "NONE" | "" (unset) — derived from DEFAULT_SECONDARY_ROLES via the
   // backend's tested ParseSecondaryRoles rather than a bespoke regex.
   const [dsr, setDsr]             = useState("");
+  // Which RSA public-key slot's KeyPairAuthModal is open (null = none).
+  const [keyModal, setKeyModal]   = useState<KeySlot | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -229,18 +320,50 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <PasswordRow search={search} onSave={async (v) => { await AlterUserProperty(name, "password", v); await load(); }} />
           </tbody></table>
 
+          <div style={SECTION_HEAD}>Key pair authentication</div>
+          {!search && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+              Two slots enable zero-downtime rotation: set <b>Key 2</b>, migrate every
+              client to the new private key, then remove <b>Key 1</b>.
+            </div>
+          )}
+          <table style={tableStyle}><tbody>
+            <KeyPairSlotRow
+              name={name} slot="RSA_PUBLIC_KEY" label="Key 1" search={search}
+              fp={val("RSA_PUBLIC_KEY_FP")} lastSet={val("RSA_PUBLIC_KEY_LAST_SET_TIME")}
+              degraded={m["__DESCRIBE_DEGRADED__"] === "1"}
+              onReload={load} onOpen={() => setKeyModal("RSA_PUBLIC_KEY")}
+            />
+            <KeyPairSlotRow
+              name={name} slot="RSA_PUBLIC_KEY_2" label="Key 2" search={search}
+              fp={val("RSA_PUBLIC_KEY_2_FP")} lastSet={val("RSA_PUBLIC_KEY_2_LAST_SET_TIME")}
+              degraded={m["__DESCRIBE_DEGRADED__"] === "1"}
+              onReload={load} onOpen={() => setKeyModal("RSA_PUBLIC_KEY_2")}
+            />
+          </tbody></table>
+
           <div style={SECTION_HEAD}>Info</div>
           <table style={tableStyle}><tbody>
             <InfoRow label="Owner"              value={val("OWNER")}              search={search} />
             <InfoRow label="Created on"         value={val("CREATED_ON")}         search={search} />
             <InfoRow label="Last success login" value={val("LAST_SUCCESS_LOGIN")} search={search} />
             <InfoRow label="Has password"       value={val("HAS_PASSWORD")}       search={search} />
-            <InfoRow label="Has RSA public key" value={val("HAS_RSA_PUBLIC_KEY")} search={search} />
+            {/* RSA public keys are managed above under Key pair authentication. */}
             {/* Read-only: MFA is managed via Mins to bypass MFA above or
                 ALTER USER … REMOVE MFA METHOD in the SQL editor. */}
             <InfoRow label="MFA (Duo)" value={val("EXT_AUTHN_DUO")} search={search} />
           </tbody></table>
         </>
+      )}
+
+      {keyModal && (
+        <KeyPairAuthModal
+          username={name}
+          slot={keyModal}
+          slotHasKey={val(keyModal === "RSA_PUBLIC_KEY" ? "RSA_PUBLIC_KEY_FP" : "RSA_PUBLIC_KEY_2_FP").trim() !== ""}
+          onApplied={load}
+          onClose={() => setKeyModal(null)}
+        />
       )}
     </Modal>
   );

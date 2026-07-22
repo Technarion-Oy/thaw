@@ -867,13 +867,14 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **User Properties** — right-click a user and choose **Properties** for a per-property editable view (same pattern as warehouse properties): every settable `ALTER USER` property — identity fields, user `TYPE`, default warehouse/role/namespace/secondary roles, network policy, disabled / must-change-password switches, days-to-expiry, mins-to-unlock, mins-to-bypass-MFA, and password reset — edits inline with typed controls (dropdowns for enums and warehouse/role pickers), saves one `ALTER USER … SET/UNSET` statement at a time, and shows insufficient-privilege errors inline; clearing a value `UNSET`s it; a read-only Info section shows owner, login history, and MFA enrolment
 - **Enable / Disable / Drop** users with a single right-click action
 - User management actions are always offered; if the current role lacks the required privilege, the Snowflake error is shown instead of the action being pre-disabled
-- **Key Pair Authentication** — right-click any user and choose **Key Pair Auth…** to set up Snowflake key-pair authentication without leaving the app:
-  - Choose a key generation method: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); only tools present on PATH are shown
-  - Set the private key output path (type or browse); the public key is saved alongside with `_pub.pem` appended; the private key file is written with mode `0600`
-  - Optionally enter a passphrase (disabled for Go built-in)
-  - Click **Generate key pair** to produce an RSA-2048 PKCS#8 PEM key pair; the stripped public key content (no PEM header/footer) is shown for review
-  - Click **Apply to \<username\>** to run `ALTER USER … SET RSA_PUBLIC_KEY='…'` immediately
-  - The menu item is greyed out automatically when the current role lacks OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on that user
+- **Key Pair Authentication** — managed from the **User Properties** modal (open **Properties** on a user), in a dedicated **Key pair authentication** section. Snowflake's two key slots (**Key 1** = `RSA_PUBLIC_KEY`, **Key 2** = `RSA_PUBLIC_KEY_2`) are shown side by side for zero-downtime rotation:
+  - Each slot shows its current fingerprint and last-set time (from `DESCRIBE USER`), or **not set**; when your role can't `DESCRIBE USER` the state is reported as *unknown* rather than falsely shown as "not set"
+  - **Set… / Replace…** opens the key pair dialog targeting that slot. You can either **generate** a new pair or **paste an existing public key** (a full PEM or already-stripped base64 — header/footer lines and whitespace are removed automatically), then apply it. Replacing a slot that already has a key asks for confirmation
+  - **Remove** UNSETs the slot (behind a confirm dialog, since it locks out anyone authenticating with that key)
+  - Rotation flow, surfaced inline: set **Key 2** → migrate every client to the new private key → remove **Key 1**
+  - Key generation offers three methods: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); only tools present on PATH are shown. Set the private key output path (type or browse); the public key is saved alongside with `_pub.pem` appended and the private key written with mode `0600`
+  - All key registration runs through one tested SQL builder (`ALTER USER … SET/UNSET RSA_PUBLIC_KEY[_2]`) with full-PEM input rejected so a pasted PEM file can't produce broken SQL
+  - User management actions are always offered; if the current role lacks the privilege, the Snowflake error surfaces instead of the action being pre-disabled
 - **Key pair auth in Create User** — the **Create User** dialog includes an **RSA public key** field and a **Generate key pair…** button; clicking the button opens the key pair generator in "pick" mode so you can generate a key pair and auto-fill the public key without leaving the create flow
 
 ---

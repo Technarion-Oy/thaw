@@ -2074,10 +2074,6 @@ export function SetSessionVariable(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetSessionVariable'](arg1, arg2, arg3);
 }
 
-export function SetUserPublicKey(arg1, arg2) {
-  return window['go']['app']['App']['SetUserPublicKey'](arg1, arg2);
-}
-
 export function StartDapProxy() {
   return window['go']['app']['App']['StartDapProxy']();
 }

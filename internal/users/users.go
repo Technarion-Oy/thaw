@@ -14,7 +14,8 @@ import (
 // single property. property must be one of: loginName, displayName, firstName,
 // middleName, lastName, email, comment, password, defaultWarehouse, defaultRole,
 // defaultNamespace, networkPolicy, defaultSecondaryRoles, type, daysToExpiry,
-// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword.
+// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword, rsaPublicKey,
+// rsaPublicKey2.
 //
 // An empty value UNSETs the property (resetting it to its default) for every
 // property except the booleans (which require TRUE/FALSE) and password (which
@@ -50,6 +51,22 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	asString := func(v string) (string, error) { return snowflake.QuoteTextLit(v), nil }
 	asIdent := func(v string) (string, error) { return snowflake.QuoteIdent(v), nil }
 	asInt := func(v string) (string, error) { return validateInt(v) }
+	// rsaPublicKey / rsaPublicKey2 register an RSA public key for key-pair auth.
+	// The value is the stripped base64 payload (no PEM header/footer). All
+	// whitespace and newlines are stripped so a copy-pasted multi-line key works,
+	// and a full PEM is rejected: its -----BEGIN/-----END----- lines would
+	// otherwise be interpolated straight into the SQL literal. Base64 has no
+	// backslashes, so QuoteStringLit (single-quote doubling) is the right escape.
+	asRSAKey := func(v string) (string, error) {
+		stripped := strings.Join(strings.Fields(v), "")
+		if strings.Contains(stripped, "-----") {
+			return "", fmt.Errorf("RSA public key must be stripped PEM base64 — remove the -----BEGIN/-----END lines")
+		}
+		if stripped == "" {
+			return "", fmt.Errorf("RSA public key cannot be empty")
+		}
+		return snowflake.QuoteStringLit(stripped), nil
+	}
 
 	stringProps := map[string]string{
 		"loginName":   "LOGIN_NAME",
@@ -79,9 +96,16 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		"disabled":           "DISABLED",
 		"mustChangePassword": "MUST_CHANGE_PASSWORD",
 	}
+	rsaKeyProps := map[string]string{
+		"rsaPublicKey":  "RSA_PUBLIC_KEY",
+		"rsaPublicKey2": "RSA_PUBLIC_KEY_2",
+	}
 
 	if key, ok := stringProps[property]; ok {
 		return setOrUnset(key, asString)
+	}
+	if key, ok := rsaKeyProps[property]; ok {
+		return setOrUnset(key, asRSAKey)
 	}
 	if key, ok := identProps[property]; ok {
 		return setOrUnset(key, asIdent)
