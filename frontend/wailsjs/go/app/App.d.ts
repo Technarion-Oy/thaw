@@ -72,12 +72,17 @@ import {backup} from '../models';
 import {filesystem} from '../models';
 import {mcp} from '../models';
 import {sfconfig} from '../models';
+import {users} from '../models';
+
+export function AbortAllUserQueries(arg1:string):Promise<void>;
 
 export function AcceptLicense():Promise<void>;
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AddRecentDir(arg1:string):Promise<Array<string>>;
+
+export function AddUserDelegatedAuth(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AlterAgent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -737,6 +742,8 @@ export function GetTopologicalOrder(arg1:string,arg2:string,arg3:string):Promise
 
 export function GetUserDDL(arg1:string):Promise<string>;
 
+export function GetUserTagReferences(arg1:string):Promise<snowflake.QueryResult>;
+
 export function GetWarehouseDDL(arg1:string):Promise<string>;
 
 export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string):Promise<Array<warehouse.WarehouseMeteringRow>>;
@@ -831,9 +838,15 @@ export function IsQueryLogEnabled():Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
+export function ListAccountAuthenticationPolicies():Promise<snowflake.QueryResult>;
+
 export function ListAccountMaskingPolicies():Promise<snowflake.QueryResult>;
 
+export function ListAccountPasswordPolicies():Promise<snowflake.QueryResult>;
+
 export function ListAccountSequences():Promise<snowflake.QueryResult>;
+
+export function ListAccountSessionPolicies():Promise<snowflake.QueryResult>;
 
 export function ListAccountTags():Promise<snowflake.QueryResult>;
 
@@ -1027,11 +1040,19 @@ export function RemoveEditorTab(arg1:string):Promise<void>;
 
 export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
 
+export function RemoveUserDelegatedAuth(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function RemoveUserMfaMethod(arg1:string,arg2:string):Promise<void>;
+
 export function RenameFile(arg1:string,arg2:string):Promise<void>;
 
 export function RenameProfile(arg1:string,arg2:string):Promise<void>;
 
+export function RenameUser(arg1:string,arg2:string):Promise<void>;
+
 export function ResetPipRegistryConfig():Promise<void>;
+
+export function ResetUserPassword(arg1:string):Promise<void>;
 
 export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 
@@ -1109,6 +1130,10 @@ export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise
 
 export function SetSessionVariable(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function SetUserPolicy(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;
+
+export function SetUserTags(arg1:string,arg2:Array<users.TagPair>):Promise<void>;
+
 export function StartDapProxy():Promise<void>;
 
 export function StartFileWatcher(arg1:string):Promise<void>;
@@ -1146,6 +1171,10 @@ export function UninstallEnvPackage(arg1:string):Promise<void>;
 export function UnsetObjectParameter(arg1:string,arg2:Array<string>,arg3:string):Promise<void>;
 
 export function UnsetObjectTag(arg1:tag.ObjectTagRef,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function UnsetUserPolicy(arg1:string,arg2:string):Promise<void>;
+
+export function UnsetUserTags(arg1:string,arg2:Array<string>):Promise<void>;
 
 export function UpdateERDesignerState(arg1:string,arg2:Array<mcp.ERDesignerTableOut>):Promise<void>;
 

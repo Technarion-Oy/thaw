@@ -169,3 +169,17 @@ func (a *App) GetAuthenticationPolicyReferences(database, schema, name string) (
 		snowflake.EscapeTextLit(database), snowflake.EscapeTextLit(schema), snowflake.EscapeTextLit(name))
 	return client.QuerySingle(a.fctx(FeatureObjectEditor), query)
 }
+
+// ListAccountAuthenticationPolicies returns every authentication policy in the
+// account via SHOW AUTHENTICATION POLICIES IN ACCOUNT (name, database_name,
+// schema_name, …). It backs the authentication-policy picker in the user
+// properties modal, mirroring ListAccountMaskingPolicies. The command requires
+// privileges on the policies, so accounts without governance access may see only
+// a subset.
+func (a *App) ListAccountAuthenticationPolicies() (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.QuerySingle(a.fctx(FeatureUsersRoles), "SHOW AUTHENTICATION POLICIES IN ACCOUNT")
+}

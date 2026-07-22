@@ -3,6 +3,8 @@
 package app
 
 import (
+	"fmt"
+
 	"thaw/internal/apperrors"
 	"thaw/internal/keypair"
 	"thaw/internal/snowflake"
@@ -38,6 +40,149 @@ func (a *App) AlterUserProperty(name, property, value string) error {
 		return apperrors.ErrNotConnected
 	}
 	return users.AlterProperty(a.fctx(FeatureUsersRoles), client, name, property, value)
+}
+
+// ResetUserPassword runs ALTER USER … RESET PASSWORD, generating a fresh
+// single-use password reset URL for the user.
+func (a *App) ResetUserPassword(name string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.ResetPassword(a.fctx(FeatureUsersRoles), client, name)
+}
+
+// RenameUser runs ALTER USER … RENAME TO. newName is typed free-hand (bare names
+// fold; a name needing quoting must be typed quoted).
+func (a *App) RenameUser(name, newName string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.Rename(a.fctx(FeatureUsersRoles), client, name, newName)
+}
+
+// AbortAllUserQueries runs ALTER USER … ABORT ALL QUERIES, cancelling every
+// running and queued query for the user across all sessions.
+func (a *App) AbortAllUserQueries(name string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.AbortAllQueries(a.fctx(FeatureUsersRoles), client, name)
+}
+
+// RemoveUserMfaMethod runs ALTER USER … REMOVE MFA METHOD <method>. method is one
+// of PASSKEY, TOTP, DUO.
+func (a *App) RemoveUserMfaMethod(name, method string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.RemoveMfaMethod(a.fctx(FeatureUsersRoles), client, name, method)
+}
+
+// SetUserPolicy runs ALTER USER … SET { AUTHENTICATION | PASSWORD | SESSION }
+// POLICY <policy_name> [ FORCE ]. kind is the policy kind; force detaches any
+// same-kind policy already attached before attaching the new one.
+func (a *App) SetUserPolicy(name, kind, policyName string, force bool) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.SetPolicy(a.fctx(FeatureUsersRoles), client, name, kind, policyName, force)
+}
+
+// UnsetUserPolicy runs ALTER USER … UNSET { AUTHENTICATION | PASSWORD | SESSION }
+// POLICY.
+func (a *App) UnsetUserPolicy(name, kind string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.UnsetPolicy(a.fctx(FeatureUsersRoles), client, name, kind)
+}
+
+// GetUserTagReferences returns the tags applied directly to the given user via
+// the INFORMATION_SCHEMA.TAG_REFERENCES table function (object domain USER).
+// Unlike the ACCOUNT_USAGE.TAG_REFERENCES view this reflects changes immediately
+// (no propagation latency), so it backs the removable-chip tag editor in the
+// user properties modal — mirroring App.GetModelTags.
+//
+// USER is an account-level object, so the reference is a bare user name and the
+// results aren't scoped to any database — but an INFORMATION_SCHEMA table
+// function still has to run inside *some* database. The session's current
+// database is used when set; otherwise (common for account admins who connect
+// without selecting one) any accessible database is picked, since the account-
+// level result is identical regardless of which database's INFORMATION_SCHEMA
+// hosts the call. When no database is accessible at all an error is returned —
+// the caller treats that (and any other failure) as "no tags shown" and still
+// allows SET/UNSET TAG.
+func (a *App) GetUserTagReferences(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	ctx := a.fctx(FeatureUsersRoles)
+	db := client.GetCachedSessionContext().Database
+	if db == "" {
+		dbs, err := client.ListDatabases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(dbs) == 0 {
+			return nil, fmt.Errorf("no accessible database to read user tags")
+		}
+		db = dbs[0]
+	}
+	sql := fmt.Sprintf(
+		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
+			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'USER')) "+
+			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
+		// EscapeTextLit (not EscapeStringLit): QuoteIdent doubles " but not \, so a
+		// backslash in an identifier must be doubled to survive the single-quoted
+		// literal rather than being read as a Snowflake escape sequence.
+		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
+	return client.Execute(ctx, sql)
+}
+
+// SetUserTags runs ALTER USER … SET TAG <t1> = '<v1>' [ , … ].
+func (a *App) SetUserTags(name string, tags []users.TagPair) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.SetTags(a.fctx(FeatureUsersRoles), client, name, tags)
+}
+
+// UnsetUserTags runs ALTER USER … UNSET TAG <t1> [ , … ].
+func (a *App) UnsetUserTags(name string, tagNames []string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.UnsetTags(a.fctx(FeatureUsersRoles), client, name, tagNames)
+}
+
+// AddUserDelegatedAuth runs ALTER USER … ADD DELEGATED AUTHORIZATION OF ROLE
+// <role> TO SECURITY INTEGRATION <integration>.
+func (a *App) AddUserDelegatedAuth(name, role, integration string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.AddDelegatedAuth(a.fctx(FeatureUsersRoles), client, name, role, integration)
+}
+
+// RemoveUserDelegatedAuth runs ALTER USER … REMOVE DELEGATED … FROM SECURITY
+// INTEGRATION <integration>. An empty role removes every delegated authorization
+// for the integration (the AUTHORIZATIONS form); a role removes just that one.
+func (a *App) RemoveUserDelegatedAuth(name, role, integration string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return users.RemoveDelegatedAuth(a.fctx(FeatureUsersRoles), client, name, role, integration)
 }
 
 // CheckAvailableKeyTools returns the list of available key generation methods.

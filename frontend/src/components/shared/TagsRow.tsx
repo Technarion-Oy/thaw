@@ -2,7 +2,7 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState } from "react";
-import { Button, Input, Space, Typography, Tag, Tooltip } from "antd";
+import { Button, Input, Space, Typography, Tag, Tooltip, Select } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 
 const { Text } = Typography;
@@ -29,12 +29,21 @@ interface Props {
   tags: EditableTag[];
   onSetTag: (name: string, value: string) => Promise<void>;
   onUnsetTag: (key: string) => Promise<void>;
+  // When provided, the tag-name field becomes a searchable dropdown of these
+  // options (e.g. every tag defined in the account) instead of a free-text
+  // input. Callers may still type a name not in the list. Omit for the original
+  // free-text behaviour, so existing consumers are unaffected. When the selected
+  // option carries a non-empty allowedValues list, the value field becomes a
+  // dropdown restricted to those values (matching the ColumnPropertiesModal tag
+  // editor) so a value the tag rejects can't be submitted.
+  nameOptions?: { value: string; label: string; allowedValues?: string[] }[];
 }
 
 // Shared inline tag editor row for the object properties modals: shows the
 // current tags as chips (removable ones closable), plus a name/value pair and
-// an Add Tag button. Both add and remove surface failures inline.
-export default function TagsRow({ tags, onSetTag, onUnsetTag }: Props) {
+// an Add Tag button. Both add and remove surface failures inline. When
+// nameOptions is passed the name field is a searchable dropdown.
+export default function TagsRow({ tags, onSetTag, onUnsetTag, nameOptions }: Props) {
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -64,6 +73,14 @@ export default function TagsRow({ tags, onSetTag, onUnsetTag }: Props) {
     }
   };
 
+  // Allowed values for the currently-selected tag (from its nameOptions entry).
+  // Non-empty → the value field is a dropdown restricted to these values.
+  const allowedValues = nameOptions?.find((o) => o.value === newName)?.allowedValues ?? [];
+
+  // Selecting a different tag name clears the drafted value, so a value allowed
+  // by the previous tag can't be carried over to one that rejects it.
+  const pickName = (v: string) => { setNewName(v); setNewValue(""); };
+
   return (
     <tr>
       <td style={LABEL_TD}>Tags</td>
@@ -90,21 +107,49 @@ export default function TagsRow({ tags, onSetTag, onUnsetTag }: Props) {
             })}
           </div>
           <Space>
-            <Input
-              size="small"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Tag name"
-              style={{ width: 140 }}
-            />
-            <Input
-              size="small"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-              placeholder="Tag value"
-              style={{ width: 160 }}
-              onPressEnter={addTag}
-            />
+            {nameOptions ? (
+              <Select
+                size="small"
+                showSearch
+                allowClear
+                value={newName || undefined}
+                onChange={(v) => pickName(v ?? "")}
+                onSearch={(v) => pickName(v)}
+                placeholder="Tag name"
+                options={nameOptions}
+                filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                style={{ width: 200 }}
+              />
+            ) : (
+              <Input
+                size="small"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Tag name"
+                style={{ width: 140 }}
+              />
+            )}
+            {allowedValues.length > 0 ? (
+              <Select
+                size="small"
+                showSearch
+                placeholder="Tag value"
+                value={newValue || undefined}
+                onChange={(v) => setNewValue(v ?? "")}
+                options={allowedValues.map((v) => ({ value: v, label: v }))}
+                filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                style={{ width: 160 }}
+              />
+            ) : (
+              <Input
+                size="small"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder="Tag value"
+                style={{ width: 160 }}
+                onPressEnter={addTag}
+              />
+            )}
             <Button
               size="small"
               icon={<PlusOutlined />}

@@ -1,16 +1,71 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, Alert, message } from "antd";
-import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, message } from "antd";
+import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
+  SetUserPolicy, UnsetUserPolicy, SetUserTags, UnsetUserTags,
+  RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
+  ListAccountAuthenticationPolicies, ListAccountPasswordPolicies, ListAccountSessionPolicies,
+  ListSecurityIntegrations, ListAccountTags, GetUserTagReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
+import TagsRow, { type EditableTag } from "../shared/TagsRow";
+import { parseAllowedValues } from "../tag/allowedValues";
 import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";
 
 const { Text } = Typography;
+
+// quoteIdent double-quotes an identifier part, doubling embedded quotes — the
+// client-side mirror of snowflake.QuoteIdent, used to build the quoted FQN that
+// the ALTER USER builders parse back with exact case.
+const quoteIdent = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+// A dropdown option parsed from a SHOW … result. allowedValues is populated from
+// SHOW TAGS' allowed_values column (empty for policies, which have no such
+// column) — a non-empty list turns the tag value field into a whitelist dropdown.
+interface NameOption { value: string; label: string; allowedValues: string[] }
+
+// nameOptionsFromShow turns a SHOW … result (which shares the
+// name / database_name / schema_name columns across POLICIES and TAGS) into
+// dropdown options: the value is the quoted FQN (passed to the ALTER builders so
+// mixed-case names round-trip), the label the readable dotted name, and (for
+// tags) allowedValues parsed from the allowed_values column.
+function nameOptionsFromShow(res: snowflake.QueryResult | null): NameOption[] {
+  const cols = res?.columns ?? [];
+  const iName    = cols.indexOf("name");
+  const iDb      = cols.indexOf("database_name");
+  const iSc      = cols.indexOf("schema_name");
+  const iAllowed = cols.indexOf("allowed_values");
+  if (iName < 0) return [];
+  return (res?.rows ?? []).map((r) => {
+    const nm = String(r[iName]);
+    const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
+    const sc = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
+    const parts = [db, sc, nm].filter(Boolean);
+    const allowedValues = iAllowed >= 0 && r[iAllowed] != null ? parseAllowedValues(String(r[iAllowed])) : [];
+    return { value: parts.map(quoteIdent).join("."), label: parts.join("."), allowedValues };
+  });
+}
+
+// userTagsToEditable maps a GetUserTagReferences result (TAG_DATABASE /
+// TAG_SCHEMA / TAG_NAME / TAG_VALUE) into removable chips. The chip key is the
+// quoted FQN handed straight to UnsetUserTags.
+function userTagsToEditable(res: snowflake.QueryResult | null): EditableTag[] {
+  const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
+  const ci = (n: string) => cols.indexOf(n);
+  const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"), vlI = ci("tag_value");
+  if (nmI < 0) return [];
+  return (res?.rows ?? []).map((row): EditableTag => {
+    const tdb = dbI >= 0 && row[dbI] != null ? String(row[dbI]) : "";
+    const tsc = scI >= 0 && row[scI] != null ? String(row[scI]) : "";
+    const tnm = String(row[nmI] ?? "");
+    const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+    return { key: qualified, name: tnm, value: vlI >= 0 && row[vlI] != null ? String(row[vlI]) : "", removable: true };
+  });
+}
 
 // ─── Helper: RSA public-key slot row ─────────────────────────────────────────
 
@@ -153,6 +208,229 @@ function PasswordRow({ onSave, search }: { onSave: (val: string) => Promise<void
   );
 }
 
+// ─── Helper: access-policy row ───────────────────────────────────────────────
+
+/**
+ * One row per attachable policy kind (Authentication / Password / Session). The
+ * policy is picked from a searchable dropdown of every policy of that kind in the
+ * account (`ListAccount*Policies`); the option value is the quoted FQN passed to
+ * SetUserPolicy. A FORCE toggle detaches any same-kind policy already attached.
+ * Assignments aren't reported by SHOW USERS, so there's no current-value display.
+ * Routes through SetUserPolicy / UnsetUserPolicy → users.BuildSet/UnsetPolicySQL.
+ */
+function PolicyRow({
+  name, label, kind, options, onReload, search,
+}: {
+  name: string;
+  label: string;
+  kind: "AUTHENTICATION" | "PASSWORD" | "SESSION";
+  options: { value: string; label: string }[];
+  onReload: () => Promise<void>;
+  search?: string;
+}) {
+  const [val, setVal]     = useState("");
+  const [force, setForce] = useState(false);
+  const [busy, setBusy]   = useState(false);
+  if (search && !`${label} policy`.toLowerCase().includes(search.toLowerCase())) return null;
+
+  const set = async () => {
+    setBusy(true);
+    try {
+      await SetUserPolicy(name, kind, val, force);
+      message.success(`${label} policy set on ${name}`);
+      setVal("");
+      await onReload();
+    } catch (e) {
+      message.error(friendlyError(e), 6);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unset = () => {
+    Modal.confirm({
+      title: `Unset ${label.toLowerCase()} policy on ${name}?`,
+      content: "This detaches the policy currently attached to the user, if any.",
+      okText: "Unset",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await UnsetUserPolicy(name, kind);
+          message.success(`${label} policy unset on ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        }
+      },
+    });
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>{label} policy</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <Select
+            size="small"
+            showSearch
+            allowClear
+            value={val || undefined}
+            onChange={(v) => setVal(v ?? "")}
+            placeholder={options.length ? "select policy…" : "no policies visible"}
+            options={options}
+            filterOption={(input, opt) => (opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+            style={{ minWidth: 220 }}
+          />
+          <Checkbox checked={force} onChange={(e) => setForce(e.target.checked)} style={{ fontSize: 12 }}>
+            FORCE
+          </Checkbox>
+          <Button size="small" type="primary" icon={<CheckOutlined />} loading={busy} disabled={!val.trim()} onClick={set}>
+            Set
+          </Button>
+          <Button size="small" danger onClick={unset}>Unset</Button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Helper: MFA method removal row ──────────────────────────────────────────
+
+const MFA_METHODS = ["TOTP", "PASSKEY", "DUO"] as const;
+
+/**
+ * Removes one enrolled MFA method (`ALTER USER … REMOVE MFA METHOD <method>`) so
+ * the user can re-enroll. Bypass windows are still set via MINS_TO_BYPASS_MFA in
+ * the Security section; this is the destructive per-method removal.
+ */
+function MfaRemoveRow({ name, onReload, search }: { name: string; onReload: () => Promise<void>; search?: string }) {
+  const [busy, setBusy] = useState<string>("");
+  if (search && !"remove mfa method".includes(search.toLowerCase())) return null;
+
+  const remove = (method: string) => {
+    Modal.confirm({
+      title: `Remove ${method} MFA method from ${name}?`,
+      content: "The user loses this factor and must re-enroll it.",
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(method);
+        try {
+          await RemoveUserMfaMethod(name, method);
+          message.success(`Removed ${method} from ${name}`);
+          await onReload();
+        } catch (e) {
+          message.error(friendlyError(e), 6);
+        } finally {
+          setBusy("");
+        }
+      },
+    });
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>Remove MFA method</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+        <Space size={4} wrap>
+          {MFA_METHODS.map((mth) => (
+            <Button key={mth} size="small" danger loading={busy === mth} onClick={() => remove(mth)}>
+              {mth}
+            </Button>
+          ))}
+        </Space>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Helper: delegated-authorization rows ────────────────────────────────────
+
+/**
+ * Manages delegated authorizations that let a security integration act on the
+ * user's behalf for a role. Add attaches ROLE→INTEGRATION; Remove detaches one
+ * role (or, with the role left blank, every delegated authorization for the
+ * integration). Routes through Add/RemoveUserDelegatedAuth →
+ * users.Build{Add,Remove}DelegatedAuthSQL.
+ */
+function DelegatedAuthRows({ name, roleOptions, integrationOptions, onReload, search }: {
+  name: string;
+  roleOptions: string[];
+  integrationOptions: string[];
+  onReload: () => Promise<void>;
+  search?: string;
+}) {
+  const [role, setRole]       = useState("");
+  const [integration, setInt] = useState("");
+  const [busy, setBusy]       = useState<string>("");
+  if (search && !"delegated authorization role security integration".includes(search.toLowerCase())) return null;
+
+  const add = async () => {
+    setBusy("add");
+    try {
+      await AddUserDelegatedAuth(name, role, integration);
+      message.success(`Delegated authorization added for ${name}`);
+      await onReload();
+    } catch (e) {
+      message.error(friendlyError(e), 6);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = async () => {
+    setBusy("remove");
+    try {
+      await RemoveUserDelegatedAuth(name, role, integration);
+      message.success(`Delegated authorization removed for ${name}`);
+      await onReload();
+    } catch (e) {
+      message.error(friendlyError(e), 6);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const roleOpts = roleOptions.map((r) => ({ value: r, label: r }));
+  const intOpts  = integrationOptions.map((i) => ({ value: i, label: i }));
+  const filterByLabel = (input: string, opt?: { label?: string }) =>
+    (opt?.label ?? "").toLowerCase().includes(input.toLowerCase());
+
+  return (
+    <>
+      <tr>
+        <td style={LABEL_TD}>Role</td>
+        <td style={{ padding: "6px 0" }}>
+          <Select
+            size="small" showSearch allowClear value={role || undefined}
+            onChange={(v) => setRole(v ?? "")} options={roleOpts} filterOption={filterByLabel}
+            placeholder="role (leave empty to remove all)" style={{ minWidth: 260 }}
+          />
+        </td>
+      </tr>
+      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+        <td style={LABEL_TD}>Security integration</td>
+        <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <Select
+              size="small" showSearch allowClear value={integration || undefined}
+              onChange={(v) => setInt(v ?? "")} options={intOpts} filterOption={filterByLabel}
+              placeholder={intOpts.length ? "select integration…" : "no integrations visible"}
+              style={{ minWidth: 200 }}
+            />
+            <Button size="small" type="primary" loading={busy === "add"} disabled={!role.trim() || !integration.trim()} onClick={add}>
+              Add
+            </Button>
+            <Button size="small" danger loading={busy === "remove"} disabled={!integration.trim()} onClick={remove}>
+              Remove
+            </Button>
+          </div>
+        </td>
+      </tr>
+    </>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -176,6 +454,26 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   const [dsr, setDsr]             = useState("");
   // Which RSA public-key slot's KeyPairAuthModal is open (null = none).
   const [keyModal, setKeyModal]   = useState<KeySlot | null>(null);
+  // Picker lists for the policy / delegated-auth / tag dropdowns and the current
+  // user-tag chips — all best-effort (empty on failure; the actions still work).
+  const [roleNames, setRoleNames]       = useState<string[]>([]);
+  const [integrationNames, setIntNames] = useState<string[]>([]);
+  const [authPolicyOpts, setAuthPolicyOpts]       = useState<{ value: string; label: string }[]>([]);
+  const [pwPolicyOpts, setPwPolicyOpts]           = useState<{ value: string; label: string }[]>([]);
+  const [sessionPolicyOpts, setSessionPolicyOpts] = useState<{ value: string; label: string }[]>([]);
+  const [tagNameOpts, setTagNameOpts]   = useState<NameOption[]>([]);
+  const [userTags, setUserTags]         = useState<EditableTag[]>([]);
+
+  // Reload the tags currently applied to the user (removable chips). Best-effort:
+  // account-level TAG_REFERENCES needs a current database, so this may return
+  // nothing — SET/UNSET still work regardless.
+  const reloadTags = useCallback(async () => {
+    try {
+      setUserTags(userTagsToEditable(await GetUserTagReferences(name)));
+    } catch {
+      setUserTags([]);
+    }
+  }, [name]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -199,6 +497,17 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
   }, [name]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { reloadTags(); }, [reloadTags]);
+  // Populate the picker lists once per open — all best-effort.
+  useEffect(() => {
+    ListRoles().then((r) => setRoleNames(r ?? [])).catch(() => setRoleNames([]));
+    ListSecurityIntegrations()
+      .then((i) => setIntNames((i ?? []).map((x) => x.name))).catch(() => setIntNames([]));
+    ListAccountAuthenticationPolicies().then((r) => setAuthPolicyOpts(nameOptionsFromShow(r))).catch(() => setAuthPolicyOpts([]));
+    ListAccountPasswordPolicies().then((r) => setPwPolicyOpts(nameOptionsFromShow(r))).catch(() => setPwPolicyOpts([]));
+    ListAccountSessionPolicies().then((r) => setSessionPolicyOpts(nameOptionsFromShow(r))).catch(() => setSessionPolicyOpts([]));
+    ListAccountTags().then((r) => setTagNameOpts(nameOptionsFromShow(r))).catch(() => setTagNameOpts([]));
+  }, [name]);
 
   // Lazy option loaders for the warehouse/role dropdowns — fetched by EditRow
   // the first time the row enters edit mode, not on every modal open.
@@ -328,6 +637,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <EditRow label="Mins to unlock"     value={numVal("MINS_TO_UNLOCK")}     type="number" allowEmpty search={search} hint="Clear to reset"               onSave={save("minsToUnlock")} />
             <EditRow label="Mins to bypass MFA" value={numVal("MINS_TO_BYPASS_MFA")} type="number" allowEmpty search={search} hint="Requires MFA enrolment; clear to reset" onSave={save("minsToBypassMfa")} />
             <PasswordRow search={search} onSave={async (v) => { await AlterUserProperty(name, "password", v); await load(); }} />
+            <MfaRemoveRow name={name} onReload={load} search={search} />
           </tbody></table>
 
           <div style={SECTION_HEAD}>Key pair authentication</div>
@@ -354,6 +664,47 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
               degraded={m["__DESCRIBE_DEGRADED__"] === "1"}
               onReload={load} onOpen={() => setKeyModal("RSA_PUBLIC_KEY_2")}
             />
+          </tbody></table>
+
+          <div style={SECTION_HEAD}><Space size={6}><SafetyOutlined />Access policies</Space></div>
+          {!search && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+              Attach an authentication, password, or session policy. Use <b>FORCE</b> to replace a
+              same-kind policy already attached. Current assignments aren't shown here (SHOW USERS
+              omits them) — inspect with <code>DESCRIBE USER</code> or <code>POLICY_REFERENCES</code>.
+            </div>
+          )}
+          <table style={tableStyle}><tbody>
+            <PolicyRow name={name} label="Authentication" kind="AUTHENTICATION" options={authPolicyOpts}    onReload={load} search={search} />
+            <PolicyRow name={name} label="Password"       kind="PASSWORD"       options={pwPolicyOpts}      onReload={load} search={search} />
+            <PolicyRow name={name} label="Session"        kind="SESSION"        options={sessionPolicyOpts} onReload={load} search={search} />
+          </tbody></table>
+
+          {(!search || "tags".includes(search.toLowerCase())) && (
+            <>
+              <div style={SECTION_HEAD}><Space size={6}><TagsOutlined />Tags</Space></div>
+              {/* Shared object-store tag editor: current tags render as chips you
+                  click to remove; the name field is a dropdown of account tags. */}
+              <table style={tableStyle}><tbody>
+                <TagsRow
+                  tags={userTags}
+                  nameOptions={tagNameOpts}
+                  onSetTag={async (tagName, tagValue) => { await SetUserTags(name, [{ name: tagName, value: tagValue }]); await reloadTags(); }}
+                  onUnsetTag={async (key) => { await UnsetUserTags(name, [key]); await reloadTags(); }}
+                />
+              </tbody></table>
+            </>
+          )}
+
+          <div style={SECTION_HEAD}><Space size={6}><ApiOutlined />Delegated authorization</Space></div>
+          {!search && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, lineHeight: 1.5 }}>
+              Let a security integration act on the user's behalf for a role. Leave the role blank
+              and click <b>Remove</b> to detach every delegated authorization for the integration.
+            </div>
+          )}
+          <table style={tableStyle}><tbody>
+            <DelegatedAuthRows name={name} roleOptions={roleNames} integrationOptions={integrationNames} onReload={load} search={search} />
           </tbody></table>
 
           <div style={SECTION_HEAD}>Info</div>
