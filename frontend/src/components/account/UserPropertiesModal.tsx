@@ -348,7 +348,11 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <InfoRow label="Created on"         value={val("CREATED_ON")}         search={search} />
             <InfoRow label="Last success login" value={val("LAST_SUCCESS_LOGIN")} search={search} />
             <InfoRow label="Has password"       value={val("HAS_PASSWORD")}       search={search} />
-            {/* RSA public keys are managed above under Key pair authentication. */}
+            {/* RSA slots are set/removed above; this SHOW USERS boolean is kept
+                because it survives DESCRIBE-degraded mode (when the per-slot
+                fingerprints read "unknown"), so a lower-privileged admin can
+                still tell whether any key is set. */}
+            <InfoRow label="Has RSA public key" value={val("HAS_RSA_PUBLIC_KEY")} search={search} />
             {/* Read-only: MFA is managed via Mins to bypass MFA above or
                 ALTER USER … REMOVE MFA METHOD in the SQL editor. */}
             <InfoRow label="MFA (Duo)" value={val("EXT_AUTHN_DUO")} search={search} />

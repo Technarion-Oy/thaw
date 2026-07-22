@@ -18,6 +18,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { keypair } from "../../../wailsjs/go/models";
 import { friendlyError } from "../common/PropertyRows";
+import { stripPem } from "./keyPairUtils";
 
 const { Text } = Typography;
 
@@ -40,20 +41,6 @@ export const SLOT_PROPERTY: Record<KeySlot, string> = {
   RSA_PUBLIC_KEY:   "rsaPublicKey",
   RSA_PUBLIC_KEY_2: "rsaPublicKey2",
 };
-
-/**
- * stripPem reduces a pasted public key to the bare base64 payload Snowflake
- * expects: it drops the -----BEGIN/-----END----- lines and all whitespace, so an
- * admin can paste either a full PEM file received from a user or an
- * already-stripped key.
- */
-function stripPem(s: string): string {
-  return s
-    .split(/\r?\n/)
-    .filter((l) => !l.trim().startsWith("-----"))
-    .join("")
-    .replace(/\s+/g, "");
-}
 
 interface Props {
   /** When set, the modal is in "apply to existing user" mode. */

@@ -62,8 +62,12 @@ func TestBuildAlterUserPropertySQL(t *testing.T) {
 		{"rsaPublicKey2", "", `ALTER USER "ALICE" UNSET RSA_PUBLIC_KEY_2`, false},
 		// whitespace/newlines inside a pasted key are stripped
 		{"rsaPublicKey", "MIIBIjAN\n  BgkqhkiG\n", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIBIjANBgkqhkiG'`, false},
-		// single-quote doubling (base64 never contains one, but the escape must hold)
-		{"rsaPublicKey", "MIIB'key", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIB''key'`, false},
+		// trailing base64 padding is allowed
+		{"rsaPublicKey", "MIIBIjAN==", `ALTER USER "ALICE" SET RSA_PUBLIC_KEY = 'MIIBIjAN=='`, false},
+		// non-base64 characters are rejected — the value is fed by a free-form
+		// paste UI, so a quote/backslash must never reach the SQL literal
+		{"rsaPublicKey", "MIIB'key", "", true},
+		{"rsaPublicKey", `abc\',DISABLED=FALSE,COMMENT='pwned`, "", true},
 		// full-PEM input is rejected — the -----BEGIN/-----END lines would break the literal
 		{"rsaPublicKey", "-----BEGIN PUBLIC KEY-----\nMIIBIjAN\n-----END PUBLIC KEY-----", "", true},
 		{"rsaPublicKey2", "-----BEGIN PUBLIC KEY-----\nMIIBIjAN\n-----END PUBLIC KEY-----", "", true},

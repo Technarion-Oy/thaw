@@ -875,7 +875,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - Key generation offers three methods: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); only tools present on PATH are shown. Set the private key output path (type or browse); the public key is saved alongside with `_pub.pem` appended and the private key written with mode `0600`
   - All key registration runs through one tested SQL builder (`ALTER USER … SET/UNSET RSA_PUBLIC_KEY[_2]`) with full-PEM input rejected so a pasted PEM file can't produce broken SQL
   - User management actions are always offered; if the current role lacks the privilege, the Snowflake error surfaces instead of the action being pre-disabled
-- **Key pair auth in Create User** — the **Create User** dialog includes an **RSA public key** field and a **Generate key pair…** button; clicking the button opens the key pair generator in "pick" mode so you can generate a key pair and auto-fill the public key without leaving the create flow
+- **Key pair auth in Create User** — the **Create User** dialog includes an **RSA public key** field and a **Generate key pair…** button; clicking the button opens the key pair dialog in "pick" mode where you can either generate a key pair or **paste an existing public key**, auto-filling the field without leaving the create flow
 
 ---
 
