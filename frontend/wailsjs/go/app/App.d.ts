@@ -1109,8 +1109,6 @@ export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise
 
 export function SetSessionVariable(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function SetUserPublicKey(arg1:string,arg2:string):Promise<void>;
-
 export function StartDapProxy():Promise<void>;
 
 export function StartFileWatcher(arg1:string):Promise<void>;

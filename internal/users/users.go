@@ -5,16 +5,25 @@ package users
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"thaw/internal/snowflake"
 )
 
+// rsaKeyPattern matches a stripped RSA public key: standard base64 (the
+// character set Snowflake's RSA_PUBLIC_KEY expects), one or more base64 chars
+// followed by optional `=` padding. It deliberately excludes `'` and `\`, so a
+// value that passes is always safe inside a single-quoted SQL literal — this is
+// the input-shape gate that lets asRSAKey quote without a backslash-escape hazard.
+var rsaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9+/]+=*$`)
+
 // BuildAlterUserPropertySQL builds an ALTER USER ... SET / UNSET statement for a
 // single property. property must be one of: loginName, displayName, firstName,
 // middleName, lastName, email, comment, password, defaultWarehouse, defaultRole,
 // defaultNamespace, networkPolicy, defaultSecondaryRoles, type, daysToExpiry,
-// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword.
+// minsToUnlock, minsToBypassMfa, disabled, mustChangePassword, rsaPublicKey,
+// rsaPublicKey2.
 //
 // An empty value UNSETs the property (resetting it to its default) for every
 // property except the booleans (which require TRUE/FALSE) and password (which
@@ -50,6 +59,27 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 	asString := func(v string) (string, error) { return snowflake.QuoteTextLit(v), nil }
 	asIdent := func(v string) (string, error) { return snowflake.QuoteIdent(v), nil }
 	asInt := func(v string) (string, error) { return validateInt(v) }
+	// rsaPublicKey / rsaPublicKey2 register an RSA public key for key-pair auth.
+	// The value is the stripped base64 payload (no PEM header/footer). All
+	// whitespace and newlines are stripped first so a copy-pasted multi-line key
+	// works, then the result must match rsaKeyPattern — a strict base64 charset
+	// that excludes `'` and `\`. Validating the shape up front (rather than
+	// trusting "base64 has no backslashes") is what makes QuoteStringLit safe
+	// here even though this field is fed by a free-form paste UI: any value that
+	// survives the gate cannot break out of the single-quoted literal. A full
+	// PEM (its -----BEGIN/-----END----- lines) fails the charset check; it gets a
+	// dedicated message since pasting a whole PEM file is the common mistake.
+	// Empty input never reaches here — setOrUnset routes empty values to UNSET.
+	asRSAKey := func(v string) (string, error) {
+		stripped := strings.Join(strings.Fields(v), "")
+		if strings.Contains(stripped, "-----") {
+			return "", fmt.Errorf("RSA public key must be stripped PEM base64 — remove the -----BEGIN/-----END lines")
+		}
+		if !rsaKeyPattern.MatchString(stripped) {
+			return "", fmt.Errorf("RSA public key must be base64 (A-Z, a-z, 0-9, +, /, =)")
+		}
+		return snowflake.QuoteStringLit(stripped), nil
+	}
 
 	stringProps := map[string]string{
 		"loginName":   "LOGIN_NAME",
@@ -79,9 +109,16 @@ func BuildAlterUserPropertySQL(name, property, value string) (string, error) {
 		"disabled":           "DISABLED",
 		"mustChangePassword": "MUST_CHANGE_PASSWORD",
 	}
+	rsaKeyProps := map[string]string{
+		"rsaPublicKey":  "RSA_PUBLIC_KEY",
+		"rsaPublicKey2": "RSA_PUBLIC_KEY_2",
+	}
 
 	if key, ok := stringProps[property]; ok {
 		return setOrUnset(key, asString)
+	}
+	if key, ok := rsaKeyProps[property]; ok {
+		return setOrUnset(key, asRSAKey)
 	}
 	if key, ok := identProps[property]; ok {
 		return setOrUnset(key, asIdent)

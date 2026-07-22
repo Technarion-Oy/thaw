@@ -49,16 +49,10 @@ func (a *App) CheckAvailableKeyTools() []string {
 
 // GenerateKeyPair generates an RSA-2048 key pair using the specified method
 // ("go", "openssl", or "ssh-keygen").
+//
+// Registering the generated public key with a user goes through
+// AlterUserProperty(name, "rsaPublicKey"|"rsaPublicKey2", value) — one tested SQL
+// builder in internal/users — so there is no separate set-public-key IPC.
 func (a *App) GenerateKeyPair(method, privateKeyPath, passphrase string) (keypair.KeyPairResult, error) {
 	return keypair.GenerateKeyPair(method, privateKeyPath, passphrase)
-}
-
-// SetUserPublicKey applies an RSA public key to a Snowflake user.
-func (a *App) SetUserPublicKey(username, publicKey string) error {
-	client := a.currentClient()
-	if client == nil {
-		return apperrors.ErrNotConnected
-	}
-	_, err := client.Execute(a.fctx(FeatureUsersRoles), keypair.BuildSetUserPublicKeySQL(username, publicKey))
-	return err
 }

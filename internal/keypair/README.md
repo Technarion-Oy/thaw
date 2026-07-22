@@ -1,25 +1,30 @@
 # internal/keypair
 
-> RSA-2048 key-pair generation (Go crypto, openssl, or ssh-keygen) and ALTER USER RSA_PUBLIC_KEY SQL builder for Snowflake key-pair authentication.
+> RSA-2048 key-pair generation (Go crypto, openssl, or ssh-keygen) for Snowflake key-pair authentication.
 
 ## Responsibility
 
-Generates an RSA-2048 key pair using one of three selectable methods, writes the
-private and public key files to disk, and returns a `KeyPairResult` containing
-the file paths plus the public key payload stripped of PEM headers — the exact
-format required by Snowflake's `ALTER USER ... SET RSA_PUBLIC_KEY = '...'`.
+Local key *generation* only. Generates an RSA-2048 key pair using one of three
+selectable methods, writes the private and public key files to disk, and returns
+a `KeyPairResult` containing the file paths plus the public key payload stripped
+of PEM headers — the exact format required by Snowflake's
+`ALTER USER ... SET RSA_PUBLIC_KEY = '...'`.
 
-Also provides `BuildSetUserPublicKeySQL` to construct that `ALTER USER` statement
-and `CheckAvailableKeyTools` to discover which generation methods are available on
-the current system.
+Also provides `CheckAvailableKeyTools` to discover which generation methods are
+available on the current system.
+
+Registration SQL lives elsewhere: the `ALTER USER ... SET/UNSET RSA_PUBLIC_KEY[_2]`
+statement is built by `internal/users.BuildAlterUserPropertySQL` (properties
+`rsaPublicKey` / `rsaPublicKey2`), so there is exactly one SQL builder for it and
+this package keeps a single responsibility.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
 | `doc.go` | Package doc + `thaw:domain` annotation (Object Browser & Administration) |
-| `keypair.go` | `KeyPairResult`, `CheckAvailableKeyTools`, `GenerateKeyPair`, three private generators, `BuildSetUserPublicKeySQL`, `stripPEMContent` |
-| `keypair_test.go` | Unit tests for key generation and SQL builder |
+| `keypair.go` | `KeyPairResult`, `CheckAvailableKeyTools`, `GenerateKeyPair`, three private generators, `stripPEMContent` |
+| `keypair_test.go` | Unit tests for key generation |
 
 ## Key types & functions
 
@@ -53,12 +58,6 @@ All generators:
 - Write the private key with `0600` permissions.
 - Write the public key as `<privateKeyPath_without_ext>_pub.pem` with `0644`.
 
-### `BuildSetUserPublicKeySQL(username, publicKey string) string`
-Returns `ALTER USER "<username>" SET RSA_PUBLIC_KEY='<publicKey>'`.
-- Username is double-quote-escaped.
-- `publicKey` should be the bare base64 string from `KeyPairResult.PublicKey`
-  (PEM headers already stripped).
-
 ### `stripPEMContent(pemStr string) string`
 Removes `-----BEGIN/END ...-----` header/footer lines and blank lines from a PEM
 string, returning the concatenated base64 payload as a single string.
@@ -66,15 +65,15 @@ string, returning the concatenated base64 payload as a single string.
 ## Patterns & integration (thin-delegator)
 
 ```go
-// internal/app/keypair.go (illustrative)
+// internal/app/users.go (illustrative)
 func (a *App) GenerateKeyPair(method, path, passphrase string) (keypair.KeyPairResult, error) {
     return keypair.GenerateKeyPair(method, path, passphrase)
 }
-
-func (a *App) BuildSetUserPublicKeySQL(username, publicKey string) string {
-    return keypair.BuildSetUserPublicKeySQL(username, publicKey)
-}
 ```
+
+Registering the generated (or pasted) public key with a user is not a keypair
+IPC — the frontend calls `AlterUserProperty(name, "rsaPublicKey"|"rsaPublicKey2",
+value)`, which routes to `internal/users.BuildAlterUserPropertySQL`.
 
 `GenerateKeyPair` does not require a live Snowflake connection. It only touches
 the local filesystem and (for `openssl`/`ssh-keygen`) spawns subprocess. The

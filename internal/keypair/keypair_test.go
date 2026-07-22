@@ -10,14 +10,6 @@ import (
 	"testing"
 )
 
-func TestBuildSetUserPublicKeySQL(t *testing.T) {
-	sql := BuildSetUserPublicKeySQL(`O"Brien`, "MIIB'key")
-	want := `ALTER USER "O""Brien" SET RSA_PUBLIC_KEY='MIIB''key'`
-	if sql != want {
-		t.Errorf("got %q, want %q", sql, want)
-	}
-}
-
 func TestCheckAvailableKeyToolsAlwaysHasGo(t *testing.T) {
 	tools := CheckAvailableKeyTools()
 	if !slices.Contains(tools, "go") {
