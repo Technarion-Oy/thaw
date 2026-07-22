@@ -51,7 +51,7 @@ func TestBuildQueryHistorySQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql := buildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true)
+			sql := buildQueryHistorySql(tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, true, QueryHistoryFilters{})
 			if !strings.Contains(sql, tt.wantFunc) {
 				t.Errorf("expected func %q in SQL:\n%s", tt.wantFunc, sql)
 			}
@@ -92,19 +92,19 @@ func TestBuildQueryHistorySQLSessionInjection(t *testing.T) {
 					t.Errorf("session id %q must panic, not be embedded", sid)
 				}
 			}()
-			buildQueryHistorySql("session", sid, "", "", "", "", 100, false)
+			buildQueryHistorySql("session", sid, "", "", "", "", 100, false, QueryHistoryFilters{})
 		}()
 	}
 
 	// A clean numeric id is embedded as-is.
-	sql := buildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false)
+	sql := buildQueryHistorySql("session", "1234567890", "", "", "", "", 100, false, QueryHistoryFilters{})
 	if !strings.Contains(sql, "SESSION_ID => 1234567890") {
 		t.Errorf("expected numeric SESSION_ID argument:\n%s", sql)
 	}
 }
 
 func TestBuildQueryHistorySQLTimeRange(t *testing.T) {
-	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 50, false, QueryHistoryFilters{})
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01T00:00:00Z'::TIMESTAMP_LTZ") {
 		t.Errorf("missing range start in SQL:\n%s", sql)
 	}
@@ -121,7 +121,7 @@ func TestBuildQueryHistorySQLTimeRange(t *testing.T) {
 // embedded verbatim (which would break out of the literal). A clean RFC3339
 // string can't distinguish QuoteStringLit from a bare '%s', so use a quote here.
 func TestBuildQueryHistorySQLTimeRangeQuoting(t *testing.T) {
-	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01'T00:00:00Z", "2026-01-02T00:00:00Z", 50, false)
+	sql := buildQueryHistorySql("all", "", "", "", "2026-01-01'T00:00:00Z", "2026-01-02T00:00:00Z", 50, false, QueryHistoryFilters{})
 	if !strings.Contains(sql, "END_TIME_RANGE_START => '2026-01-01''T00:00:00Z'::TIMESTAMP_LTZ") {
 		t.Errorf("single-quote in start timestamp must be doubled by QuoteStringLit:\n%s", sql)
 	}
@@ -149,7 +149,7 @@ func TestGetQueryHistoryValidationGuards(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// nil client is safe: every guard returns before the client is used.
-			_, err := GetQueryHistory(context.Background(), nil, tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, false)
+			_, err := GetQueryHistory(context.Background(), nil, tt.filterType, tt.sessionID, tt.userName, tt.warehouse, "", "", 100, false, QueryHistoryFilters{})
 			if err == nil {
 				t.Fatalf("expected an error, got nil")
 			}
@@ -157,6 +157,95 @@ func TestGetQueryHistoryValidationGuards(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestBuildQueryHistorySQLFilters exercises the WHERE-clause filters: status and
+// type IN-lists (case-insensitive, uppercased), the duration threshold, and the
+// database/schema equality predicates. It also asserts the limit re-application:
+// with a filter active the table function fetches the full window and the user's
+// limit becomes an outer LIMIT.
+func TestBuildQueryHistorySQLFilters(t *testing.T) {
+	filters := QueryHistoryFilters{
+		Statuses:      []string{"success", "FAIL"},
+		QueryTypes:    []string{"select"},
+		MinDurationMs: 5000,
+		Database:      "my_db",
+		Schema:        "public",
+	}
+	sql := buildQueryHistorySql("all", "", "", "", "", "", 100, false, filters)
+
+	wantContains := []string{
+		"WHERE ",
+		"UPPER(EXECUTION_STATUS) IN ('SUCCESS', 'FAIL')",
+		"UPPER(QUERY_TYPE) IN ('SELECT')",
+		"TOTAL_ELAPSED_TIME >= 5000",
+		"UPPER(DATABASE_NAME) = UPPER('my_db')",
+		"UPPER(SCHEMA_NAME) = UPPER('public')",
+		// The user's limit (100) is smaller than maxResultLimit, so the function
+		// fetches the full window and the limit is re-applied afterwards.
+		"RESULT_LIMIT => 10000",
+		"LIMIT 100",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(sql, want) {
+			t.Errorf("expected %q in SQL:\n%s", want, sql)
+		}
+	}
+	// The user's limit must be re-applied only as an outer LIMIT, never handed to
+	// the table function (which would filter an already-truncated page).
+	if strings.Contains(sql, "RESULT_LIMIT => 100)") {
+		t.Errorf("user limit should not be passed to the table function when filters are active:\n%s", sql)
+	}
+}
+
+// TestBuildQueryHistorySQLNoFilters confirms the unfiltered path is unchanged: no
+// WHERE clause, no outer LIMIT, and the user's limit goes straight to the table
+// function.
+func TestBuildQueryHistorySQLNoFilters(t *testing.T) {
+	sql := buildQueryHistorySql("all", "", "", "", "", "", 100, false, QueryHistoryFilters{})
+	if strings.Contains(sql, "WHERE ") {
+		t.Errorf("did not expect a WHERE clause without filters:\n%s", sql)
+	}
+	if strings.Contains(sql, "\nLIMIT ") {
+		t.Errorf("did not expect an outer LIMIT without filters:\n%s", sql)
+	}
+	if !strings.Contains(sql, "RESULT_LIMIT => 100") {
+		t.Errorf("expected the user limit passed to the table function:\n%s", sql)
+	}
+}
+
+// TestBuildQueryHistorySQLFilterEscaping guards against injection through the
+// string-valued filters: values are escaped by snowflake.QuoteStringLit and
+// uppercased for the case-insensitive IN-lists.
+func TestBuildQueryHistorySQLFilterEscaping(t *testing.T) {
+	filters := QueryHistoryFilters{
+		Statuses: []string{"a') OR ('1'='1"},
+		Database: "db') OR ('1'='1",
+	}
+	sql := buildQueryHistorySql("all", "", "", "", "", "", 100, false, filters)
+	if !strings.Contains(sql, "UPPER(EXECUTION_STATUS) IN ('A'') OR (''1''=''1')") {
+		t.Errorf("status literal must be escaped and uppercased:\n%s", sql)
+	}
+	if !strings.Contains(sql, "UPPER(DATABASE_NAME) = UPPER('db'') OR (''1''=''1')") {
+		t.Errorf("database literal must be escaped:\n%s", sql)
+	}
+}
+
+// TestBuildQueryHistorySQLBlankFilterValues verifies that all-blank filter slices
+// and whitespace-only strings add no predicate (so an accidental empty multi-select
+// does not emit an empty IN-list or a spurious WHERE).
+func TestBuildQueryHistorySQLBlankFilterValues(t *testing.T) {
+	filters := QueryHistoryFilters{
+		Statuses:      []string{"", "   "},
+		QueryTypes:    []string{},
+		MinDurationMs: 0,
+		Database:      "   ",
+		Schema:        "",
+	}
+	sql := buildQueryHistorySql("all", "", "", "", "", "", 100, false, filters)
+	if strings.Contains(sql, "WHERE ") {
+		t.Errorf("blank filter values must not produce a WHERE clause:\n%s", sql)
 	}
 }
 

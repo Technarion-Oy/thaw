@@ -51,6 +51,18 @@ function isValidSessionId(s: string): boolean {
 // bounds are evaluated when the range is applied, not at module load.
 const todayRange = (): [Dayjs, Dayjs] => [dayjs().startOf("day"), dayjs().endOf("day")];
 
+// Curated option lists for the status / query-type multi-selects. These are the
+// common EXECUTION_STATUS / QUERY_TYPE values; the actual option lists are the
+// union of these and any distinct values present in the current result set (so a
+// value we didn't anticipate still shows up once it's been fetched). Both selects
+// also allow free-typed values (Snowflake matches them case-insensitively).
+const KNOWN_STATUSES = ["SUCCESS", "FAIL", "RUNNING", "QUEUED", "BLOCKED", "INCIDENT"];
+const KNOWN_QUERY_TYPES = [
+  "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP", "ALTER",
+  "SHOW", "DESCRIBE", "USE", "GRANT", "REVOKE", "CALL", "COPY", "PUT", "GET",
+  "BEGIN_TRANSACTION", "COMMIT", "ROLLBACK", "UNKNOWN",
+];
+
 interface Props {
   onClose: () => void;
 }
@@ -77,6 +89,14 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(todayRange);
   const [resultLimit,     setResultLimit]     = useState(100);
   const [includeClientGen, setIncludeClientGen] = useState(false);
+  // Server-side WHERE-clause filters (issue #827). These compose with the scope
+  // + time range above and with the client-side query-text search below. Empty
+  // values add no predicate. Duration is captured in seconds and converted to ms.
+  const [statuses,        setStatuses]        = useState<string[]>([]);
+  const [queryTypes,      setQueryTypes]      = useState<string[]>([]);
+  const [minDurationSec,  setMinDurationSec]  = useState<number | null>(null);
+  const [databaseFilter,  setDatabaseFilter]  = useState("");
+  const [schemaFilter,    setSchemaFilter]    = useState("");
   const [rows,            setRows]            = useState<queryhistory.QueryHistoryRow[] | null>(null);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState<string | null>(null);
@@ -116,6 +136,16 @@ export default function QueryHistoryModal({ onClose }: Props) {
     try {
       const start = range ? range[0].toISOString() : "";
       const end   = range ? range[1].toISOString() : "";
+      // Read the extra filters from current state — they aren't part of the
+      // drill-down overrides, so like resultLimit/includeClientGen they're taken
+      // straight from the latest render (runQueryRef keeps the auto-run fresh).
+      const filters: queryhistory.QueryHistoryFilters = {
+        statuses,
+        queryTypes,
+        minDurationMs: minDurationSec && minDurationSec > 0 ? Math.round(minDurationSec * 1000) : 0,
+        database: databaseFilter.trim(),
+        schema: schemaFilter.trim(),
+      };
       const data = await GetQueryHistory(
         ft,
         sid,
@@ -125,6 +155,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
         end,
         resultLimit,
         includeClientGen,
+        filters,
       );
       setRows(data ?? []);
     } catch (e) {
@@ -288,6 +319,29 @@ export default function QueryHistoryModal({ onClose }: Props) {
         ? rows.filter((r) => r.queryText.toLowerCase().includes(querySearch.toLowerCase()))
         : rows)
     : null;
+
+  // Option lists for the status / query-type multi-selects: the curated set
+  // merged with any distinct values in the current result set, so a fetched value
+  // we didn't hard-code still becomes selectable.
+  const optionList = (known: string[], get: (r: queryhistory.QueryHistoryRow) => string) => {
+    const seen = new Set(known);
+    for (const r of rows ?? []) {
+      const v = get(r);
+      if (v) seen.add(v);
+    }
+    return Array.from(seen).map((v) => ({ value: v, label: v }));
+  };
+  const statusOptions = optionList(KNOWN_STATUSES, (r) => r.status);
+  const queryTypeOptions = optionList(KNOWN_QUERY_TYPES, (r) => r.queryType);
+
+  // Whether any server-side WHERE filter is active — used to disambiguate an empty
+  // result ("no rows matched the filters") from "no history at all".
+  const hasServerFilters =
+    statuses.length > 0 ||
+    queryTypes.length > 0 ||
+    (minDurationSec != null && minDurationSec > 0) ||
+    databaseFilter.trim() !== "" ||
+    schemaFilter.trim() !== "";
 
   const columns: ColumnsType<queryhistory.QueryHistoryRow> = [
     {
@@ -474,6 +528,73 @@ export default function QueryHistoryModal({ onClose }: Props) {
           />
         </div>
 
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Status</div>
+          <Select
+            mode="multiple"
+            allowClear
+            size="small"
+            value={statuses}
+            onChange={setStatuses}
+            options={statusOptions}
+            style={{ minWidth: 160 }}
+            placeholder="Any status"
+            maxTagCount="responsive"
+          />
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Query type</div>
+          <Select
+            mode="multiple"
+            allowClear
+            size="small"
+            value={queryTypes}
+            onChange={setQueryTypes}
+            options={queryTypeOptions}
+            style={{ minWidth: 160 }}
+            placeholder="Any type"
+            maxTagCount="responsive"
+          />
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Min duration (s)</div>
+          <InputNumber
+            size="small"
+            min={0}
+            step={0.1}
+            value={minDurationSec}
+            onChange={(v) => setMinDurationSec(v)}
+            style={{ width: 100 }}
+            placeholder="Any"
+          />
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Database</div>
+          <Input
+            size="small"
+            value={databaseFilter}
+            onChange={(e) => setDatabaseFilter(e.target.value)}
+            onPressEnter={() => { if (!runDisabled && !loading) handleRun(); }}
+            style={{ width: 140 }}
+            placeholder="Any database"
+          />
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Schema</div>
+          <Input
+            size="small"
+            value={schemaFilter}
+            onChange={(e) => setSchemaFilter(e.target.value)}
+            onPressEnter={() => { if (!runDisabled && !loading) handleRun(); }}
+            style={{ width: 140 }}
+            placeholder="Any schema"
+          />
+        </div>
+
         <div style={{ paddingBottom: 2 }}>
           <Checkbox
             checked={includeClientGen}
@@ -584,6 +705,11 @@ export default function QueryHistoryModal({ onClose }: Props) {
           />
           <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {visibleRows?.length ?? 0}{querySearch.trim() && visibleRows?.length !== rows.length ? ` of ${rows.length}` : ""} row{(visibleRows?.length ?? 0) !== 1 ? "s" : ""}
+            {hasServerFilters && (
+              <span style={{ marginLeft: 8, color: "var(--accent)" }}>
+                · filtered{(visibleRows?.length ?? 0) === 0 ? " — no queries match the active filters" : ""}
+              </span>
+            )}
           </Text>
         </>
       )}

@@ -3455,6 +3455,26 @@ export namespace projectionpolicy {
 
 export namespace queryhistory {
 	
+	export class QueryHistoryFilters {
+	    statuses: string[];
+	    queryTypes: string[];
+	    minDurationMs: number;
+	    database: string;
+	    schema: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryHistoryFilters(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statuses = source["statuses"];
+	        this.queryTypes = source["queryTypes"];
+	        this.minDurationMs = source["minDurationMs"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	    }
+	}
 	export class QueryHistoryRow {
 	    queryId: string;
 	    sessionId: string;
