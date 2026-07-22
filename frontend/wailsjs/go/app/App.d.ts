@@ -1052,7 +1052,7 @@ export function RenameUser(arg1:string,arg2:string):Promise<void>;
 
 export function ResetPipRegistryConfig():Promise<void>;
 
-export function ResetUserPassword(arg1:string):Promise<void>;
+export function ResetUserPassword(arg1:string):Promise<string>;
 
 export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 

@@ -193,7 +193,10 @@ func BuildUnsetTagsSQL(name string, tagNames []string) (string, error) {
 
 // BuildAddDelegatedAuthSQL builds
 // `ALTER USER <name> ADD DELEGATED AUTHORIZATION OF ROLE <role> TO SECURITY INTEGRATION <integration>`.
-// role and integration are typed free-hand (bare names fold).
+// role and integration are picker-sourced canonical-case names (from SHOW ROLES /
+// SHOW SECURITY INTEGRATIONS), so they are double-quoted exactly — like the
+// DEFAULT_ROLE / DEFAULT_WAREHOUSE builders in users.go — rather than run through
+// the free-hand fold-or-quote logic, which would mis-fold a quoted mixed-case name.
 func BuildAddDelegatedAuthSQL(name, role, integration string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("user name is required")
@@ -204,17 +207,9 @@ func BuildAddDelegatedAuthSQL(name, role, integration string) (string, error) {
 	if strings.TrimSpace(integration) == "" {
 		return "", fmt.Errorf("security integration name is required")
 	}
-	roleRef, err := renderQualifiedName("role name", role, 1)
-	if err != nil {
-		return "", err
-	}
-	intRef, err := renderQualifiedName("security integration name", integration, 1)
-	if err != nil {
-		return "", err
-	}
 	return fmt.Sprintf(
 		"ALTER USER %s ADD DELEGATED AUTHORIZATION OF ROLE %s TO SECURITY INTEGRATION %s",
-		snowflake.QuoteIdent(name), roleRef, intRef,
+		snowflake.QuoteIdent(name), snowflake.QuoteIdent(role), snowflake.QuoteIdent(integration),
 	), nil
 }
 
@@ -222,6 +217,9 @@ func BuildAddDelegatedAuthSQL(name, role, integration string) (string, error) {
 //   - role set → `REMOVE DELEGATED AUTHORIZATION OF ROLE <role> FROM SECURITY INTEGRATION <integration>`
 //   - role empty → `REMOVE DELEGATED AUTHORIZATIONS FROM SECURITY INTEGRATION <integration>`
 //     (removes every delegated authorization for the integration)
+//
+// role and integration are picker-sourced canonical-case names, double-quoted
+// exactly (see BuildAddDelegatedAuthSQL).
 func BuildRemoveDelegatedAuthSQL(name, role, integration string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("user name is required")
@@ -229,21 +227,13 @@ func BuildRemoveDelegatedAuthSQL(name, role, integration string) (string, error)
 	if strings.TrimSpace(integration) == "" {
 		return "", fmt.Errorf("security integration name is required")
 	}
-	intRef, err := renderQualifiedName("security integration name", integration, 1)
-	if err != nil {
-		return "", err
-	}
 	var clause string
 	if strings.TrimSpace(role) == "" {
 		clause = "REMOVE DELEGATED AUTHORIZATIONS"
 	} else {
-		roleRef, err := renderQualifiedName("role name", role, 1)
-		if err != nil {
-			return "", err
-		}
-		clause = fmt.Sprintf("REMOVE DELEGATED AUTHORIZATION OF ROLE %s", roleRef)
+		clause = fmt.Sprintf("REMOVE DELEGATED AUTHORIZATION OF ROLE %s", snowflake.QuoteIdent(role))
 	}
-	return fmt.Sprintf("ALTER USER %s %s FROM SECURITY INTEGRATION %s", snowflake.QuoteIdent(name), clause, intRef), nil
+	return fmt.Sprintf("ALTER USER %s %s FROM SECURITY INTEGRATION %s", snowflake.QuoteIdent(name), clause, snowflake.QuoteIdent(integration)), nil
 }
 
 // exec runs a builder's output against the client, sharing the build-then-execute
@@ -256,10 +246,25 @@ func exec(ctx context.Context, client *snowflake.Client, sql string, buildErr er
 	return err
 }
 
-// ResetPassword runs ALTER USER … RESET PASSWORD.
-func ResetPassword(ctx context.Context, client *snowflake.Client, name string) error {
+// ResetPassword runs ALTER USER … RESET PASSWORD and returns the status message
+// Snowflake emits in the single result row — which contains the generated
+// single-use password reset URL the admin must hand to the user. Each call issues
+// a fresh one-time link, so the message is the whole point of the action and is
+// threaded back to the caller rather than discarded. Returns "" if the result is
+// empty (older behaviors / stripped output).
+func ResetPassword(ctx context.Context, client *snowflake.Client, name string) (string, error) {
 	sql, err := BuildResetPasswordSQL(name)
-	return exec(ctx, client, sql, err)
+	if err != nil {
+		return "", err
+	}
+	res, err := client.QuerySingle(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	if res != nil && len(res.Rows) > 0 && len(res.Rows[0]) > 0 && res.Rows[0][0] != nil {
+		return fmt.Sprintf("%v", res.Rows[0][0]), nil
+	}
+	return "", nil
 }
 
 // Rename runs ALTER USER … RENAME TO.

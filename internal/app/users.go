@@ -42,12 +42,13 @@ func (a *App) AlterUserProperty(name, property, value string) error {
 	return users.AlterProperty(a.fctx(FeatureUsersRoles), client, name, property, value)
 }
 
-// ResetUserPassword runs ALTER USER … RESET PASSWORD, generating a fresh
-// single-use password reset URL for the user.
-func (a *App) ResetUserPassword(name string) error {
+// ResetUserPassword runs ALTER USER … RESET PASSWORD and returns Snowflake's
+// status message, which carries the generated single-use password reset URL the
+// admin must relay to the user. Each call issues a fresh one-time link.
+func (a *App) ResetUserPassword(name string) (string, error) {
 	client := a.currentClient()
 	if client == nil {
-		return apperrors.ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return users.ResetPassword(a.fctx(FeatureUsersRoles), client, name)
 }
@@ -62,7 +63,7 @@ func (a *App) RenameUser(name, newName string) error {
 	return users.Rename(a.fctx(FeatureUsersRoles), client, name, newName)
 }
 
-// AbortAllUserQueries runs ALTER USER … ABORT ALL QUERIES, cancelling every
+// AbortAllUserQueries runs ALTER USER … ABORT ALL QUERIES, canceling every
 // running and queued query for the user across all sessions.
 func (a *App) AbortAllUserQueries(name string) error {
 	client := a.currentClient()
@@ -143,7 +144,9 @@ func (a *App) GetUserTagReferences(name string) (*snowflake.QueryResult, error) 
 		// backslash in an identifier must be doubled to survive the single-quoted
 		// literal rather than being read as a Snowflake escape sequence.
 		snowflake.QuoteIdent(db), snowflake.EscapeTextLit(snowflake.QuoteIdent(name)))
-	return client.Execute(ctx, sql)
+	// QuerySingle (not Execute): its doc recommends it for TABLE() function calls,
+	// matching sibling readers like GetAuthenticationPolicyReferences.
+	return client.QuerySingle(ctx, sql)
 }
 
 // SetUserTags runs ALTER USER … SET TAG <t1> = '<v1>' [ , … ].

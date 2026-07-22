@@ -33,13 +33,13 @@ MFA removal, policy attach/detach, tag set/unset, delegated authorization).
 
 ## Action semantics (`actions.go`)
 
-- **`BuildResetPasswordSQL`** — `RESET PASSWORD` (generates a single-use reset URL; does *not* take a new password — use the `password` property for that).
+- **`BuildResetPasswordSQL`** — `RESET PASSWORD` (generates a single-use reset URL; does *not* take a new password — use the `password` property for that). Its executor `ResetPassword` returns Snowflake's status row (the reset URL string) instead of discarding it, so the UI can show the link copyably.
 - **`BuildRenameUserSQL`** — `RENAME TO <new_name>`; the target is rendered via `renderQualifiedName` (single part), so a bare name folds and a name with a space must be typed quoted (same SQL-syntax model as `defaultNamespace`).
 - **`BuildAbortAllQueriesSQL`** — `ABORT ALL QUERIES`.
 - **`BuildRemoveMfaMethodSQL`** — `REMOVE MFA METHOD <method>`; `method` is a validated enum (`PASSKEY` / `TOTP` / `DUO`).
 - **`BuildSet/UnsetPolicySQL`** — `SET { AUTHENTICATION | PASSWORD | SESSION } POLICY <name> [ FORCE ]` / `UNSET … POLICY`; kind is validated, policy name is a `renderQualifiedName` (up to 3 parts), `force` appends the `FORCE` keyword.
 - **`BuildSet/UnsetTagsSQL`** — `SET TAG <n> = '<v>' [ , … ]` / `UNSET TAG <n> [ , … ]`; at least one tag required, names via `renderQualifiedName`, values via `QuoteTextLit`. `TagPair` carries one assignment.
-- **`BuildAdd/RemoveDelegatedAuthSQL`** — `ADD DELEGATED AUTHORIZATION OF ROLE <r> TO SECURITY INTEGRATION <i>` / `REMOVE DELEGATED { AUTHORIZATION OF ROLE <r> | AUTHORIZATIONS } FROM SECURITY INTEGRATION <i>`; an **empty role** on remove selects the all-`AUTHORIZATIONS` form. Role/integration are single-part `renderQualifiedName`s.
+- **`BuildAdd/RemoveDelegatedAuthSQL`** — `ADD DELEGATED AUTHORIZATION OF ROLE <r> TO SECURITY INTEGRATION <i>` / `REMOVE DELEGATED { AUTHORIZATION OF ROLE <r> | AUTHORIZATIONS } FROM SECURITY INTEGRATION <i>`; an **empty role** on remove selects the all-`AUTHORIZATIONS` form. Role/integration are picker-sourced canonical-case names, so they are `QuoteIdent`-wrapped exactly (like `asIdent` for `defaultRole`/`defaultWarehouse`) rather than run through the free-hand fold-or-quote path — a quoted mixed-case role/integration keeps its case.
 
 ## Gotchas
 

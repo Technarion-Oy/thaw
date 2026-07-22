@@ -172,11 +172,12 @@ func TestBuildUnsetTagsSQL(t *testing.T) {
 }
 
 func TestBuildAddDelegatedAuthSQL(t *testing.T) {
-	got, err := BuildAddDelegatedAuthSQL("ALICE", "my_role", "oauth_int")
+	// picker-sourced canonical-case names are quoted exactly (mixed case preserved)
+	got, err := BuildAddDelegatedAuthSQL("ALICE", "MY_ROLE", "OAuth_Int")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `ALTER USER "ALICE" ADD DELEGATED AUTHORIZATION OF ROLE my_role TO SECURITY INTEGRATION oauth_int`
+	want := `ALTER USER "ALICE" ADD DELEGATED AUTHORIZATION OF ROLE "MY_ROLE" TO SECURITY INTEGRATION "OAuth_Int"`
 	if got != want {
 		t.Errorf("\n got %q\nwant %q", got, want)
 	}
@@ -189,21 +190,21 @@ func TestBuildAddDelegatedAuthSQL(t *testing.T) {
 }
 
 func TestBuildRemoveDelegatedAuthSQL(t *testing.T) {
-	// with a role → single-authorization form
-	got, err := BuildRemoveDelegatedAuthSQL("ALICE", "my_role", "oauth_int")
+	// with a role → single-authorization form; exact-case quoting
+	got, err := BuildRemoveDelegatedAuthSQL("ALICE", "MY_ROLE", "OAuth_Int")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `ALTER USER "ALICE" REMOVE DELEGATED AUTHORIZATION OF ROLE my_role FROM SECURITY INTEGRATION oauth_int`
+	want := `ALTER USER "ALICE" REMOVE DELEGATED AUTHORIZATION OF ROLE "MY_ROLE" FROM SECURITY INTEGRATION "OAuth_Int"`
 	if got != want {
 		t.Errorf("\n got %q\nwant %q", got, want)
 	}
 	// empty role → all-authorizations form
-	got, err = BuildRemoveDelegatedAuthSQL("ALICE", "", "oauth_int")
+	got, err = BuildRemoveDelegatedAuthSQL("ALICE", "", "OAuth_Int")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want = `ALTER USER "ALICE" REMOVE DELEGATED AUTHORIZATIONS FROM SECURITY INTEGRATION oauth_int`
+	want = `ALTER USER "ALICE" REMOVE DELEGATED AUTHORIZATIONS FROM SECURITY INTEGRATION "OAuth_Int"`
 	if got != want {
 		t.Errorf("\n got %q\nwant %q", got, want)
 	}

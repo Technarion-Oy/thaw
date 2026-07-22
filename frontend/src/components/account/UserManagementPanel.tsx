@@ -134,8 +134,32 @@ export default function UserManagementPanel() {
       okText: "Reset",
       onOk: async () => {
         try {
-          await ResetUserPassword(user.name);
-          message.success(`Password reset for ${user.name}`);
+          // RESET PASSWORD returns a status row containing the generated
+          // single-use reset URL — surface it copyably rather than dropping it,
+          // since re-running the statement issues a fresh link and invalidates
+          // this one.
+          const msg = await ResetUserPassword(user.name);
+          if (msg && msg.trim()) {
+            Modal.info({
+              title: `Password reset for ${user.name}`,
+              width: 560,
+              content: (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                    Give this single-use link to the user. It isn't shown again, and resetting the password again invalidates it.
+                  </Text>
+                  <Typography.Paragraph
+                    copyable={{ text: msg }}
+                    style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}
+                  >
+                    {msg}
+                  </Typography.Paragraph>
+                </div>
+              ),
+            });
+          } else {
+            message.success(`Password reset for ${user.name}`);
+          }
         } catch (e) {
           message.error(friendlyError(e));
         }
