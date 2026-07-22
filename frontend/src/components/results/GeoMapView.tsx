@@ -2,7 +2,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -36,6 +36,29 @@ export default function GeoMapView({ geojson }: Props) {
   // leave a false banner up.
   const [tileError, setTileError] = useState(false);
 
+  // Perform the one-time auto-fit for the first geometry. No-ops until the
+  // container has a real (non-zero) size, so an early 0×0 measurement can't
+  // compute a bogus world view and permanently lock hasFitRef — the fit is
+  // retried (from the geojson effect and the ResizeObserver) until it lands on
+  // a real size. Invalid/empty bounds fall back to a world view but keep
+  // hasFitRef false so a later real geometry still fits properly.
+  const fitInitial = useCallback(() => {
+    const map = mapRef.current;
+    const layer = layerRef.current;
+    if (!map || !layer || hasFitRef.current) return;
+    const el = containerRef.current;
+    if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
+
+    const bounds = layer.getBounds();
+    if (!bounds.isValid()) {
+      map.setView([0, 0], 1);
+      return;
+    }
+    // maxZoom caps a single Point (zero-area bounds) from zooming to street level.
+    map.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
+    hasFitRef.current = true;
+  }, []);
+
   // Create the map once; destroy on unmount (Map-view close / new query).
   useEffect(() => {
     const el = containerRef.current;
@@ -56,13 +79,31 @@ export default function GeoMapView({ geojson }: Props) {
       .addTo(map);
     mapRef.current = map;
 
+    // Leaflet measures the container once at init and caches the size, only
+    // re-measuring on a *window* resize (its trackResize handler). Any other
+    // container-size change — the lazy panel/flex layout settling after mount,
+    // classic scrollbars appearing on Windows/WebView2, the cell-detail panel's
+    // drag handle, the editor/results splitter — is invisible to Leaflet and
+    // permanently corrupts tile ranges, vector-pane positioning, and fitBounds.
+    // A ResizeObserver that calls invalidateSize keeps the cached size in sync,
+    // and lets us run the deferred first fit once a real size arrives. Same
+    // pattern as TerminalPanel's xterm FitAddon and QueryLogPane.
+    const ro = new ResizeObserver(() => {
+      const m = mapRef.current;
+      if (!m) return;
+      m.invalidateSize(false);
+      if (!hasFitRef.current) fitInitial();
+    });
+    ro.observe(el);
+
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
       hasFitRef.current = false;
     };
-  }, []);
+  }, [fitInitial]);
 
   // Swap the GeoJSON layer when the selected cell changes, preserving the
   // current zoom across switches (only the first geometry auto-fits).
@@ -81,21 +122,20 @@ export default function GeoMapView({ geojson }: Props) {
       }).addTo(map);
       layerRef.current = layer;
 
-      const bounds = layer.getBounds();
-      if (!bounds.isValid()) {
-        if (!hasFitRef.current) map.setView([0, 0], 1);
-      } else if (!hasFitRef.current) {
-        // maxZoom caps a single Point (zero-area bounds) from zooming to street level.
-        map.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
-        hasFitRef.current = true;
+      if (hasFitRef.current) {
+        // Already auto-fit once: keep the user's zoom, just move to the new
+        // geometry.
+        const bounds = layer.getBounds();
+        if (bounds.isValid()) map.setView(bounds.getCenter(), map.getZoom());
       } else {
-        // Keep the user's zoom; just move to the new geometry.
-        map.setView(bounds.getCenter(), map.getZoom());
+        // First geometry: fit now if the container is measured; otherwise the
+        // ResizeObserver runs this once a real size arrives.
+        fitInitial();
       }
     } catch {
       if (!hasFitRef.current) map.setView([0, 0], 1);
     }
-  }, [geojson]);
+  }, [geojson, fitInitial]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 200 }}>
