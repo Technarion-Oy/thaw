@@ -73,6 +73,7 @@ export default function AISettingsModal({ onClose }: Props) {
   // flag is off, no matter what this modal is set to. Surface it so the toggle
   // isn't silently overridden.
   const featureFlagOn = useFeatureFlagsStore((s) => s.flags.aiInlineCompletions);
+  const featureFlagLocked = useFeatureFlagsStore((s) => s.locked.aiInlineCompletions);
 
   // Tracks the last-saved config so we can show "currently in use" info.
   const [savedConfig, setSavedConfig] = useState<{ provider: Provider; model: string } | null>(null);
@@ -236,8 +237,16 @@ export default function AISettingsModal({ onClose }: Props) {
           <Alert
             type="warning"
             showIcon
-            message="AI inline completions are turned off by a feature flag"
-            description="Enable “AI inline completions” under View → Enabled Features… for this toggle to take effect (an IT administrator may have locked it)."
+            message={
+              featureFlagLocked
+                ? "AI inline completions have been disabled by an administrator policy on this machine"
+                : "AI inline completions are turned off by a feature flag"
+            }
+            description={
+              featureFlagLocked
+                ? undefined
+                : "Enable “AI inline completions” under View → Enabled Features… for this toggle to take effect."
+            }
           />
         )}
 

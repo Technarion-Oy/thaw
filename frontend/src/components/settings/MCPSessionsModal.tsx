@@ -61,6 +61,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
   const refresh = useMCPStore((s) => s.refresh);
   const isConnected = useConnectionStore((s) => s.isConnected);
   const mcpEnabled = useFeatureFlagsStore((s) => s.flags.mcpServer);
+  const mcpLocked = useFeatureFlagsStore((s) => s.locked.mcpServer);
 
   // The feature can be off and admin-locked; the native menu can still open
   // this modal, so disable starting sessions and explain why.
@@ -163,17 +164,23 @@ export default function MCPSessionsModal({ onClose }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="MCP Server is turned off"
-          description="Turn it on to start sessions."
+          message={
+            mcpLocked
+              ? "MCP Server has been disabled by an administrator policy on this machine."
+              : "MCP Server is turned off"
+          }
+          description={mcpLocked ? undefined : "Turn it on to start sessions."}
           action={
-            <Button
-              size="small"
-              onClick={() =>
-                window.dispatchEvent(new Event("thaw:open-feature-flags"))
-              }
-            >
-              Enabled Features…
-            </Button>
+            mcpLocked ? undefined : (
+              <Button
+                size="small"
+                onClick={() =>
+                  window.dispatchEvent(new Event("thaw:open-feature-flags"))
+                }
+              >
+                Enabled Features…
+              </Button>
+            )
           }
           style={{ marginBottom: 12 }}
         />
