@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
 import { Button, Modal, Tooltip, Input, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -53,6 +53,54 @@ function tabPrefix(tab: Tab) {
 // INVARIANT: every field the strip renders MUST appear here, or that field going
 // stale won't trigger a re-render. Exported and unit-tested (TabBar.test.ts) so a
 // future edit that adds a rendered field without adding it here fails the test.
+// Full label to show in a truncation tooltip: the backing file's full path for
+// file tabs (so several files from the same directory are distinguishable),
+// otherwise the tab title. (issue #829)
+function tabFullLabel(t: Tab): string {
+  return t.path ?? t.title;
+}
+
+// A single-line, ellipsis-truncated label that shows an AntD Tooltip with the
+// full text ONLY when the text actually overflows its container — so short names
+// that fully fit don't get a redundant tooltip. Truncation is measured on hover
+// (`scrollWidth > clientWidth`) rather than at render, so it stays correct as the
+// container resizes. Callers pass `overlayStyle` to lift the portal above the
+// position:fixed Active Files panel (z-index 9999). (issue #829)
+function OverflowTooltip({
+  fullText,
+  overlayStyle,
+  onDoubleClick,
+  children,
+}: {
+  fullText: string;
+  overlayStyle?: React.CSSProperties;
+  onDoubleClick?: (e: React.MouseEvent) => void;
+  children: ReactNode;
+}) {
+  const spanRef = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(false);
+  return (
+    <Tooltip
+      title={truncated ? fullText : undefined}
+      mouseEnterDelay={0.5}
+      placement="bottom"
+      overlayStyle={overlayStyle}
+    >
+      <span
+        ref={spanRef}
+        onMouseEnter={() => {
+          const el = spanRef.current;
+          if (el) setTruncated(el.scrollWidth > el.clientWidth);
+        }}
+        onDoubleClick={onDoubleClick}
+        style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
+      >
+        {children}
+      </span>
+    </Tooltip>
+  );
+}
+
 export function tabStripSignature(t: Tab): string {
   return [
     t.id, t.title, t.path ?? "", t.kind ?? "",
@@ -98,6 +146,12 @@ export default function TabBar() {
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Id of the strip tab whose title span is currently overflowing its 220px cap,
+  // measured on hover. When set, that tab's tooltip (which otherwise shows only the
+  // per-tab session ID) also surfaces the full title/path so overflowed names are
+  // readable without activating the tab. (issue #829)
+  const [truncatedTabId, setTruncatedTabId] = useState<string | null>(null);
 
   // Inline tab rename (non-file tabs only — file tabs derive their title from the path).
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -317,11 +371,21 @@ export default function TabBar() {
         const isDropAfter  = dropTarget?.id === tab.id && !dropTarget.before;
 
         const sessionId = sessionIds[tab.id];
-        const tooltipText = !isConnected
+        const sessionLine = !isConnected
           ? undefined
           : sessionId
           ? `Session ID: ${sessionId}`
           : "No active session";
+        // Show the full title/path first (bold) only when the strip title is
+        // truncated, then the session line — either may be absent. (#829)
+        const showFullTitle = truncatedTabId === tab.id;
+        const tooltipText: ReactNode =
+          showFullTitle || sessionLine ? (
+            <>
+              {showFullTitle && <div style={{ fontWeight: 600 }}>{tabFullLabel(tab)}</div>}
+              {sessionLine && <div>{sessionLine}</div>}
+            </>
+          ) : undefined;
 
         return (
           <Tooltip key={tab.id} title={tooltipText} mouseEnterDelay={0.6} placement="bottom">
@@ -405,6 +469,8 @@ export default function TabBar() {
             ) : (
               <span
                 onDoubleClick={(e) => { e.stopPropagation(); startRename(tab); }}
+                onMouseEnter={(e) =>
+                  setTruncatedTabId(e.currentTarget.scrollWidth > e.currentTarget.clientWidth ? tab.id : null)}
                 style={{
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -545,9 +611,12 @@ export default function TabBar() {
                     }}
                   >
                     {tabIcon(t)}
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                    {/* Tooltip with the full title/path, shown only when the row
+                        is truncated. overlayStyle lifts the portal above the panel
+                        (z-index 9999), same reason the context menu needs it. (#829) */}
+                    <OverflowTooltip fullText={tabFullLabel(t)} overlayStyle={{ zIndex: 10000 }}>
                       {tabPrefix(t)}{t.title}
-                    </span>
+                    </OverflowTooltip>
                     {/* Close button — revealed on row hover (see .ctx-item-close).
                         Routes through the same request-close-tab flow as the strip
                         so dirty tabs still prompt before closing. */}
