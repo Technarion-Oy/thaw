@@ -10,6 +10,81 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// maxResultLimit is Snowflake's documented ceiling for the RESULT_LIMIT argument
+// of the QUERY_HISTORY* table functions (1–10 000). When extra WHERE filters are
+// active we fetch this full window from the function and re-apply the user's
+// smaller limit afterwards (see buildQueryHistorySql).
+const maxResultLimit = 10000
+
+// QueryHistoryFilters holds the optional server-side WHERE-clause filters applied
+// on top of the QUERY_HISTORY* table function's own (session/user/warehouse/time)
+// named arguments. Every field is optional; a zero value adds no predicate.
+//
+// These fields are not accepted as named arguments by the table functions, so
+// they are expressed as a WHERE clause wrapping the function call. Because the
+// function applies RESULT_LIMIT itself (before our WHERE), buildQueryHistorySql
+// fetches a full window when any filter here is set and re-applies the caller's
+// limit as an outer LIMIT — so the limit means "N matching rows", not "matches
+// within the first N".
+type QueryHistoryFilters struct {
+	// Statuses restricts to rows whose EXECUTION_STATUS is one of these values
+	// (matched case-insensitively), e.g. "SUCCESS", "FAIL", "RUNNING".
+	Statuses []string `json:"statuses"`
+	// QueryTypes restricts to rows whose QUERY_TYPE is one of these values
+	// (matched case-insensitively), e.g. "SELECT", "INSERT", "CREATE".
+	QueryTypes []string `json:"queryTypes"`
+	// MinDurationMs restricts to rows with TOTAL_ELAPSED_TIME >= this many
+	// milliseconds. Zero or negative adds no duration predicate.
+	MinDurationMs int64 `json:"minDurationMs"`
+	// Database restricts to rows whose DATABASE_NAME matches this value
+	// (case-insensitive equality). Empty adds no predicate.
+	Database string `json:"database"`
+	// Schema restricts to rows whose SCHEMA_NAME matches this value
+	// (case-insensitive equality). Empty adds no predicate.
+	Schema string `json:"schema"`
+}
+
+// buildQueryHistoryPredicates renders the QueryHistoryFilters into a slice of SQL
+// boolean predicates (to be ANDed in a WHERE clause). All string literals are
+// escaped via snowflake.QuoteStringLit; the numeric duration is emitted directly.
+func buildQueryHistoryPredicates(f QueryHistoryFilters) []string {
+	var predicates []string
+	if clause := inClauseCI("EXECUTION_STATUS", f.Statuses); clause != "" {
+		predicates = append(predicates, clause)
+	}
+	if clause := inClauseCI("QUERY_TYPE", f.QueryTypes); clause != "" {
+		predicates = append(predicates, clause)
+	}
+	if f.MinDurationMs > 0 {
+		predicates = append(predicates, fmt.Sprintf("TOTAL_ELAPSED_TIME >= %d", f.MinDurationMs))
+	}
+	if db := strings.TrimSpace(f.Database); db != "" {
+		predicates = append(predicates, fmt.Sprintf("UPPER(DATABASE_NAME) = UPPER(%s)", snowflake.QuoteStringLit(db)))
+	}
+	if sch := strings.TrimSpace(f.Schema); sch != "" {
+		predicates = append(predicates, fmt.Sprintf("UPPER(SCHEMA_NAME) = UPPER(%s)", snowflake.QuoteStringLit(sch)))
+	}
+	return predicates
+}
+
+// inClauseCI builds a case-insensitive `UPPER(col) IN (...)` predicate from vals,
+// dropping blank entries and escaping each literal. Returns "" when no non-blank
+// value remains (so the caller adds no predicate).
+func inClauseCI(col string, vals []string) string {
+	quoted := make([]string, 0, len(vals))
+	for _, v := range vals {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		quoted = append(quoted, snowflake.QuoteStringLit(strings.ToUpper(v)))
+	}
+	if len(quoted) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("UPPER(%s) IN (%s)", col, strings.Join(quoted, ", "))
+}
+
 // QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
 type QueryHistoryRow struct {
 	QueryID       string `json:"queryId"`
@@ -39,12 +114,19 @@ type QueryHistoryRow struct {
 //   - endTimeStart/End:       RFC3339 strings or "" for no filter
 //   - resultLimit:            max rows returned (1–10 000)
 //   - includeClientGenerated: include client-generated statements
+//   - filters:                extra WHERE-clause filters (status/type/duration/db/schema)
 //
 // Precondition: for filterType "session", sessionID must be a valid bare int64.
 // GetQueryHistory (the primary gate, and the only production caller) enforces
 // this; passing an invalid id here is a programmer error and panics rather than
 // silently emitting an argument-less QUERY_HISTORY_BY_SESSION() that resolves to
 // the wrong (pooled) session. Always go through GetQueryHistory.
+//
+// When filters add a WHERE clause, the table function is asked for a full window
+// (RESULT_LIMIT => maxResultLimit) and the caller's resultLimit is re-applied as
+// an outer LIMIT — so the limit counts matching rows, not rows scanned before the
+// filter. Without filters the resultLimit is passed straight to the function as
+// before.
 func buildQueryHistorySql(
 	filterType string,
 	sessionID string,
@@ -54,7 +136,18 @@ func buildQueryHistorySql(
 	endTimeEnd string,
 	resultLimit int,
 	includeClientGenerated bool,
+	filters QueryHistoryFilters,
 ) string {
+	predicates := buildQueryHistoryPredicates(filters)
+	hasFilters := len(predicates) > 0
+
+	// The table function applies RESULT_LIMIT before our WHERE runs, so with a
+	// filter active a small user limit would filter an already-truncated page.
+	// Fetch the full window and re-apply the user's limit outside the function.
+	innerLimit := resultLimit
+	if hasFilters && resultLimit > 0 && resultLimit < maxResultLimit {
+		innerLimit = maxResultLimit
+	}
 	// Choose the table function name.
 	var funcName string
 	switch filterType {
@@ -98,8 +191,8 @@ func buildQueryHistorySql(
 	if endTimeEnd != "" {
 		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => %s::TIMESTAMP_LTZ", snowflake.QuoteStringLit(endTimeEnd)))
 	}
-	if resultLimit > 0 {
-		args = append(args, fmt.Sprintf("RESULT_LIMIT => %d", resultLimit))
+	if innerLimit > 0 {
+		args = append(args, fmt.Sprintf("RESULT_LIMIT => %d", innerLimit))
 	}
 	if includeClientGenerated {
 		args = append(args, "INCLUDE_CLIENT_GENERATED_STATEMENT => TRUE")
@@ -110,13 +203,23 @@ func buildQueryHistorySql(
 		argClause = strings.Join(args, ", ")
 	}
 
+	whereClause := ""
+	if hasFilters {
+		whereClause = "\nWHERE " + strings.Join(predicates, "\n  AND ")
+	}
+	// Re-apply the user's limit after filtering (see the innerLimit bump above).
+	outerLimit := ""
+	if hasFilters && resultLimit > 0 {
+		outerLimit = fmt.Sprintf("\nLIMIT %d", resultLimit)
+	}
+
 	return fmt.Sprintf(`
 SELECT QUERY_ID, SESSION_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
        DATABASE_NAME, SCHEMA_NAME, START_TIME, END_TIME,
        TOTAL_ELAPSED_TIME, EXECUTION_STATUS, ERROR_MESSAGE,
        ROWS_PRODUCED, BYTES_SCANNED
-FROM table(SNOWFLAKE.information_schema.%s(%s))
-ORDER BY START_TIME DESC`, funcName, argClause)
+FROM table(SNOWFLAKE.information_schema.%s(%s))%s
+ORDER BY START_TIME DESC%s`, funcName, argClause, whereClause, outerLimit)
 }
 
 // ParseQueryHistory projects a query-history result into QueryHistoryRow values.
@@ -184,6 +287,7 @@ func GetQueryHistory(
 	endTimeEnd string,
 	resultLimit int,
 	includeClientGenerated bool,
+	filters QueryHistoryFilters,
 ) ([]QueryHistoryRow, error) {
 	// Trim the name filters up front so the empty-checks and the value embedded
 	// by buildQueryHistorySql agree — otherwise "ALICE " would pass the guard and
@@ -209,7 +313,7 @@ func GetQueryHistory(
 	if filterType == "warehouse" && warehouseName == "" {
 		return nil, fmt.Errorf("a warehouse name is required for warehouse-scoped query history")
 	}
-	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	query := buildQueryHistorySql(filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated, filters)
 	res, err := client.QuerySingle(ctx, query)
 	if err != nil {
 		return nil, err

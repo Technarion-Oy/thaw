@@ -109,7 +109,8 @@ func registerEditorTools(srv *mcpsdk.Server, client *snowflake.Client, mode stri
 			"",          // endTimeStart
 			"",          // endTimeEnd
 			limit,
-			false, // exclude client-generated statements
+			false,                              // exclude client-generated statements
+			queryhistory.QueryHistoryFilters{}, // no extra WHERE-clause filters
 		)
 		if err != nil {
 			// Log the full error for debugging but return a generic

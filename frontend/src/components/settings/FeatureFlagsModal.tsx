@@ -180,7 +180,7 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
           <FlagRow
             label="Query Activity History"
-            description="Searchable query logs scoped to session, user, or warehouse."
+            description="Searchable query logs scoped to session, user, or warehouse, with status/type/duration/database filters."
             checked={flags.queryActivityHistory}
             locked={locked.queryActivityHistory}
             onChange={(v) => set("queryActivityHistory", v)}

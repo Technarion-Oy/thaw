@@ -429,6 +429,8 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 //   - endTimeStart/End:       RFC3339 strings or "" for no filter
 //   - resultLimit:            max rows returned (1–10 000)
 //   - includeClientGenerated: include client-generated statements
+//   - filters:                extra WHERE-clause filters (execution status, query
+//     type, minimum duration, database, schema); a zero value applies none
 func (a *App) GetQueryHistory(
 	filterType string,
 	sessionID string,
@@ -438,10 +440,11 @@ func (a *App) GetQueryHistory(
 	endTimeEnd string,
 	resultLimit int,
 	includeClientGenerated bool,
+	filters queryhistory.QueryHistoryFilters,
 ) ([]queryhistory.QueryHistoryRow, error) {
 	client := a.currentClient()
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return queryhistory.GetQueryHistory(a.fctx(FeatureSQLEditor), client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
+	return queryhistory.GetQueryHistory(a.fctx(FeatureSQLEditor), client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated, filters)
 }
