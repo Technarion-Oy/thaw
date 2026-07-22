@@ -73,8 +73,25 @@ func (a *App) AbortAllUserQueries(name string) error {
 	return users.AbortAllQueries(a.fctx(FeatureUsersRoles), client, name)
 }
 
-// RemoveUserMfaMethod runs ALTER USER … REMOVE MFA METHOD <method>. method is one
-// of PASSKEY, TOTP, DUO.
+// ListUserMfaMethods returns the MFA methods enrolled for the given user via
+// SHOW MFA METHODS FOR USER <name> (columns: name, type, comment, last_used,
+// created_on). It backs the MFA-method removal list in the user properties
+// modal — the `name` column is the system-generated identifier passed to
+// RemoveUserMfaMethod, not the factor `type`. The FOR USER clause requires the
+// ACCOUNTADMIN role; the privilege error surfaces to the UI rather than being
+// pre-checked.
+func (a *App) ListUserMfaMethods(name string) (*snowflake.QueryResult, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	query := fmt.Sprintf("SHOW MFA METHODS FOR USER %s", snowflake.QuoteIdent(name))
+	return client.QuerySingle(a.fctx(FeatureUsersRoles), query)
+}
+
+// RemoveUserMfaMethod runs ALTER USER … REMOVE MFA METHOD <method>. method is the
+// system-generated identifier from the `name` column of ListUserMfaMethods (not
+// the factor type).
 func (a *App) RemoveUserMfaMethod(name, method string) error {
 	client := a.currentClient()
 	if client == nil {

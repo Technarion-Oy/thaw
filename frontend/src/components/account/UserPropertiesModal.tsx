@@ -1,71 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, message } from "antd";
+import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, Tag, message } from "antd";
 import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
   SetUserPolicy, UnsetUserPolicy, SetUserTags, UnsetUserTags,
-  RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
+  ListUserMfaMethods, RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
   ListAccountAuthenticationPolicies, ListAccountPasswordPolicies, ListAccountSessionPolicies,
   ListSecurityIntegrations, ListAccountTags, GetUserTagReferences,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import TagsRow, { type EditableTag } from "../shared/TagsRow";
-import { parseAllowedValues } from "../tag/allowedValues";
 import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";
+import {
+  type NameOption, type MfaMethod,
+  nameOptionsFromShow, userTagsToEditable, parseMfaMethods,
+} from "./userPropertyUtils";
 
 const { Text } = Typography;
-
-// quoteIdent double-quotes an identifier part, doubling embedded quotes — the
-// client-side mirror of snowflake.QuoteIdent, used to build the quoted FQN that
-// the ALTER USER builders parse back with exact case.
-const quoteIdent = (s: string) => `"${s.replace(/"/g, '""')}"`;
-
-// A dropdown option parsed from a SHOW … result. allowedValues is populated from
-// SHOW TAGS' allowed_values column (empty for policies, which have no such
-// column) — a non-empty list turns the tag value field into a whitelist dropdown.
-interface NameOption { value: string; label: string; allowedValues: string[] }
-
-// nameOptionsFromShow turns a SHOW … result (which shares the
-// name / database_name / schema_name columns across POLICIES and TAGS) into
-// dropdown options: the value is the quoted FQN (passed to the ALTER builders so
-// mixed-case names round-trip), the label the readable dotted name, and (for
-// tags) allowedValues parsed from the allowed_values column.
-function nameOptionsFromShow(res: snowflake.QueryResult | null): NameOption[] {
-  const cols = res?.columns ?? [];
-  const iName    = cols.indexOf("name");
-  const iDb      = cols.indexOf("database_name");
-  const iSc      = cols.indexOf("schema_name");
-  const iAllowed = cols.indexOf("allowed_values");
-  if (iName < 0) return [];
-  return (res?.rows ?? []).map((r) => {
-    const nm = String(r[iName]);
-    const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
-    const sc = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
-    const parts = [db, sc, nm].filter(Boolean);
-    const allowedValues = iAllowed >= 0 && r[iAllowed] != null ? parseAllowedValues(String(r[iAllowed])) : [];
-    return { value: parts.map(quoteIdent).join("."), label: parts.join("."), allowedValues };
-  });
-}
-
-// userTagsToEditable maps a GetUserTagReferences result (TAG_DATABASE /
-// TAG_SCHEMA / TAG_NAME / TAG_VALUE) into removable chips. The chip key is the
-// quoted FQN handed straight to UnsetUserTags.
-function userTagsToEditable(res: snowflake.QueryResult | null): EditableTag[] {
-  const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
-  const ci = (n: string) => cols.indexOf(n);
-  const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"), vlI = ci("tag_value");
-  if (nmI < 0) return [];
-  return (res?.rows ?? []).map((row): EditableTag => {
-    const tdb = dbI >= 0 && row[dbI] != null ? String(row[dbI]) : "";
-    const tsc = scI >= 0 && row[scI] != null ? String(row[scI]) : "";
-    const tnm = String(row[nmI] ?? "");
-    const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
-    return { key: qualified, name: tnm, value: vlI >= 0 && row[vlI] != null ? String(row[vlI]) : "", removable: true };
-  });
-}
 
 // ─── Helper: RSA public-key slot row ─────────────────────────────────────────
 
@@ -254,12 +208,15 @@ function PolicyRow({
       okText: "Unset",
       okButtonProps: { danger: true },
       onOk: async () => {
+        setBusy(true);
         try {
           await UnsetUserPolicy(name, kind);
           message.success(`${label} policy unset on ${name}`);
           await onReload();
         } catch (e) {
           message.error(friendlyError(e), 6);
+        } finally {
+          setBusy(false);
         }
       },
     });
@@ -287,7 +244,7 @@ function PolicyRow({
           <Button size="small" type="primary" icon={<CheckOutlined />} loading={busy} disabled={!val.trim()} onClick={set}>
             Set
           </Button>
-          <Button size="small" danger onClick={unset}>Unset</Button>
+          <Button size="small" danger loading={busy} onClick={unset}>Unset</Button>
         </div>
       </td>
     </tr>
@@ -296,29 +253,46 @@ function PolicyRow({
 
 // ─── Helper: MFA method removal row ──────────────────────────────────────────
 
-const MFA_METHODS = ["TOTP", "PASSKEY", "DUO"] as const;
-
 /**
- * Removes one enrolled MFA method (`ALTER USER … REMOVE MFA METHOD <method>`) so
- * the user can re-enroll. Bypass windows are still set via MINS_TO_BYPASS_MFA in
- * the Security section; this is the destructive per-method removal.
+ * Lists the user's enrolled MFA methods (`SHOW MFA METHODS FOR USER`) as
+ * removable rows, and removes one (`ALTER USER … REMOVE MFA METHOD <name>`) so
+ * the user can re-enroll. The removal identifier is the system-generated `name`
+ * column — not the factor `type` (which is display-only) — so a fixed
+ * TOTP/PASSKEY/DUO button set would target the wrong thing. Bypass windows are
+ * still set via MINS_TO_BYPASS_MFA in the Security section; this is the
+ * destructive per-factor removal. SHOW MFA METHODS FOR USER needs ACCOUNTADMIN,
+ * so a load failure is shown as a faint caveat rather than a loud error.
  */
-function MfaRemoveRow({ name, onReload, search }: { name: string; onReload: () => Promise<void>; search?: string }) {
-  const [busy, setBusy] = useState<string>("");
-  if (search && !"remove mfa method".includes(search.toLowerCase())) return null;
+function MfaRemoveRow({ name, search }: { name: string; search?: string }) {
+  const [methods, setMethods] = useState<MfaMethod[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [busy, setBusy]       = useState<string>("");
 
-  const remove = (method: string) => {
+  const reload = useCallback(async () => {
+    setLoadErr(null);
+    try {
+      setMethods(parseMfaMethods(await ListUserMfaMethods(name)));
+    } catch (e) {
+      setMethods([]);
+      setLoadErr(friendlyError(e));
+    }
+  }, [name]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (search && !"mfa methods".includes(search.toLowerCase())) return null;
+
+  const remove = (m: MfaMethod) => {
     Modal.confirm({
-      title: `Remove ${method} MFA method from ${name}?`,
+      title: `Remove ${m.type || "MFA"} method from ${name}?`,
       content: "The user loses this factor and must re-enroll it.",
       okText: "Remove",
       okButtonProps: { danger: true },
       onOk: async () => {
-        setBusy(method);
+        setBusy(m.name);
         try {
-          await RemoveUserMfaMethod(name, method);
-          message.success(`Removed ${method} from ${name}`);
-          await onReload();
+          await RemoveUserMfaMethod(name, m.name);
+          message.success(`Removed ${m.type || "MFA method"} from ${name}`);
+          await reload();
         } catch (e) {
           message.error(friendlyError(e), 6);
         } finally {
@@ -330,15 +304,30 @@ function MfaRemoveRow({ name, onReload, search }: { name: string; onReload: () =
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>Remove MFA method</td>
+      <td style={LABEL_TD}>MFA methods</td>
       <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
-        <Space size={4} wrap>
-          {MFA_METHODS.map((mth) => (
-            <Button key={mth} size="small" danger loading={busy === mth} onClick={() => remove(mth)}>
-              {mth}
-            </Button>
-          ))}
-        </Space>
+        {methods === null ? (
+          <Spin size="small" />
+        ) : loadErr ? (
+          <span style={{ fontSize: 11, fontStyle: "italic", color: "var(--text-faint)" }}>
+            unavailable — {loadErr}
+          </span>
+        ) : methods.length === 0 ? (
+          <span style={{ fontSize: 12, fontStyle: "italic", color: "var(--text-faint)" }}>no enrolled methods</span>
+        ) : (
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {methods.map((m) => (
+              <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Tag style={{ margin: 0 }}>{m.type || "MFA"}</Tag>
+                {m.comment && <span style={{ fontSize: 12, color: "var(--text)" }}>{m.comment}</span>}
+                {m.lastUsed && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>last used {m.lastUsed}</span>}
+                <Button size="small" danger icon={<DeleteOutlined />} loading={busy === m.name} onClick={() => remove(m)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </Space>
+        )}
       </td>
     </tr>
   );
@@ -637,7 +626,7 @@ export default function UserPropertiesModal({ name, onClose }: Props) {
             <EditRow label="Mins to unlock"     value={numVal("MINS_TO_UNLOCK")}     type="number" allowEmpty search={search} hint="Clear to reset"               onSave={save("minsToUnlock")} />
             <EditRow label="Mins to bypass MFA" value={numVal("MINS_TO_BYPASS_MFA")} type="number" allowEmpty search={search} hint="Requires MFA enrolment; clear to reset" onSave={save("minsToBypassMfa")} />
             <PasswordRow search={search} onSave={async (v) => { await AlterUserProperty(name, "password", v); await load(); }} />
-            <MfaRemoveRow name={name} onReload={load} search={search} />
+            <MfaRemoveRow name={name} search={search} />
           </tbody></table>
 
           <div style={SECTION_HEAD}>Key pair authentication</div>

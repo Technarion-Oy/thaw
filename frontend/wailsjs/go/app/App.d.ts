@@ -950,6 +950,8 @@ export function ListUserDatabases():Promise<Array<string>>;
 
 export function ListUserFunctions(arg1:string):Promise<Array<snowflake.UserFunction>>;
 
+export function ListUserMfaMethods(arg1:string):Promise<snowflake.QueryResult>;
+
 export function ListUserSchemas(arg1:string):Promise<Array<string>>;
 
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;

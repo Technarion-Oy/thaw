@@ -85,17 +85,19 @@ func BuildAbortAllQueriesSQL(name string) (string, error) {
 }
 
 // BuildRemoveMfaMethodSQL builds `ALTER USER <name> REMOVE MFA METHOD <method>`,
-// removing one enrolled MFA method so the user can re-enroll. method is one of
-// PASSKEY, TOTP, DUO (the documented mfaActions method keywords).
+// removing one enrolled MFA method so the user can re-enroll. method is the
+// system-generated per-enrollment identifier from the `name` column of
+// SHOW MFA METHODS — NOT the factor type (PASSKEY/TOTP/DUO), which is a separate
+// column. It is picker-sourced (App.ListUserMfaMethods), so it is QuoteIdent-
+// wrapped exactly, matching the delegated-authorization identifiers.
 func BuildRemoveMfaMethodSQL(name, method string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("user name is required")
 	}
-	m, err := snowflake.ValidateEnumValue("MFA method", method, "PASSKEY", "TOTP", "DUO")
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(method) == "" {
+		return "", fmt.Errorf("MFA method identifier is required")
 	}
-	return fmt.Sprintf("ALTER USER %s REMOVE MFA METHOD %s", snowflake.QuoteIdent(name), m), nil
+	return fmt.Sprintf("ALTER USER %s REMOVE MFA METHOD %s", snowflake.QuoteIdent(name), snowflake.QuoteIdent(method)), nil
 }
 
 // policyKeyword maps the policy kind selector to its SQL keyword and validates

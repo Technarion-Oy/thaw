@@ -68,10 +68,10 @@ func TestBuildRemoveMfaMethodSQL(t *testing.T) {
 		method, want string
 		wantErr      bool
 	}{
-		{"TOTP", `ALTER USER "ALICE" REMOVE MFA METHOD TOTP`, false},
-		{"passkey", `ALTER USER "ALICE" REMOVE MFA METHOD PASSKEY`, false},
-		{"DUO", `ALTER USER "ALICE" REMOVE MFA METHOD DUO`, false},
-		{"SMS", "", true},
+		// method is the system-generated `name` from SHOW MFA METHODS (not the
+		// type), quoted exactly — its case/charset is preserved
+		{"MFA_1a2b3c", `ALTER USER "ALICE" REMOVE MFA METHOD "MFA_1a2b3c"`, false},
+		{"passkey-01", `ALTER USER "ALICE" REMOVE MFA METHOD "passkey-01"`, false},
 		{"", "", true},
 	}
 	for _, tt := range tests {

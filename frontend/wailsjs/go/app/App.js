@@ -1754,6 +1754,10 @@ export function ListUserFunctions(arg1) {
   return window['go']['app']['App']['ListUserFunctions'](arg1);
 }
 
+export function ListUserMfaMethods(arg1) {
+  return window['go']['app']['App']['ListUserMfaMethods'](arg1);
+}
+
 export function ListUserSchemas(arg1) {
   return window['go']['app']['App']['ListUserSchemas'](arg1);
 }
