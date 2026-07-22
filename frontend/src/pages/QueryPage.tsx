@@ -106,7 +106,7 @@ export default function QueryPage() {
   // on every keystroke and is only needed inside callbacks (which read it fresh
   // via getState), so leaving it out is what stops the per-keystroke re-render
   // storm that made fast typing lag by seconds. (#762)
-  const { selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } =
+  const { selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } =
     useQueryStore(
       useShallow((s) => ({
         selectedSql: s.selectedSql,
@@ -116,7 +116,6 @@ export default function QueryPage() {
         setError: s.setError,
         markSaved: s.markSaved,
         openScratch: s.openScratch,
-        setSql: s.setSql,
         openNotebook: s.openNotebook,
         openNotebookUnsaved: s.openNotebookUnsaved,
         refreshFileTab: s.refreshFileTab,
@@ -389,16 +388,6 @@ export default function QueryPage() {
     NotebookUseContext(activeTabId, ctx.role, ctx.warehouse, ctx.database, ctx.schema).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabCtx, activeTabId, isNotebookTab]);
-
-  // Handle load-query events from QueryHistoryModal
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { sql: querySql } = (e as CustomEvent<{ sql: string }>).detail;
-      setSql(querySql);
-    };
-    window.addEventListener("load-query", handler);
-    return () => window.removeEventListener("load-query", handler);
-  }, [setSql]);
 
   // Open notebook from Snowpark menu
   useEffect(() => {
