@@ -5533,6 +5533,168 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	return nil
 }
 
+// DeployStreamlitParams holds the parameters for deploying a local Streamlit app
+// directory to Snowflake via a temporary internal stage.
+type DeployStreamlitParams struct {
+	Database      string `json:"database"`
+	Schema        string `json:"schema"`
+	Name          string `json:"name"`          // STREAMLIT object name in Snowflake
+	CaseSensitive bool   `json:"caseSensitive"` // when true, Name is double-quoted exactly; otherwise unquoted if valid
+	LocalDir      string `json:"localDir"`      // absolute local path to the Streamlit app folder to upload
+	MainFile      string `json:"mainFile"`      // entrypoint relative to LocalDir (e.g. "streamlit_app.py")
+	OrReplace     bool   `json:"orReplace"`
+	// Optional CREATE STREAMLIT clauses
+	QueryWarehouse string `json:"queryWarehouse"` // QUERY_WAREHOUSE = <warehouse>
+	Title          string `json:"title"`          // TITLE = '<display title>'
+	Comment        string `json:"comment"`
+}
+
+// DeployStreamlit uploads a local Streamlit app directory to a temporary internal
+// stage and creates a Snowflake STREAMLIT object from it, then drops the stage.
+//
+//  1. CREATE TEMPORARY STAGE in the target schema
+//  2. Recursively PUT the app files to the stage, preserving their relative paths
+//  3. CREATE [OR REPLACE] STREAMLIT … FROM @stage MAIN_FILE = '<relpath>'
+//  4. DROP STAGE (deferred – also fires on error)
+//
+// A temporary stage is sufficient because CREATE STREAMLIT copies the files once
+// at creation time (modern FROM <stage> MAIN_FILE grammar), so the source need
+// not persist afterwards.
+//
+// The CREATE STREAMLIT statement is built inline here rather than via
+// streamlit.BuildCreateStreamlitSql because internal/streamlit imports
+// internal/snowflake; calling back the other way would be an import cycle. The
+// emitted grammar is kept in sync with that builder. (Mirrors DeployNotebook.)
+func (c *Client) DeployStreamlit(ctx context.Context, params DeployStreamlitParams) error {
+	if params.LocalDir == "" {
+		return fmt.Errorf("LocalDir must be provided")
+	}
+	mainFile := filepath.ToSlash(strings.TrimSpace(params.MainFile))
+	if mainFile == "" {
+		return fmt.Errorf("MainFile must be provided")
+	}
+
+	// Create a temporary stage in the target schema.
+	stageName := fmt.Sprintf("THAW_STREAMLIT_%d", time.Now().UnixNano())
+	stageRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), stageName)
+	stageAt := "@" + stageRef
+
+	if _, err := c.execCtx(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+		return fmt.Errorf("create streamlit stage: %w", err)
+	}
+	defer c.execCtx(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+
+	// Recursively upload the app folder to the stage, preserving relative paths.
+	// NOTE: the dedicated recursive-upload helper (step 1.2) refines this with
+	// per-subdirectory PUT grouping and a fuller junk skip-list plus unit tests.
+	if err := c.uploadDirToStage(ctx, params.LocalDir, stageAt); err != nil {
+		return fmt.Errorf("upload streamlit app to stage: %w", err)
+	}
+
+	// Build the CREATE STREAMLIT statement (grammar mirrors
+	// streamlit.BuildCreateStreamlitSql; see method doc for why it's inline).
+	streamlitRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteOrBare(params.Name, params.CaseSensitive))
+
+	var sb strings.Builder
+	sb.WriteString("CREATE ")
+	if params.OrReplace {
+		sb.WriteString("OR REPLACE ")
+	}
+	sb.WriteString("STREAMLIT ")
+	sb.WriteString(streamlitRef)
+	sb.WriteString(fmt.Sprintf("\n  FROM %s", stageAt))
+	sb.WriteString(fmt.Sprintf("\n  MAIN_FILE = '%s'", EscapeStringLit(mainFile)))
+	if qw := strings.TrimSpace(params.QueryWarehouse); qw != "" {
+		sb.WriteString(fmt.Sprintf("\n  QUERY_WAREHOUSE = %s", QuoteIdent(qw)))
+	}
+	if t := strings.TrimSpace(params.Title); t != "" {
+		sb.WriteString(fmt.Sprintf("\n  TITLE = '%s'", EscapeStringLit(t)))
+	}
+	if cm := strings.TrimSpace(params.Comment); cm != "" {
+		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'", EscapeStringLit(cm)))
+	}
+
+	if _, err := c.execCtx(ctx, sb.String()); err != nil {
+		return fmt.Errorf("create streamlit: %w", err)
+	}
+	return nil
+}
+
+// uploadDirToStage recursively uploads every file under localDir to the given
+// stage location (e.g. "@db.schema.stage"), preserving each file's path relative
+// to localDir. One PUT is issued per file, targeting the subdirectory that
+// mirrors its relative location. Common VCS/junk paths (.git/, __pycache__/,
+// hidden dot-files, .DS_Store) are skipped.
+//
+// This is the minimal working uploader for the Streamlit deploy path; step 1.2
+// replaces it with a per-subdirectory PUT-grouping helper plus dedicated tests.
+func (c *Client) uploadDirToStage(ctx context.Context, localDir, stageAt string) error {
+	root, err := filepath.Abs(localDir)
+	if err != nil {
+		return fmt.Errorf("resolve app dir: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat app dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("app path is not a directory: %s", root)
+	}
+
+	uploaded := 0
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		name := d.Name()
+		if d.IsDir() {
+			// Skip VCS metadata, Python caches, and hidden directories (but not
+			// the root itself, whose relative name is ".").
+			if path != root && (name == ".git" || name == "__pycache__" || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Skip hidden files and OS junk.
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relDir := filepath.ToSlash(filepath.Dir(rel))
+
+		fileURL, err := localFileURLForFile(path)
+		if err != nil {
+			return fmt.Errorf("build file url for %s: %w", rel, err)
+		}
+		escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
+
+		target := stageAt
+		if relDir != "" && relDir != "." {
+			target = stageAt + "/" + relDir
+		}
+
+		putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, target)
+		putRows, err := c.queryCtx(ctx, putSQL)
+		if err != nil {
+			return fmt.Errorf("upload %s: %w", rel, err)
+		}
+		putRows.Close() //nolint:errcheck
+		uploaded++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if uploaded == 0 {
+		return fmt.Errorf("no files to upload in %s", root)
+	}
+	return nil
+}
+
 // ── Cross-schema object search ───────────────────────────────────────────────
 
 // SearchResult holds the results of a cross-schema object and column name
