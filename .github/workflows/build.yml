@@ -88,11 +88,13 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      # ── Wails Builds (obfuscated via garble) ──────────────────────────────
+      # ── Wails Builds (macOS/Linux obfuscated via garble) ──────────────────
       # -obfuscated: invokes garble as the Go compiler toolchain within the
       #   Wails build pipeline, producing an obfuscated binary without a
       #   separate post-build step.  This preserves macOS ad-hoc signing
-      #   (no binary replacement after codesign) and Windows .syso embedding.
+      #   (no binary replacement after codesign).  The Windows build below
+      #   deliberately omits it (issue #820): obfuscated Go binaries trigger
+      #   Defender heuristics that hurt SmartScreen download reputation.
       # -platform:   explicit target to avoid implicit runner-architecture deps.
       # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
       #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
@@ -106,11 +108,21 @@ jobs:
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        run: wails build -obfuscated -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        # NOTE (issue #820): no -obfuscated here. Garble-obfuscated Go binaries
+        # are a known Microsoft Defender heuristic trigger that hurts SmartScreen
+        # download reputation; macOS/Linux stay obfuscated above. This first pass
+        # compiles thaw.exe, generates build/windows/installer/wails_tools.nsh,
+        # and produces a throwaway installer whose packed thaw.exe is still
+        # unsigned — it is rebuilt below after the binary is signed.
+        run: wails build -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       # ── Sign Windows binaries (Azure Trusted Signing) ───────────────────────
+      # Correct signing order (issue #820): sign the app binary FIRST, then
+      # package it into the NSIS installer, then sign the installer. Previously a
+      # single sign step ran after packaging, so the thaw.exe embedded inside the
+      # installer was never signed.
       - name: Azure Login (Windows only)
         if: matrix.platform == 'windows'
         uses: azure/login@v2
@@ -118,7 +130,7 @@ jobs:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
           allow-no-subscriptions: true
 
-      - name: Sign Windows binaries
+      - name: Sign app binary (Windows)
         if: matrix.platform == 'windows'
         uses: azure/trusted-signing-action@v0
         with:
@@ -128,8 +140,37 @@ jobs:
           endpoint: ${{ vars.AZURE_CODE_SIGNING_ENDPOINT }}
           trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
-          files-folder: build/bin
-          files-folder-filter: exe
+          files: ${{ github.workspace }}/build/bin/thaw.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Repackage installer with the signed binary (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        # Re-run NSIS so the installer now embeds the freshly signed thaw.exe.
+        # wails_tools.nsh (INFO_*/ARCH/PRODUCT_EXECUTABLE defines) was generated
+        # by the -nsis build above; we only pass the arch binary define, exactly
+        # as documented in build/windows/installer/project.nsi. The OutFile in
+        # project.nsi overwrites the throwaway installer from the build step.
+        run: |
+          $define = if ("${{ matrix.arch }}" -eq "arm64") { "ARG_WAILS_ARM64_BINARY" } else { "ARG_WAILS_AMD64_BINARY" }
+          $exe = (Resolve-Path build/bin/thaw.exe).Path
+          Push-Location build/windows/installer
+          makensis "-D${define}=$exe" project.nsi
+          Pop-Location
+
+      - name: Sign installer (Windows)
+        if: matrix.platform == 'windows'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_CODE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files: ${{ github.workspace }}/build/bin/thaw-${{ matrix.arch }}-installer.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
