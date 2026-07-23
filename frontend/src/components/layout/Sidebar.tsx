@@ -873,7 +873,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createContactModal, setCreateContactModal] = useState<{ db: string; schema: string } | null>(null);
   const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
-  const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
+  const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string; name?: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNotebookModal, setCreateNotebookModal] = useState<{ db: string; schema: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3071,6 +3071,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDeployStreamlitModal({ db, schema });
   };
 
+  // Redeploy an existing app from a local folder: opens the deploy modal fixed to
+  // the selected STREAMLIT object with OR REPLACE enforced (snapshot semantics).
+  const openRedeployStreamlit = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setDeployStreamlitModal({ db, schema, name });
+  };
+
   const openStreamlitProperties = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -4978,6 +4990,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openContactProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamlitProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
+            menuItem("Redeploy from local folder…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openRedeployStreamlit)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -6127,6 +6141,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         <DeployStreamlitModal
           db={deployStreamlitModal.db}
           schema={deployStreamlitModal.schema}
+          initialName={deployStreamlitModal.name}
           onClose={() => setDeployStreamlitModal(null)}
           onSuccess={() => refreshDatabaseByName(deployStreamlitModal.db, { schema: deployStreamlitModal.schema, kind: "STREAMLIT" })}
         />

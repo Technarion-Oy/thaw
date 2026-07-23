@@ -23,7 +23,12 @@ object browser.
   (upload → temp stage → `CREATE STREAMLIT` → drop stage, all backend). Uses the
   shared `CreateModalShell` with `lockWhileBusy` so the upload isn't orphaned by
   a mid-flight dismiss. No SQL preview — the backend builds the statement inline
-  around the temporary stage it creates.
+  around the temporary stage it creates. **Update-existing path:** with an
+  `initialName` prop the modal runs in "redeploy" mode — the name is fixed to the
+  target app and `OR REPLACE` is enforced (Streamlit snapshots files at CREATE
+  time, so a plain re-upload can't refresh a running app); it re-uploads to a
+  fresh temp stage and issues `CREATE OR REPLACE STREAMLIT`, consistent with
+  notebook redeploy.
 - **`StreamlitPropertiesModal.tsx`** — `GetObjectProperties("STREAMLIT", …)`
   (SHOW STREAMLITS enriched with DESCRIBE `root_location`/`main_file`). Surfaces
   the **URL endpoint** — a clickable Snowsight deep-link built from the account
@@ -40,7 +45,9 @@ object browser.
 Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`): Create-Object →
 Projects submenu, type-node "Create Streamlit…" and "Deploy local Streamlit…"
 (opens `DeployStreamlitModal`; on success refreshes the schema's `STREAMLIT`
-list via `refreshDatabaseByName`), object-node "Properties…", plus DROP / RENAME.
+list via `refreshDatabaseByName`), object-node "Properties…" and "Redeploy from
+local folder…" (opens `DeployStreamlitModal` with `initialName` set → redeploy
+mode), plus DROP / RENAME.
 Icon + colour live in `components/sidebar/objectIcons.tsx` (`AppstoreOutlined`,
 `--icon-streamlit`). Streamlit supports `GET_DDL`, so View Definition /
 comparison / rename are all available.

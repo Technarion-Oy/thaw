@@ -20,6 +20,13 @@ const { Text } = Typography;
 interface Props {
   db: string;
   schema: string;
+  /**
+   * When set, the modal runs in "update existing app" mode: the name is fixed to
+   * this app and OR REPLACE is enforced. Streamlit copies files once at CREATE
+   * time (snapshot semantics), so a plain re-upload can't refresh a running app —
+   * updating means CREATE OR REPLACE against a fresh temp stage.
+   */
+  initialName?: string;
   onClose: () => void;
   onSuccess?: () => void;
 }
@@ -31,15 +38,19 @@ function folderBaseName(dir: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-export default function DeployStreamlitModal({ db, schema, onClose, onSuccess }: Props) {
+export default function DeployStreamlitModal({ db, schema, initialName, onClose, onSuccess }: Props) {
+  // "Update existing app" mode: the target app name is fixed and OR REPLACE is
+  // enforced (see the initialName prop doc).
+  const updateMode = Boolean(initialName);
+
   const [localDir, setLocalDir] = useState("");
   const [mainFile, setMainFile] = useState("");
   const [candidates, setCandidates] = useState<string[]>([]);
   const [detecting, setDetecting] = useState(false);
 
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName ?? "");
   const [caseSensitive, setCaseSensitive] = useState(false);
-  const [orReplace, setOrReplace] = useState(false);
+  const [orReplace, setOrReplace] = useState(updateMode);
   const [queryWarehouse, setQueryWarehouse] = useState("");
   const [title, setTitle] = useState("");
   const [comment, setComment] = useState("");
@@ -71,7 +82,7 @@ export default function DeployStreamlitModal({ db, schema, onClose, onSuccess }:
     }
     if (!dir) return;
     setLocalDir(dir);
-    if (!name.trim()) setName(folderBaseName(dir));
+    if (!updateMode && !name.trim()) setName(folderBaseName(dir));
 
     setDetecting(true);
     try {
@@ -110,7 +121,7 @@ export default function DeployStreamlitModal({ db, schema, onClose, onSuccess }:
         title: title || "",
         comment: comment || "",
       } as any);
-      message.success(`Streamlit app "${name.trim()}" deployed to Snowflake`);
+      message.success(`Streamlit app "${name.trim()}" ${updateMode ? "redeployed" : "deployed"} to Snowflake`);
       onSuccess?.();
       onClose();
     });
@@ -123,10 +134,10 @@ export default function DeployStreamlitModal({ db, schema, onClose, onSuccess }:
   return (
     <CreateModalShell
       icon={<CloudUploadOutlined />}
-      title="Deploy Streamlit"
-      subtitle={`${db}.${schema}`}
+      title={updateMode ? "Redeploy Streamlit" : "Deploy Streamlit"}
+      subtitle={updateMode ? `${db}.${schema}.${initialName}` : `${db}.${schema}`}
       width={720}
-      okText="Deploy"
+      okText={updateMode ? "Redeploy" : "Deploy"}
       error={error}
       errorTitle="Streamlit deploy failed"
       onErrorClose={() => setError(null)}
@@ -168,10 +179,19 @@ export default function DeployStreamlitModal({ db, schema, onClose, onSuccess }:
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
           <Form.Item label="Streamlit name" required style={{ marginBottom: 4 }}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="MY_APP" />
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="MY_APP"
+              readOnly={updateMode}
+            />
           </Form.Item>
           <Form.Item style={{ marginBottom: 4 }}>
-            <Checkbox checked={orReplace} onChange={(e) => setOrReplace(e.target.checked)}>
+            <Checkbox
+              checked={orReplace}
+              disabled={updateMode}
+              onChange={(e) => setOrReplace(e.target.checked)}
+            >
               OR REPLACE
             </Checkbox>
           </Form.Item>
