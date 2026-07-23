@@ -3,9 +3,13 @@
 package app
 
 import (
+	"context"
+	"time"
+
 	"thaw/internal/apperrors"
 	"thaw/internal/snowflake"
 	"thaw/internal/streamlit"
+	"thaw/internal/streamlittemplate"
 )
 
 // AlterStreamlit runs an ALTER STREAMLIT statement for the given app. clause is
@@ -39,4 +43,25 @@ func (a *App) DeployStreamlit(params snowflake.DeployStreamlitParams) error {
 		return apperrors.ErrNotConnected
 	}
 	return client.DeployStreamlit(a.fctx(FeatureObjectEditor), params)
+}
+
+// ListStreamlitTemplates fetches the catalog of Streamlit app templates from the
+// Snowflake-Labs/snowflake-demo-streamlit repo (Apache-2.0). It never rejects on
+// network/rate-limit failures: those return a Degraded catalog carrying a
+// built-in fallback list, so the picker stays usable and additive. No Snowflake
+// connection is required.
+func (a *App) ListStreamlitTemplates() streamlittemplate.Catalog {
+	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
+	defer cancel()
+	return streamlittemplate.ListTemplates(ctx)
+}
+
+// CreateStreamlitFromTemplate scaffolds the chosen template folder into destDir
+// (files preserved, plus the Apache-2.0 LICENSE and a NOTICE provenance line). It
+// refuses a non-empty destination. No Snowflake connection is required — the
+// scaffolded folder is deployed separately via DeployStreamlit.
+func (a *App) CreateStreamlitFromTemplate(templateName, destDir string) error {
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Minute)
+	defer cancel()
+	return streamlittemplate.DownloadTemplate(ctx, templateName, destDir)
 }

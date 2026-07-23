@@ -71,6 +71,7 @@ import {gitrepo} from '../models';
 import {backup} from '../models';
 import {filesystem} from '../models';
 import {mcp} from '../models';
+import {streamlittemplate} from '../models';
 import {sfconfig} from '../models';
 import {users} from '../models';
 
@@ -417,6 +418,8 @@ export function CreateNotificationIntegration(arg1:integrations.NotificationInte
 export function CreateSecurityIntegration(arg1:integrations.SecurityIntegrationParams):Promise<void>;
 
 export function CreateStorageIntegration(arg1:integrations.StorageIntegrationParams):Promise<void>;
+
+export function CreateStreamlitFromTemplate(arg1:string,arg2:string):Promise<void>;
 
 export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
 
@@ -947,6 +950,8 @@ export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string
 export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
 
 export function ListStages(arg1:string,arg2:string):Promise<Array<snowflake.StageSummary>>;
+
+export function ListStreamlitTemplates():Promise<streamlittemplate.Catalog>;
 
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
 

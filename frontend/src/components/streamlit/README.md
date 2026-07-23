@@ -29,6 +29,15 @@ object browser.
   time, so a plain re-upload can't refresh a running app); it re-uploads to a
   fresh temp stage and issues `CREATE OR REPLACE STREAMLIT`, consistent with
   notebook redeploy.
+- **`NewStreamlitFromTemplateModal.tsx`** — scaffolds a new **local** Streamlit
+  app from a [`Snowflake-Labs/snowflake-demo-streamlit`](https://github.com/Snowflake-Labs/snowflake-demo-streamlit)
+  template (Apache-2.0), then the user deploys it with the local-deploy path.
+  Loads the catalog via `ListStreamlitTemplates` (searchable name + description
+  list; surfaces the `Degraded` fallback state as a warning), picks a destination
+  folder (`PickDirectory`), and scaffolds via `CreateStreamlitFromTemplate` with
+  progress/error/success states (success offers **Open folder** via
+  `RevealInFinder`). Shows the **required attribution** line linking to the source
+  repo (`BrowserOpenURL`).
 - **`StreamlitPropertiesModal.tsx`** — `GetObjectProperties("STREAMLIT", …)`
   (SHOW STREAMLITS enriched with DESCRIBE `root_location`/`main_file`). Surfaces
   the **URL endpoint** — a clickable Snowsight deep-link built from the account
@@ -45,7 +54,8 @@ object browser.
 Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`): Create-Object →
 Projects submenu, type-node "Create Streamlit…" and "Deploy local Streamlit…"
 (opens `DeployStreamlitModal`; on success refreshes the schema's `STREAMLIT`
-list via `refreshDatabaseByName`), object-node "Properties…" and "Redeploy from
+list via `refreshDatabaseByName`), "New Streamlit app from template…" (opens
+`NewStreamlitFromTemplateModal`), object-node "Properties…" and "Redeploy from
 local folder…" (opens `DeployStreamlitModal` with `initialName` set → redeploy
 mode), plus DROP / RENAME.
 Icon + colour live in `components/sidebar/objectIcons.tsx` (`AppstoreOutlined`,

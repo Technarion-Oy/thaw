@@ -690,6 +690,10 @@ export function CreateStorageIntegration(arg1) {
   return window['go']['app']['App']['CreateStorageIntegration'](arg1);
 }
 
+export function CreateStreamlitFromTemplate(arg1, arg2) {
+  return window['go']['app']['App']['CreateStreamlitFromTemplate'](arg1, arg2);
+}
+
 export function DebugNotebookCell(arg1, arg2, arg3) {
   return window['go']['app']['App']['DebugNotebookCell'](arg1, arg2, arg3);
 }
@@ -1748,6 +1752,10 @@ export function ListStageFiles(arg1, arg2) {
 
 export function ListStages(arg1, arg2) {
   return window['go']['app']['App']['ListStages'](arg1, arg2);
+}
+
+export function ListStreamlitTemplates() {
+  return window['go']['app']['App']['ListStreamlitTemplates']();
 }
 
 export function ListSupportedDbtVersions() {

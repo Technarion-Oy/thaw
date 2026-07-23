@@ -68,6 +68,7 @@ import {
   NodeIndexOutlined,
   ContactsOutlined,
   AppstoreOutlined,
+  AppstoreAddOutlined,
   GoldOutlined,
   MergeCellsOutlined,
   AuditOutlined,
@@ -217,6 +218,7 @@ import CreateContactModal from "../contact/CreateContactModal";
 import ContactPropertiesModal from "../contact/ContactPropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
 import DeployStreamlitModal from "../streamlit/DeployStreamlitModal";
+import NewStreamlitFromTemplateModal from "../streamlit/NewStreamlitFromTemplateModal";
 import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
 import CreateNotebookModal from "../notebook/CreateNotebookModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
@@ -874,6 +876,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string; name?: string } | null>(null);
+  const [templateStreamlitModal, setTemplateStreamlitModal] = useState<boolean>(false);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNotebookModal, setCreateNotebookModal] = useState<{ db: string; schema: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3071,6 +3074,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDeployStreamlitModal({ db, schema });
   };
 
+  // Scaffold a new local Streamlit app from a snowflake-demo-streamlit template.
+  const openStreamlitFromTemplate = () => {
+    setCtxMenu(null);
+    setTemplateStreamlitModal(true);
+  };
+
   // Redeploy an existing app from a local folder: opens the deploy modal fixed to
   // the selected STREAMLIT object with OR REPLACE enforced (snapshot semantics).
   const openRedeployStreamlit = () => {
@@ -4846,6 +4855,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
+            menuItem("New Streamlit app from template…", <AppstoreAddOutlined style={{ fontSize: 12 }} />, openStreamlitFromTemplate)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -6145,6 +6156,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           onClose={() => setDeployStreamlitModal(null)}
           onSuccess={() => refreshDatabaseByName(deployStreamlitModal.db, { schema: deployStreamlitModal.schema, kind: "STREAMLIT" })}
         />
+      )}
+
+      {templateStreamlitModal && (
+        <NewStreamlitFromTemplateModal onClose={() => setTemplateStreamlitModal(false)} />
       )}
 
       {streamlitPropsModal && (
