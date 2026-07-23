@@ -13,6 +13,17 @@ object browser.
   Live SQL preview via `BuildCreateStreamlitSql`; runs through `ExecDDL`. Only
   the modern `FROM <stage location>` grammar is emitted (no legacy
   `ROOT_LOCATION`).
+- **`DeployStreamlitModal.tsx`** — deploys a **local** Streamlit app folder to
+  Snowflake (distinct from `CreateStreamlitModal`, which points `FROM` at files
+  already in a stage). Native folder picker (`PickDirectory`) → main-file
+  detection (`DetectStreamlitMainFile`: pre-fills `streamlit_app.py` / `app.py`,
+  else offers the root `*.py` candidates in an `AutoComplete`) → name (+ case
+  control, defaulting to the folder name), `OR REPLACE` toggle, query-warehouse
+  picker (`ListWarehouses`), title, and comment. Submits via `DeployStreamlit`
+  (upload → temp stage → `CREATE STREAMLIT` → drop stage, all backend). Uses the
+  shared `CreateModalShell` with `lockWhileBusy` so the upload isn't orphaned by
+  a mid-flight dismiss. No SQL preview — the backend builds the statement inline
+  around the temporary stage it creates.
 - **`StreamlitPropertiesModal.tsx`** — `GetObjectProperties("STREAMLIT", …)`
   (SHOW STREAMLITS enriched with DESCRIBE `root_location`/`main_file`). Surfaces
   the **URL endpoint** — a clickable Snowsight deep-link built from the account

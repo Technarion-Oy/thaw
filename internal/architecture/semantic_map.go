@@ -138,6 +138,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/account/userPropertyUtils.ts",
         "frontend/src/components/agent/AgentPropertiesModal.tsx",
         "frontend/src/components/agent/CreateAgentModal.tsx",
         "frontend/src/components/agent/profile.ts",
@@ -247,6 +248,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/stream/CreateStreamModal.tsx",
         "frontend/src/components/stream/StreamPropertiesModal.tsx",
         "frontend/src/components/streamlit/CreateStreamlitModal.tsx",
+        "frontend/src/components/streamlit/DeployStreamlitModal.tsx",
         "frontend/src/components/streamlit/StreamlitPropertiesModal.tsx",
         "frontend/src/components/tag/CreateTagModal.tsx",
         "frontend/src/components/tag/TagManagementModal.tsx",
