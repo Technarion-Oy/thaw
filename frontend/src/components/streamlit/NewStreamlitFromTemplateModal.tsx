@@ -175,7 +175,10 @@ export default function NewStreamlitFromTemplateModal({ onClose, onDeployNow }: 
                       style={{
                         cursor: "pointer",
                         padding: "8px 12px",
-                        background: isSel ? "var(--selection-bg, #e6f4ff)" : undefined,
+                        // Theme-aware selection highlight (works in light & dark);
+                        // a transparent border on unselected rows avoids a shift.
+                        borderLeft: isSel ? "3px solid var(--accent)" : "3px solid transparent",
+                        background: isSel ? "var(--bg-hover)" : undefined,
                       }}
                     >
                       <List.Item.Meta
