@@ -14,5 +14,9 @@
 // downloads — never a full clone of the 30+ demos — and carries along the repo's
 // Apache-2.0 LICENSE plus a NOTICE provenance line for attribution.
 //
-// thaw:domain: Object Browser & Administration
+// Scaffolding writes into a local folder and never creates a Snowflake object —
+// it is a local developer workflow (like dbt project scaffolding), not object
+// administration — so it belongs to the Snowpark & Developer Workflows domain.
+//
+// thaw:domain: Snowpark & Developer Workflows
 package streamlittemplate

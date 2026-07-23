@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// @thaw-domain: Object Browser & Administration
+// @thaw-domain: Snowpark & Developer Workflows
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Space, Typography, Tooltip, message } from "antd";
