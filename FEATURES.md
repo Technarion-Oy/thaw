@@ -1248,6 +1248,7 @@ The remaining basic features below also have no user toggle but keep an **admin-
 - **gosec** — security static analysis (weekly): hardcoded credentials, weak crypto, TLS misconfigurations, unsafe operations
 - **IP protection** — proprietary SQL analysis algorithms (syntax tokenizer, semantic validator, JOIN condition engine) are implemented in the Go backend (`internal/sqleditor`) and compiled into the binary; the frontend bundle is additionally processed by Terser (2-pass minification, no source maps) and `javascript-obfuscator` (RC4 string-array encoding, hexadecimal identifier renaming) so that app logic is not recoverable from the shipped binary
 - **Release builds** — macOS (arm64), Windows (amd64), and Linux (amd64) binaries are built automatically when a version tag (`v*`) is pushed to `main`; artifacts are named after the tag (e.g. `thaw-v1.2.3-darwin-arm64.zip`)
+- **Windows one-click installer** — the Windows release ships a modern, Electron/Squirrel-style NSIS installer (`build/windows/installer/project.nsi`): no wizard pages, a branded dark-themed progress screen, a per-user install to `%LOCALAPPDATA%\Programs\Thaw` (no UAC prompt), automatic WebView2-runtime bootstrap when missing, and Thaw launches itself when the copy finishes. A raw portable `.exe` is published alongside the installer
 
 All security/quality tools can also be run locally — see the `README.md` for install and run commands.
 

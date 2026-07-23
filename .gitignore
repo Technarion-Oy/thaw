@@ -18,6 +18,13 @@ coverage.out
 # ── Wails build artefacts ─────────────────────────────────────────────────────
 /build/darwin/thaw.app
 /build/windows/thaw.exe
+# Regenerated on every `wails build --nsis` from wails.json — never commit these.
+# (project.nsi and installer/resources/ ARE tracked; everything below is generated.)
+/build/windows/icon.ico
+/build/windows/wails.exe.manifest
+/build/windows/*.syso
+/build/windows/installer/wails_tools.nsh
+/build/windows/installer/tmp/
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 frontend/node_modules/
