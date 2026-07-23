@@ -5590,8 +5590,24 @@ func (c *Client) DeployStreamlit(ctx context.Context, params DeployStreamlitPara
 		return fmt.Errorf("upload streamlit app to stage: %w", err)
 	}
 
-	// Build the CREATE STREAMLIT statement (grammar mirrors
-	// streamlit.BuildCreateStreamlitSql; see method doc for why it's inline).
+	// Build the CREATE STREAMLIT statement against the temp stage and run it.
+	if _, err := c.execCtx(ctx, buildDeployStreamlitSQL(stageAt, mainFile, params)); err != nil {
+		return fmt.Errorf("create streamlit: %w", err)
+	}
+	return nil
+}
+
+// buildDeployStreamlitSQL constructs the CREATE STREAMLIT statement DeployStreamlit
+// runs, sourcing the app from the (already-created) temp stage location stageAt
+// and the given relative mainFile. It is a pure helper split out from
+// DeployStreamlit so the SQL grammar can be unit-tested without a live Snowflake
+// connection.
+//
+// The grammar mirrors streamlit.BuildCreateStreamlitSql; it is emitted inline
+// here rather than by calling that builder because internal/streamlit imports
+// internal/snowflake (calling back would be an import cycle) — see the
+// DeployStreamlit doc.
+func buildDeployStreamlitSQL(stageAt, mainFile string, params DeployStreamlitParams) string {
 	streamlitRef := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(params.Database), QuoteIdent(params.Schema), QuoteOrBare(params.Name, params.CaseSensitive))
 
 	var sb strings.Builder
@@ -5612,11 +5628,7 @@ func (c *Client) DeployStreamlit(ctx context.Context, params DeployStreamlitPara
 	if cm := strings.TrimSpace(params.Comment); cm != "" {
 		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'", EscapeStringLit(cm)))
 	}
-
-	if _, err := c.execCtx(ctx, sb.String()); err != nil {
-		return fmt.Errorf("create streamlit: %w", err)
-	}
-	return nil
+	return sb.String()
 }
 
 // ── Cross-schema object search ───────────────────────────────────────────────
