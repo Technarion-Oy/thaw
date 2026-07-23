@@ -62,8 +62,10 @@ object browser.
 
 ## Wiring
 
-Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`): Create-Object →
-Projects submenu, type-node "Create Streamlit…" and "Deploy local Streamlit…"
+Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`) from two entry
+points — the schema's **Create-Object → Projects** submenu (Streamlit…, Deploy
+local Streamlit…, New Streamlit app from template…) and the **"Streamlits"
+type-node** menu ("Create Streamlit…" and "Deploy local Streamlit…"
 (opens `DeployStreamlitModal`; on success refreshes the schema's `STREAMLIT`
 list via `refreshDatabaseByName`), "New Streamlit app from template…" (opens
 `NewStreamlitFromTemplateModal`), object-node "Properties…" and "Redeploy from

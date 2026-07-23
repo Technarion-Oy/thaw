@@ -4747,6 +4747,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
                   {menuItem("Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
+                  {menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
+                  {menuItem("New Streamlit app from template…", <AppstoreAddOutlined style={{ fontSize: 12 }} />, openStreamlitFromTemplate)}
                   {menuItem("Notebook…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
                 </>
               ), 1)}
