@@ -130,6 +130,9 @@ jobs:
         run: go mod download
 
       - name: Install garble
+        # Only macOS/Linux build with -obfuscated; the Windows build dropped it
+        # (issue #820), so skip the garble install on Windows runners.
+        if: matrix.platform != 'windows'
         run: go install mvdan.cc/garble@latest
 
       - name: Install NSIS (Windows only)

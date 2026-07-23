@@ -64,6 +64,9 @@ jobs:
         run: go mod download
 
       - name: Install garble
+        # Only macOS/Linux build with -obfuscated; the Windows build dropped it
+        # (issue #820), so skip the garble install on Windows runners.
+        if: matrix.platform != 'windows'
         run: go install mvdan.cc/garble@latest
 
       - name: Install NSIS (Windows only)
@@ -247,3 +250,24 @@ jobs:
           files: |
             build/bin/checksums.txt
             build/bin/checksums.txt.sig
+
+      # ── Post-release checklist reminder (issue #820) ───────────────────────
+      # SmartScreen scores download reputation per file hash, so every new
+      # installer starts from zero. Submitting each release installer to
+      # Microsoft for review usually clears the "isn't commonly downloaded"
+      # warning within days. Only meaningful on tag runs, where the installer is
+      # actually attached to the GitHub Release above.
+      - name: SmartScreen submission reminder (Windows)
+        if: github.ref_type == 'tag' && matrix.platform == 'windows'
+        shell: bash
+        run: |
+          {
+            echo "### 🪟 Post-release: submit the Windows installer to Microsoft (issue #820)"
+            echo ""
+            echo "Every release produces a new file hash, so SmartScreen download reputation resets each version."
+            echo "To clear the \"isn't commonly downloaded\" warning faster:"
+            echo ""
+            echo "1. Download \`thaw-${{ steps.prep.outputs.version }}-windows-${{ matrix.arch }}-installer.exe\` from the release."
+            echo "2. Submit it at <https://www.microsoft.com/en-us/wdsi/filesubmission> → **Software developer** → report as incorrectly detected."
+            echo "3. Publisher reputation under Azure Trusted Signing keeps accruing across releases, so this should stop being needed over time."
+          } >> "$GITHUB_STEP_SUMMARY"
