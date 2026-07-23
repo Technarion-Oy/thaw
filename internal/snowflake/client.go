@@ -5585,8 +5585,7 @@ func (c *Client) DeployStreamlit(ctx context.Context, params DeployStreamlitPara
 	defer c.execCtx(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
 	// Recursively upload the app folder to the stage, preserving relative paths.
-	// NOTE: the dedicated recursive-upload helper (step 1.2) refines this with
-	// per-subdirectory PUT grouping and a fuller junk skip-list plus unit tests.
+	// See uploadDirToStage / planStageUploads in stage_upload.go.
 	if err := c.uploadDirToStage(ctx, params.LocalDir, stageAt); err != nil {
 		return fmt.Errorf("upload streamlit app to stage: %w", err)
 	}
@@ -5616,81 +5615,6 @@ func (c *Client) DeployStreamlit(ctx context.Context, params DeployStreamlitPara
 
 	if _, err := c.execCtx(ctx, sb.String()); err != nil {
 		return fmt.Errorf("create streamlit: %w", err)
-	}
-	return nil
-}
-
-// uploadDirToStage recursively uploads every file under localDir to the given
-// stage location (e.g. "@db.schema.stage"), preserving each file's path relative
-// to localDir. One PUT is issued per file, targeting the subdirectory that
-// mirrors its relative location. Common VCS/junk paths (.git/, __pycache__/,
-// hidden dot-files, .DS_Store) are skipped.
-//
-// This is the minimal working uploader for the Streamlit deploy path; step 1.2
-// replaces it with a per-subdirectory PUT-grouping helper plus dedicated tests.
-func (c *Client) uploadDirToStage(ctx context.Context, localDir, stageAt string) error {
-	root, err := filepath.Abs(localDir)
-	if err != nil {
-		return fmt.Errorf("resolve app dir: %w", err)
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		return fmt.Errorf("stat app dir: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("app path is not a directory: %s", root)
-	}
-
-	uploaded := 0
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		name := d.Name()
-		if d.IsDir() {
-			// Skip VCS metadata, Python caches, and hidden directories (but not
-			// the root itself, whose relative name is ".").
-			if path != root && (name == ".git" || name == "__pycache__" || strings.HasPrefix(name, ".")) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Skip hidden files and OS junk.
-		if strings.HasPrefix(name, ".") {
-			return nil
-		}
-
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		relDir := filepath.ToSlash(filepath.Dir(rel))
-
-		fileURL, err := localFileURLForFile(path)
-		if err != nil {
-			return fmt.Errorf("build file url for %s: %w", rel, err)
-		}
-		escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
-
-		target := stageAt
-		if relDir != "" && relDir != "." {
-			target = stageAt + "/" + relDir
-		}
-
-		putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, target)
-		putRows, err := c.queryCtx(ctx, putSQL)
-		if err != nil {
-			return fmt.Errorf("upload %s: %w", rel, err)
-		}
-		putRows.Close() //nolint:errcheck
-		uploaded++
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if uploaded == 0 {
-		return fmt.Errorf("no files to upload in %s", root)
 	}
 	return nil
 }
