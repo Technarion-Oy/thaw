@@ -68,7 +68,6 @@ import {
   NodeIndexOutlined,
   ContactsOutlined,
   AppstoreOutlined,
-  AppstoreAddOutlined,
   GoldOutlined,
   MergeCellsOutlined,
   AuditOutlined,
@@ -95,6 +94,7 @@ import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectC
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
+import { useSessionStore } from "../../store/sessionStore";
 import { insertAtCursor } from "../editor/editorRef";
 import { useObjectStore } from "../../store/objectStore";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -958,6 +958,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   useEffect(() => {
     const off = EventsOn("mcp:open-er-designer", (payload: { database: string; merged: snowflake.ERDiagramData; baseline: snowflake.ERDiagramData }) => {
       setMcpErDesigner({ database: payload.database, merged: payload.merged, baseline: payload.baseline });
+    });
+    return () => off();
+  }, []);
+
+  // Tools → New Streamlit App from Template — a local scaffolding workflow launched
+  // from the menu bar (not the object browser). The active session's db/schema seed
+  // the optional "Deploy now" hand-off; scaffolding itself needs neither.
+  useEffect(() => {
+    const off = EventsOn("menu:streamlit-template", () => {
+      const { database, schema } = useSessionStore.getState();
+      setTemplateStreamlitModal({ db: database, schema });
     });
     return () => off();
   }, []);
@@ -3074,16 +3085,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDeployStreamlitModal({ db, schema });
   };
 
-  // Scaffold a new local Streamlit app from a snowflake-demo-streamlit template.
-  const openStreamlitFromTemplate = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    setCtxMenu(null);
-    setTemplateStreamlitModal({ db, schema });
-  };
-
   // Redeploy an existing app from a local folder: opens the deploy modal fixed to
   // the selected STREAMLIT object with OR REPLACE enforced (snapshot semantics).
   const openRedeployStreamlit = () => {
@@ -4748,7 +4749,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                   {menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
-                  {menuItem("New Streamlit app from template…", <AppstoreAddOutlined style={{ fontSize: 12 }} />, openStreamlitFromTemplate)}
                   {menuItem("Notebook…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
                 </>
               ), 1)}
@@ -4861,8 +4861,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
-          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
-            menuItem("New Streamlit app from template…", <AppstoreAddOutlined style={{ fontSize: 12 }} />, openStreamlitFromTemplate)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -6168,11 +6166,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       {templateStreamlitModal && (
         <NewStreamlitFromTemplateModal
           onClose={() => setTemplateStreamlitModal(null)}
-          onDeployNow={(destDir) => {
-            const { db, schema } = templateStreamlitModal;
-            setTemplateStreamlitModal(null);
-            setDeployStreamlitModal({ db, schema, localDir: destDir });
-          }}
+          // "Deploy now" needs a target schema; offer it only when the active
+          // session has one (the menu-bar launch may not).
+          onDeployNow={
+            templateStreamlitModal.db && templateStreamlitModal.schema
+              ? (destDir) => {
+                  const { db, schema } = templateStreamlitModal;
+                  setTemplateStreamlitModal(null);
+                  setDeployStreamlitModal({ db, schema, localDir: destDir });
+                }
+              : undefined
+          }
         />
       )}
 

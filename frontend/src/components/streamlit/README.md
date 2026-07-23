@@ -62,15 +62,20 @@ object browser.
 
 ## Wiring
 
-Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`) from two entry
-points — the schema's **Create-Object → Projects** submenu (Streamlit…, Deploy
-local Streamlit…, New Streamlit app from template…) and the **"Streamlits"
-type-node** menu ("Create Streamlit…" and "Deploy local Streamlit…"
-(opens `DeployStreamlitModal`; on success refreshes the schema's `STREAMLIT`
-list via `refreshDatabaseByName`), "New Streamlit app from template…" (opens
-`NewStreamlitFromTemplateModal`), object-node "Properties…" and "Redeploy from
-local folder…" (opens `DeployStreamlitModal` with `initialName` set → redeploy
-mode), plus DROP / RENAME.
-Icon + colour live in `components/sidebar/objectIcons.tsx` (`AppstoreOutlined`,
-`--icon-streamlit`). Streamlit supports `GET_DDL`, so View Definition /
-comparison / rename are all available.
+The **object-store** actions are registered in `components/layout/Sidebar.tsx`
+(kind `STREAMLIT`) from two entry points — the schema's **Create-Object →
+Projects** submenu ("Streamlit…", "Deploy local Streamlit…") and the
+**"Streamlits" type-node** menu ("Create Streamlit…", "Deploy local Streamlit…";
+opens `DeployStreamlitModal`, refreshing the schema's `STREAMLIT` list via
+`refreshDatabaseByName` on success) — plus the object-node "Properties…" and
+"Redeploy from local folder…" (opens `DeployStreamlitModal` with `initialName`
+→ redeploy mode), DROP / RENAME. Icon + colour live in
+`components/sidebar/objectIcons.tsx` (`AppstoreOutlined`, `--icon-streamlit`).
+Streamlit supports `GET_DDL`, so View Definition / comparison / rename are all
+available.
+
+**`NewStreamlitFromTemplateModal`** is a local scaffolding workflow, so it is
+launched from the **menu bar** — *Tools → New Streamlit App from Template…*
+(`internal/app/menu.go` emits `menu:streamlit-template`, which Sidebar listens
+for), **not** the object browser. It seeds the optional "Deploy now" hand-off
+with the active session's db/schema (offered only when a schema is selected).
