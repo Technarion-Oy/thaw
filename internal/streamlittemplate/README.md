@@ -43,7 +43,10 @@ single chosen folder locally — never a full clone of the 30+ demos.
 - **Path safety**: `validTemplateName` rejects traversal/hidden/excluded names,
   and `safeJoin` rejects any tree entry that would escape `destDir`.
 - Base URLs (`githubAPIBase`, `rawBase`) are package vars so tests can point them
-  at an `httptest` server; the network paths are covered without live GitHub.
+  at an `httptest` server; the network paths are covered without live GitHub —
+  including the failure modes (rate-limit 403 → `Degraded` catalog / clear
+  download error, truncated tree, template-not-found) and space-containing folder
+  names (URL escaping).
 
 ## IPC
 

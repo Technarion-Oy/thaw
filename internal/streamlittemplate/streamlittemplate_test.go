@@ -235,3 +235,80 @@ func TestSafeJoin(t *testing.T) {
 		}
 	}
 }
+
+// rateLimitHandler responds like GitHub when the unauthenticated rate limit is
+// exhausted: 403 with X-RateLimit-Remaining: 0.
+func rateLimitHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+	})
+}
+
+func TestListTemplatesRateLimited(t *testing.T) {
+	withServer(t, rateLimitHandler())
+	cat := ListTemplates(context.Background())
+	if !cat.Degraded {
+		t.Fatal("expected degraded catalog on rate limit")
+	}
+	if !strings.Contains(cat.Note, "rate limit") {
+		t.Errorf("degraded note should mention the rate limit, got %q", cat.Note)
+	}
+	if len(cat.Templates) != len(embeddedTemplateNames) {
+		t.Errorf("fallback templates = %d, want %d", len(cat.Templates), len(embeddedTemplateNames))
+	}
+}
+
+func TestDownloadTemplateRateLimited(t *testing.T) {
+	withServer(t, rateLimitHandler())
+	err := DownloadTemplate(context.Background(), "Inventory Tracker", filepath.Join(t.TempDir(), "app"))
+	if err == nil || !strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("expected a clear rate-limit error, got %v", err)
+	}
+}
+
+func TestDownloadTemplateTruncatedTree(t *testing.T) {
+	withServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/git/trees/") {
+			_ = json.NewEncoder(w).Encode(treeResponse{
+				Tree:      []treeEntry{{Path: "Inventory Tracker/streamlit_app.py", Type: "blob"}},
+				Truncated: true,
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	err := DownloadTemplate(context.Background(), "Inventory Tracker", filepath.Join(t.TempDir(), "app"))
+	if err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("expected a truncated-tree error, got %v", err)
+	}
+}
+
+func TestDownloadTemplateNotFound(t *testing.T) {
+	withServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/git/trees/") {
+			_ = json.NewEncoder(w).Encode(treeResponse{
+				Tree: []treeEntry{{Path: "Some Other App/streamlit_app.py", Type: "blob"}},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	err := DownloadTemplate(context.Background(), "Missing App", filepath.Join(t.TempDir(), "app"))
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected a not-found error, got %v", err)
+	}
+}
+
+func TestRawURLEscapesSpaces(t *testing.T) {
+	got := rawURL("Business Intelligence Dashboard/pages/page 1.py")
+	for _, want := range []string{
+		"Business%20Intelligence%20Dashboard",
+		"page%201.py",
+		"/" + repoOwner + "/" + repoName + "/" + repoRef + "/",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rawURL()=%q missing %q", got, want)
+		}
+	}
+}
