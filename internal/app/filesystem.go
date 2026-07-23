@@ -427,10 +427,13 @@ func (a *App) PickPrivateKeyFile() string {
 }
 
 // PickDirectory opens a native folder-picker dialog and returns the selected path.
-// Returns an empty string if the user cancels.
+// Returns an empty string if the user cancels. The dialog opens in the currently
+// opened folder when set (matching PickOpenFile/PickAnyFile); `currentWorkdir`
+// returns "" when no folder is open, which lets the OS pick the location as before.
 func (a *App) PickDirectory() string {
 	path, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select repository directory",
+		Title:            "Select folder",
+		DefaultDirectory: a.currentWorkdir(),
 	})
 	if err != nil {
 		return ""
