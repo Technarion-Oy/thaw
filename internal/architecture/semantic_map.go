@@ -251,6 +251,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/streamlit/CreateStreamlitModal.tsx",
         "frontend/src/components/streamlit/DeployStreamlitModal.tsx",
         "frontend/src/components/streamlit/NewStreamlitFromTemplateModal.tsx",
+        "frontend/src/components/streamlit/StreamlitPreviewControl.tsx",
         "frontend/src/components/streamlit/StreamlitPropertiesModal.tsx",
         "frontend/src/components/tag/CreateTagModal.tsx",
         "frontend/src/components/tag/TagManagementModal.tsx",

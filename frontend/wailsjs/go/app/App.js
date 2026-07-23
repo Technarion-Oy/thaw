@@ -2170,6 +2170,10 @@ export function StartShell(arg1, arg2) {
   return window['go']['app']['App']['StartShell'](arg1, arg2);
 }
 
+export function StartStreamlitPreview(arg1, arg2) {
+  return window['go']['app']['App']['StartStreamlitPreview'](arg1, arg2);
+}
+
 export function StopDapProxy() {
   return window['go']['app']['App']['StopDapProxy']();
 }
@@ -2188,6 +2192,10 @@ export function StopNotebookSession(arg1) {
 
 export function StopShell() {
   return window['go']['app']['App']['StopShell']();
+}
+
+export function StopStreamlitPreview() {
+  return window['go']['app']['App']['StopStreamlitPreview']();
 }
 
 export function SubmitMFACode(arg1, arg2) {

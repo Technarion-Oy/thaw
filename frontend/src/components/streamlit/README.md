@@ -31,6 +31,13 @@ object browser.
   time, so a plain re-upload can't refresh a running app); it re-uploads to a
   fresh temp stage and issues `CREATE OR REPLACE STREAMLIT`, consistent with
   notebook redeploy.
+- **`StreamlitPreviewControl.tsx`** — a compact "Preview locally" control embedded
+  in `DeployStreamlitModal`. Runs `streamlit run <main file>` in the Snowpark
+  Python environment via `StartStreamlitPreview` (backend `internal/snowpark`),
+  streams `snowpark:streamlit-*` events, opens the browser when the server is
+  ready, and offers Stop / Open-in-browser. Stops the process on unmount / Stop.
+  Surfaces the **runtime-parity caveat** (Snowflake pins Python/Streamlit versions
+  and an allow-listed Anaconda set, so local ≠ Snowflake).
 - **`NewStreamlitFromTemplateModal.tsx`** — scaffolds a new **local** Streamlit
   app from a [`Snowflake-Labs/snowflake-demo-streamlit`](https://github.com/Snowflake-Labs/snowflake-demo-streamlit)
   template (Apache-2.0), then the user deploys it with the local-deploy path.

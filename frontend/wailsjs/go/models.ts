@@ -5489,6 +5489,20 @@ export namespace snowpark {
 	        this.pythonPath = source["pythonPath"];
 	    }
 	}
+	export class StreamlitPreviewResult {
+	    url: string;
+	    port: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamlitPreviewResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.port = source["port"];
+	    }
+	}
 
 }
 

@@ -1159,6 +1159,8 @@ export function StartQuery(arg1:string,arg2:string):Promise<string>;
 
 export function StartShell(arg1:string,arg2:string):Promise<void>;
 
+export function StartStreamlitPreview(arg1:string,arg2:string):Promise<snowpark.StreamlitPreviewResult>;
+
 export function StopDapProxy():Promise<void>;
 
 export function StopFileWatcher():Promise<void>;
@@ -1168,6 +1170,8 @@ export function StopMCPSession(arg1:string):Promise<void>;
 export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
+
+export function StopStreamlitPreview():Promise<void>;
 
 export function SubmitMFACode(arg1:string,arg2:string):Promise<void>;
 

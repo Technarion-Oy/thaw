@@ -14,6 +14,7 @@ import {
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
+import StreamlitPreviewControl from "./StreamlitPreviewControl";
 
 const { Text } = Typography;
 
@@ -238,6 +239,14 @@ export default function DeployStreamlitModal({ db, schema, initialName, initialL
               String(opt?.value ?? "").toLowerCase().includes(input.toLowerCase())
             }
             style={{ width: "100%" }}
+          />
+        </Form.Item>
+
+        <Form.Item label="Local preview" style={itemStyle}>
+          <StreamlitPreviewControl
+            localDir={localDir}
+            mainFile={mainFile}
+            disabled={!localDir.trim() || !mainFile.trim() || detecting}
           />
         </Form.Item>
 

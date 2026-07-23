@@ -103,7 +103,7 @@ nil-check → delegate → return.
 | `erdesigner.go` | ER designer state sync IPC: `UpdateERDesignerState`, `ClearERDesignerState`; pushes designer table state into `mcp.Manager.ERDesignerState()` for MCP tool access. |
 | `notebook_native.go` | Snowflake Notebooks CRUD IPC; delegates to `internal/snowflake`. |
 | `migration.go` | Schema-migration IPC (`ScanMigrationSource`, `AnalyzeMigration`, `CreateMigrationSnapshot`, `ExecuteMigration`); delegates to `a.migrationSvc` (`internal/migration`). |
-| `snowpark.go` | Snowpark/Jupyter environment check, setup, kernel lifecycle, and pip package management — including the dependency-file surface (`PickRequirementsFile`, `PickPyprojectFile`, `InstallRequirementsFile`, `InstallPyprojectFile`, `PickFreezeOutputFile`, `FreezeRequirements`); delegates to `a.snowparkSvc` (`internal/snowpark`). |
+| `snowpark.go` | Snowpark/Jupyter environment check, setup, kernel lifecycle, and pip package management — including the dependency-file surface (`PickRequirementsFile`, `PickPyprojectFile`, `InstallRequirementsFile`, `InstallPyprojectFile`, `PickFreezeOutputFile`, `FreezeRequirements`) and the local Streamlit preview (`StartStreamlitPreview`, `StopStreamlitPreview`); delegates to `a.snowparkSvc` (`internal/snowpark`). |
 
 ## Key types & functions
 
