@@ -437,7 +437,7 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
-export function DeployStreamlit(arg1:snowflake.DeployStreamlitParams):Promise<void>;
+export function DeployStreamlit(arg1:streamlit.DeployStreamlitParams):Promise<void>;
 
 export function DescribeAgent(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

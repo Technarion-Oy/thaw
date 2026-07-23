@@ -6,6 +6,10 @@ package stage
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -287,6 +291,105 @@ func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath 
 
 	_, err = client.Execute(ctx, sql)
 	return err
+}
+
+// ── Recursive directory upload ──────────────────────────────────────────────
+
+// dirUpload is one planned file upload: an absolute local file path and the
+// '/'-separated stage subdirectory (relative to the stage root) it belongs in
+// ("" for the folder root).
+type dirUpload struct {
+	Path   string
+	RelDir string
+}
+
+// isJunkDir reports whether a directory should be skipped when uploading a local
+// folder: VCS metadata, Python bytecode caches, and any hidden (dot) directory.
+func isJunkDir(name string) bool {
+	return name == ".git" || name == "__pycache__" || strings.HasPrefix(name, ".")
+}
+
+// isJunkFile reports whether a file should be skipped: OS junk and any hidden
+// (dot) file (".DS_Store" is covered by the dot rule but named for clarity).
+func isJunkFile(name string) bool {
+	return name == ".DS_Store" || strings.HasPrefix(name, ".")
+}
+
+// planDirUploads walks the folder at root and returns an ordered, deterministic
+// set of file uploads that reproduce its non-junk tree, preserving relative
+// paths. It performs no I/O beyond the walk, so it is unit-testable without a
+// live connection. Skips .git/, __pycache__/, other hidden directories, hidden
+// files, and .DS_Store (see isJunkDir / isJunkFile).
+func planDirUploads(root string) ([]dirUpload, error) {
+	var ups []dirUpload
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if path != root && isJunkDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isJunkFile(d.Name()) {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relDir := filepath.ToSlash(filepath.Dir(rel))
+		if relDir == "." {
+			relDir = ""
+		}
+		ups = append(ups, dirUpload{Path: path, RelDir: relDir})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(ups, func(i, j int) bool { return ups[i].Path < ups[j].Path })
+	return ups, nil
+}
+
+// UploadDirToStage recursively uploads every non-junk file under localDir to
+// stageName, preserving each file's path relative to localDir — one PUT per file
+// via UploadFileToStage (AUTO_COMPRESS=FALSE). stageName is the stage root (e.g.
+// "@DB.SCHEMA.STAGE"); files land under "<stageName>/<relative subdir>". VCS
+// metadata, hidden files, __pycache__, and .DS_Store are skipped.
+func UploadDirToStage(ctx context.Context, client *snowflake.Client, localDir, stageName string, overwrite bool) error {
+	root, err := filepath.Abs(localDir)
+	if err != nil {
+		return fmt.Errorf("resolve app dir: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat app dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("app path is not a directory: %s", root)
+	}
+
+	ups, err := planDirUploads(root)
+	if err != nil {
+		return err
+	}
+	if len(ups) == 0 {
+		return fmt.Errorf("no files to upload in %s", root)
+	}
+
+	base := strings.TrimRight(stageName, "/")
+	for _, u := range ups {
+		target := base
+		if u.RelDir != "" {
+			target = base + "/" + u.RelDir
+		}
+		if err := UploadFileToStage(ctx, client, u.Path, target, 0, false, "", overwrite); err != nil {
+			return fmt.Errorf("upload %s: %w", u.Path, err)
+		}
+	}
+	return nil
 }
 
 // DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.

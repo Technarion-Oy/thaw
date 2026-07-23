@@ -66,7 +66,7 @@ func TestDeployStreamlit(t *testing.T) {
 	}
 
 	appName := randomName("APP_")
-	params := snowflake.DeployStreamlitParams{
+	params := streamlit.DeployStreamlitParams{
 		Database: dbName,
 		Schema:   "PUBLIC",
 		Name:     appName,
@@ -78,7 +78,7 @@ func TestDeployStreamlit(t *testing.T) {
 
 	deployCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	if err := client.DeployStreamlit(deployCtx, params); err != nil {
+	if err := streamlit.DeployStreamlit(deployCtx, client, params); err != nil {
 		t.Fatalf("DeployStreamlit: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestDeployStreamlit(t *testing.T) {
 	params.OrReplace = true
 	redeployCtx, cancel2 := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel2()
-	if err := client.DeployStreamlit(redeployCtx, params); err != nil {
+	if err := streamlit.DeployStreamlit(redeployCtx, client, params); err != nil {
 		t.Fatalf("DeployStreamlit (redeploy): %v", err)
 	}
 	assertStreamlitMainFile(t, client, fqn, "streamlit_app.py")

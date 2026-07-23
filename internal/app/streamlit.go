@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"thaw/internal/apperrors"
-	"thaw/internal/snowflake"
 	"thaw/internal/streamlit"
 	"thaw/internal/streamlittemplate"
 )
@@ -37,12 +36,12 @@ func (a *App) DetectStreamlitMainFile(dir string) (streamlit.MainFileResult, err
 // The upload uses PUT. PUT is always available in Thaw — the former PUT feature
 // flag was removed in feature-flags v18 (issue #567), so there is no flag to gate
 // on here.
-func (a *App) DeployStreamlit(params snowflake.DeployStreamlitParams) error {
+func (a *App) DeployStreamlit(params streamlit.DeployStreamlitParams) error {
 	client := a.currentClient()
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return client.DeployStreamlit(a.fctx(FeatureObjectEditor), params)
+	return streamlit.DeployStreamlit(a.fctx(FeatureObjectEditor), client, params)
 }
 
 // ListStreamlitTemplates fetches the catalog of Streamlit app templates from the

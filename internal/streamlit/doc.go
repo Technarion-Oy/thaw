@@ -7,10 +7,11 @@
 // FROM clause), a relative main file, and an optional query warehouse, title,
 // comment, and external-access integrations.
 //
-// For the "deploy a local app folder → Snowflake" path, DetectStreamlitMainFile
+// For the "deploy a local app folder → Snowflake" path, DeployStreamlit uploads
+// the folder to a temporary stage (reusing stage.UploadDirToStage) and issues
+// CREATE STREAMLIT (via BuildCreateStreamlitSql), and DetectStreamlitMainFile
 // picks the entrypoint at a folder root (preferring streamlit_app.py, then
-// app.py, else returning the *.py candidates to choose from); the recursive
-// stage upload and the CREATE itself live in internal/snowflake (DeployStreamlit).
+// app.py, else returning the *.py candidates to choose from).
 //
 // Only the modern FROM <stage location> grammar is emitted; the deprecated
 // ROOT_LOCATION form is intentionally not supported. The mutable properties —
