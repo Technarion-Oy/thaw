@@ -216,6 +216,7 @@ import GatewayPropertiesModal from "../gateway/GatewayPropertiesModal";
 import CreateContactModal from "../contact/CreateContactModal";
 import ContactPropertiesModal from "../contact/ContactPropertiesModal";
 import CreateStreamlitModal from "../streamlit/CreateStreamlitModal";
+import DeployStreamlitModal from "../streamlit/DeployStreamlitModal";
 import StreamlitPropertiesModal from "../streamlit/StreamlitPropertiesModal";
 import CreateNotebookModal from "../notebook/CreateNotebookModal";
 import CreatePipeModal from "../pipe/CreatePipeModal";
@@ -872,6 +873,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createContactModal, setCreateContactModal] = useState<{ db: string; schema: string } | null>(null);
   const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
+  const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNotebookModal, setCreateNotebookModal] = useState<{ db: string; schema: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3060,6 +3062,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateStreamlitModal({ db, schema });
   };
 
+  const openDeployStreamlit = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setDeployStreamlitModal({ db, schema });
+  };
+
   const openStreamlitProperties = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -4821,6 +4832,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Contact…", <ContactsOutlined style={{ fontSize: 12 }} />, openCreateContact)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Create Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
+            menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -6107,6 +6120,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createStreamlitModal.schema}
           onClose={() => setCreateStreamlitModal(null)}
           onSuccess={() => refreshDatabaseByName(createStreamlitModal.db, { schema: createStreamlitModal.schema, kind: "STREAMLIT" })}
+        />
+      )}
+
+      {deployStreamlitModal && (
+        <DeployStreamlitModal
+          db={deployStreamlitModal.db}
+          schema={deployStreamlitModal.schema}
+          onClose={() => setDeployStreamlitModal(null)}
+          onSuccess={() => refreshDatabaseByName(deployStreamlitModal.db, { schema: deployStreamlitModal.schema, kind: "STREAMLIT" })}
         />
       )}
 

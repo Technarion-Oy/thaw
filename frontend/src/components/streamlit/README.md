@@ -38,7 +38,9 @@ object browser.
 ## Wiring
 
 Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`): Create-Object →
-Projects submenu, type-node "Create Streamlit…", object-node "Properties…", plus
-DROP / RENAME. Icon + colour live in `components/sidebar/objectIcons.tsx`
-(`AppstoreOutlined`, `--icon-streamlit`). Streamlit supports `GET_DDL`, so View
-Definition / comparison / rename are all available.
+Projects submenu, type-node "Create Streamlit…" and "Deploy local Streamlit…"
+(opens `DeployStreamlitModal`; on success refreshes the schema's `STREAMLIT`
+list via `refreshDatabaseByName`), object-node "Properties…", plus DROP / RENAME.
+Icon + colour live in `components/sidebar/objectIcons.tsx` (`AppstoreOutlined`,
+`--icon-streamlit`). Streamlit supports `GET_DDL`, so View Definition /
+comparison / rename are all available.
