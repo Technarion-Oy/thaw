@@ -26,6 +26,20 @@ CREATE [OR REPLACE] STREAMLIT [IF NOT EXISTS] <fqn>
   `Comment`.
 - `BuildCreateStreamlitSql` — the only exported builder.
 
+## Local-app deploy helpers
+
+Supporting the "deploy a local Streamlit folder → Snowflake" path (the recursive
+stage upload and `CREATE STREAMLIT` live in `internal/snowflake`,
+`DeployStreamlit`):
+
+- `DetectStreamlitMainFile(dir) (MainFileResult, error)` — inspects the **root**
+  of a local app folder and picks the entrypoint, preferring `streamlit_app.py`
+  then `app.py`. When neither is present `MainFile` is empty and the caller picks
+  from `Candidates` (all root-level `*.py` base names, sorted — always populated
+  so the UI can offer overrides). Only the root is scanned (pages under `pages/`
+  are not entrypoints); hidden files are skipped and the `.py` extension is
+  matched case-insensitively.
+
 ## Gotchas
 
 - **No legacy `ROOT_LOCATION`.** Snowflake's `ROOT_LOCATION = '…'` form is
