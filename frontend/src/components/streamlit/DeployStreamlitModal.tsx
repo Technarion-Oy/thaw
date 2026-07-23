@@ -27,6 +27,11 @@ interface Props {
    * updating means CREATE OR REPLACE against a fresh temp stage.
    */
   initialName?: string;
+  /**
+   * When set, the modal opens with this folder already selected and its main file
+   * auto-detected — used by the "Deploy now" flow after scaffolding a template.
+   */
+  initialLocalDir?: string;
   onClose: () => void;
   onSuccess?: () => void;
 }
@@ -38,12 +43,12 @@ function folderBaseName(dir: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-export default function DeployStreamlitModal({ db, schema, initialName, onClose, onSuccess }: Props) {
+export default function DeployStreamlitModal({ db, schema, initialName, initialLocalDir, onClose, onSuccess }: Props) {
   // "Update existing app" mode: the target app name is fixed and OR REPLACE is
   // enforced (see the initialName prop doc).
   const updateMode = Boolean(initialName);
 
-  const [localDir, setLocalDir] = useState("");
+  const [localDir, setLocalDir] = useState(initialLocalDir ?? "");
   const [mainFile, setMainFile] = useState("");
   const [candidates, setCandidates] = useState<string[]>([]);
   const [detecting, setDetecting] = useState(false);
@@ -69,21 +74,12 @@ export default function DeployStreamlitModal({ db, schema, initialName, onClose,
       .finally(() => setLoadingWarehouses(false));
   }, []);
 
-  // Pick a local folder, then detect its entry point. The detected main file
+  // Detect the app's entry point in the given folder. The detected main file
   // (streamlit_app.py / app.py) pre-fills; otherwise the *.py candidates are
   // offered for the user to choose. The object name defaults to the folder name
-  // unless the user has already typed one.
-  const handleBrowse = async () => {
-    let dir = "";
-    try {
-      dir = await PickDirectory();
-    } catch {
-      return;
-    }
-    if (!dir) return;
-    setLocalDir(dir);
+  // unless the user has already typed one (and never in update mode).
+  const detectMainFile = async (dir: string) => {
     if (!updateMode && !name.trim()) setName(folderBaseName(dir));
-
     setDetecting(true);
     try {
       const res = await DetectStreamlitMainFile(dir);
@@ -99,6 +95,26 @@ export default function DeployStreamlitModal({ db, schema, initialName, onClose,
     } finally {
       setDetecting(false);
     }
+  };
+
+  // When opened pre-filled (e.g. "Deploy now" after scaffolding a template),
+  // detect the entry point of the supplied folder immediately.
+  useEffect(() => {
+    if (initialLocalDir) detectMainFile(initialLocalDir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pick a local folder, then detect its entry point.
+  const handleBrowse = async () => {
+    let dir = "";
+    try {
+      dir = await PickDirectory();
+    } catch {
+      return;
+    }
+    if (!dir) return;
+    setLocalDir(dir);
+    await detectMainFile(dir);
   };
 
   const canSubmit =

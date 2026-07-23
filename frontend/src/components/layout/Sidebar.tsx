@@ -875,8 +875,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createContactModal, setCreateContactModal] = useState<{ db: string; schema: string } | null>(null);
   const [contactPropsModal, setContactPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createStreamlitModal, setCreateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
-  const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string; name?: string } | null>(null);
-  const [templateStreamlitModal, setTemplateStreamlitModal] = useState<boolean>(false);
+  const [deployStreamlitModal, setDeployStreamlitModal] = useState<{ db: string; schema: string; name?: string; localDir?: string } | null>(null);
+  const [templateStreamlitModal, setTemplateStreamlitModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamlitPropsModal, setStreamlitPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createNotebookModal, setCreateNotebookModal] = useState<{ db: string; schema: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
@@ -3076,8 +3076,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // Scaffold a new local Streamlit app from a snowflake-demo-streamlit template.
   const openStreamlitFromTemplate = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
     setCtxMenu(null);
-    setTemplateStreamlitModal(true);
+    setTemplateStreamlitModal({ db, schema });
   };
 
   // Redeploy an existing app from a local folder: opens the deploy modal fixed to
@@ -6153,13 +6157,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={deployStreamlitModal.db}
           schema={deployStreamlitModal.schema}
           initialName={deployStreamlitModal.name}
+          initialLocalDir={deployStreamlitModal.localDir}
           onClose={() => setDeployStreamlitModal(null)}
           onSuccess={() => refreshDatabaseByName(deployStreamlitModal.db, { schema: deployStreamlitModal.schema, kind: "STREAMLIT" })}
         />
       )}
 
       {templateStreamlitModal && (
-        <NewStreamlitFromTemplateModal onClose={() => setTemplateStreamlitModal(false)} />
+        <NewStreamlitFromTemplateModal
+          onClose={() => setTemplateStreamlitModal(null)}
+          onDeployNow={(destDir) => {
+            const { db, schema } = templateStreamlitModal;
+            setTemplateStreamlitModal(null);
+            setDeployStreamlitModal({ db, schema, localDir: destDir });
+          }}
+        />
       )}
 
       {streamlitPropsModal && (

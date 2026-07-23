@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Input, List, Typography, Button, Alert, Spin, Empty, Space, Result } from "antd";
-import { AppstoreAddOutlined, FolderOpenOutlined, SearchOutlined } from "@ant-design/icons";
+import { AppstoreAddOutlined, CloudUploadOutlined, FolderOpenOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   ListStreamlitTemplates,
   CreateStreamlitFromTemplate,
@@ -21,12 +21,12 @@ const REPO_URL = "https://github.com/Snowflake-Labs/snowflake-demo-streamlit";
 
 interface Props {
   onClose: () => void;
-  /** Called after a successful scaffold with the destination folder. Lets the
-   * caller offer a follow-on "deploy now" flow. */
-  onScaffolded?: (destDir: string, templateName: string) => void;
+  /** When provided, the success screen offers a "Deploy now" button that hands
+   * the scaffolded folder to the caller (which opens the deploy modal pre-filled). */
+  onDeployNow?: (destDir: string, templateName: string) => void;
 }
 
-export default function NewStreamlitFromTemplateModal({ onClose, onScaffolded }: Props) {
+export default function NewStreamlitFromTemplateModal({ onClose, onDeployNow }: Props) {
   const [templates, setTemplates] = useState<streamlittemplate.Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [degradedNote, setDegradedNote] = useState<string>("");
@@ -80,7 +80,6 @@ export default function NewStreamlitFromTemplateModal({ onClose, onScaffolded }:
     try {
       await CreateStreamlitFromTemplate(selected, destDir);
       setDone(true);
-      onScaffolded?.(destDir, selected);
     } catch (e) {
       setCreateError(String(e));
     } finally {
@@ -118,6 +117,16 @@ export default function NewStreamlitFromTemplateModal({ onClose, onScaffolded }:
             </Text>
           }
           extra={[
+            onDeployNow && (
+              <Button
+                key="deploy"
+                type="primary"
+                icon={<CloudUploadOutlined />}
+                onClick={() => { onDeployNow(destDir, selected); onClose(); }}
+              >
+                Deploy now
+              </Button>
+            ),
             <Button key="reveal" icon={<FolderOpenOutlined />} onClick={() => RevealInFinder(destDir).catch(() => {})}>
               Open folder
             </Button>,

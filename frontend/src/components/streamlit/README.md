@@ -23,7 +23,9 @@ object browser.
   (upload → temp stage → `CREATE STREAMLIT` → drop stage, all backend). Uses the
   shared `CreateModalShell` with `lockWhileBusy` so the upload isn't orphaned by
   a mid-flight dismiss. No SQL preview — the backend builds the statement inline
-  around the temporary stage it creates. **Update-existing path:** with an
+  around the temporary stage it creates. An `initialLocalDir` prop opens the modal
+  with a folder already selected and its main file auto-detected (the "Deploy now"
+  hand-off from `NewStreamlitFromTemplateModal`). **Update-existing path:** with an
   `initialName` prop the modal runs in "redeploy" mode — the name is fixed to the
   target app and `OR REPLACE` is enforced (Streamlit snapshots files at CREATE
   time, so a plain re-upload can't refresh a running app); it re-uploads to a
@@ -35,9 +37,11 @@ object browser.
   Loads the catalog via `ListStreamlitTemplates` (searchable name + description
   list; surfaces the `Degraded` fallback state as a warning), picks a destination
   folder (`PickDirectory`), and scaffolds via `CreateStreamlitFromTemplate` with
-  progress/error/success states (success offers **Open folder** via
-  `RevealInFinder`). Shows the **required attribution** line linking to the source
-  repo (`BrowserOpenURL`).
+  progress/error/success states. On success it offers **Deploy now** — which
+  hands the scaffolded folder to `onDeployNow`, opening `DeployStreamlitModal`
+  pre-filled (`initialLocalDir`, main file auto-detected) — and **Open folder**
+  via `RevealInFinder`. Shows the **required attribution** line linking to the
+  source repo (`BrowserOpenURL`).
 - **`StreamlitPropertiesModal.tsx`** — `GetObjectProperties("STREAMLIT", …)`
   (SHOW STREAMLITS enriched with DESCRIBE `root_location`/`main_file`). Surfaces
   the **URL endpoint** — a clickable Snowsight deep-link built from the account
