@@ -434,6 +434,8 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
+export function DeployStreamlit(arg1:snowflake.DeployStreamlitParams):Promise<void>;
+
 export function DescribeAgent(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
@@ -453,6 +455,8 @@ export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Prom
 export function DescribeSemanticView(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function DetectStreamlitMainFile(arg1:string):Promise<streamlit.MainFileResult>;
 
 export function Disconnect():Promise<void>;
 

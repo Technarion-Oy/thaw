@@ -4495,6 +4495,36 @@ export namespace snowflake {
 	        this.warehouse = source["warehouse"];
 	    }
 	}
+	export class DeployStreamlitParams {
+	    database: string;
+	    schema: string;
+	    name: string;
+	    caseSensitive: boolean;
+	    localDir: string;
+	    mainFile: string;
+	    orReplace: boolean;
+	    queryWarehouse: string;
+	    title: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeployStreamlitParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.localDir = source["localDir"];
+	        this.mainFile = source["mainFile"];
+	        this.orReplace = source["orReplace"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.title = source["title"];
+	        this.comment = source["comment"];
+	    }
+	}
 	export class DroppedTable {
 	    name: string;
 	    droppedOn: string;
@@ -6389,6 +6419,20 @@ export namespace stream {
 
 export namespace streamlit {
 	
+	export class MainFileResult {
+	    mainFile: string;
+	    candidates: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MainFileResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mainFile = source["mainFile"];
+	        this.candidates = source["candidates"];
+	    }
+	}
 	export class StreamlitConfig {
 	    name: string;
 	    caseSensitive: boolean;

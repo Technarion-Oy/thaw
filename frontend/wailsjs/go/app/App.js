@@ -722,6 +722,10 @@ export function DeployNotebook(arg1) {
   return window['go']['app']['App']['DeployNotebook'](arg1);
 }
 
+export function DeployStreamlit(arg1) {
+  return window['go']['app']['App']['DeployStreamlit'](arg1);
+}
+
 export function DescribeAgent(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeAgent'](arg1, arg2, arg3);
 }
@@ -760,6 +764,10 @@ export function DescribeSemanticView(arg1, arg2, arg3) {
 
 export function DescribeSessionPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeSessionPolicy'](arg1, arg2, arg3);
+}
+
+export function DetectStreamlitMainFile(arg1) {
+  return window['go']['app']['App']['DetectStreamlitMainFile'](arg1);
 }
 
 export function Disconnect() {
