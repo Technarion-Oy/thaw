@@ -14,9 +14,11 @@ Unicode true
 ##   * bootstraps the WebView2 runtime if it is missing,
 ##   * launches Thaw automatically when the copy finishes.
 ##
-## The output artifact name is unchanged (thaw-<arch>-installer.exe), so the
-## CI pipeline (.github/workflows/build.yml) and Azure Trusted Signing steps
-## need no changes.
+## The output artifact name is unchanged (thaw-<arch>-installer.exe). The CI
+## pipeline (build.yml / manual-release.yml) signs the app binary, then re-runs
+## makensis over this script to repackage the installer around the signed
+## thaw.exe, then signs the installer (issue #820) — see the "Repackage
+## installer with the signed binary" step in those workflows.
 ##
 ## wails_tools.nsh is regenerated on every `wails build --nsis` from the
 ## ProjectInfo in wails.json — do NOT edit or commit it. This file, by

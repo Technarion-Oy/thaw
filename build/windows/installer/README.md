@@ -25,8 +25,24 @@ wizard, `project.nsi` is a modern **one-click** installer:
 - **Auto-launch** — Thaw starts as soon as the copy finishes and the window
   closes itself.
 
-The output artifact is still `thaw-<arch>-installer.exe`, so the CI pipeline
-(`.github/workflows/build.yml`) and Azure Trusted Signing steps are unchanged.
+The output artifact is still `thaw-<arch>-installer.exe`.
+
+## Signing flow in CI (issue #820)
+
+The release workflows (`build.yml` and `manual-release.yml`) sign in the
+correct order so the binary embedded in the installer is signed too:
+
+1. `wails build --nsis` (no `-obfuscated` on Windows — garble obfuscation
+   trips Defender heuristics that hurt SmartScreen reputation) compiles
+   `thaw.exe`, generates `wails_tools.nsh`, and produces a throwaway installer.
+2. **Azure Trusted Signing** signs `build/bin/thaw.exe`.
+3. `makensis` re-runs over `project.nsi` (passing only
+   `-DARG_WAILS_<ARCH>_BINARY=…/thaw.exe`) to repackage the installer around
+   the now-signed binary, overwriting the throwaway.
+4. **Azure Trusted Signing** signs the installer itself.
+
+Previously a single sign step ran after packaging, leaving the packed
+`thaw.exe` unsigned.
 
 ## Editing / debugging locally
 
