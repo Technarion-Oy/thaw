@@ -430,10 +430,13 @@ func (a *App) PickPrivateKeyFile() string {
 // Returns an empty string if the user cancels. The dialog opens in the currently
 // opened folder when set (matching PickOpenFile/PickAnyFile); `currentWorkdir`
 // returns "" when no folder is open, which lets the OS pick the location as before.
+// CanCreateDirectories enables the "New Folder" button so the user can create a
+// fresh (empty) destination in place — e.g. a scaffold target for a template.
 func (a *App) PickDirectory() string {
 	path, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:            "Select folder",
-		DefaultDirectory: a.currentWorkdir(),
+		Title:                "Select folder",
+		DefaultDirectory:     a.currentWorkdir(),
+		CanCreateDirectories: true,
 	})
 	if err != nil {
 		return ""
