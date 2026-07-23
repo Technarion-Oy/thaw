@@ -27,6 +27,7 @@ import {
   LinkOutlined,
   DisconnectOutlined,
   BuildOutlined,
+  BorderOuterOutlined,
 } from "@ant-design/icons";
 import ERTableNode from "./ERTableNode";
 import type { DesignerTable } from "./erTypes";
@@ -43,6 +44,31 @@ const nodeTypes = { erTable: ERTableNode };
 
 /** Vertical gap (px) between saved-position nodes and dagre-positioned new nodes. */
 const DAGRE_OFFSET_GAP = 120;
+
+// ── MiniMap visibility preference ───────────────────────────────────────────
+// The MiniMap renders a second scaled copy of every node in the DOM, which is a
+// meaningful memory cost on wide schemas (see issue #821). It defaults on to
+// preserve existing behaviour, but the toggle lets memory-conscious users on
+// Windows/WebView2 drop that second copy. Persisted globally (a display
+// preference, not per-database).
+const MINIMAP_PREF_KEY = "thaw-er-minimap";
+
+function loadMinimapPref(): boolean {
+  try {
+    // Absent → default on.
+    return localStorage.getItem(MINIMAP_PREF_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function saveMinimapPref(show: boolean): void {
+  try {
+    localStorage.setItem(MINIMAP_PREF_KEY, show ? "1" : "0");
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
 
 // ── Context menu shell (shared positioning / dismiss logic) ─────────────────
 
@@ -658,6 +684,16 @@ function ERCanvasInner({
     onSelectionChangeProp?.([]);
   }, [onSelectionChangeProp]);
 
+  // ── MiniMap visibility ─────────────────────────────────────────────────────
+  const [showMinimap, setShowMinimap] = useState<boolean>(loadMinimapPref);
+  const toggleMinimap = useCallback(() => {
+    setShowMinimap((prev) => {
+      const next = !prev;
+      saveMinimapPref(next);
+      return next;
+    });
+  }, []);
+
   // ── Context menu ─────────────────────────────────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
 
@@ -723,17 +759,32 @@ function ERCanvasInner({
         nodesConnectable={mode === "edit"}
         deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
+        // Cull off-screen nodes/edges from the DOM. On wide schemas the ER
+        // designer otherwise holds every table node in the DOM regardless of
+        // viewport, inflating WebView2 memory (issue #821).
+        onlyRenderVisibleElements
         style={{ background: "var(--bg)" }}
       >
         <Background color="var(--border)" gap={20} />
         <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor="var(--bg-overlay)"
-          maskColor="rgba(0, 0, 0, 0.6)"
-          style={{ background: "var(--bg-elevated)" }}
-        />
+        {showMinimap && (
+          <MiniMap
+            nodeColor="var(--bg-overlay)"
+            maskColor="rgba(0, 0, 0, 0.6)"
+            style={{ background: "var(--bg-elevated)" }}
+          />
+        )}
         <Panel position="top-right">
           <div style={{ display: "flex", gap: 4 }}>
+            <Button
+              size="small"
+              type={showMinimap ? "primary" : "default"}
+              icon={<BorderOuterOutlined />}
+              onClick={toggleMinimap}
+              title={showMinimap ? "Hide minimap (saves memory)" : "Show minimap"}
+            >
+              Minimap
+            </Button>
             <Button
               size="small"
               icon={<AimOutlined />}
