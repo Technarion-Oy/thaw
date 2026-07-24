@@ -148,7 +148,8 @@ func (a *App) UnsetUserPolicy(name, kind string) error {
 // the INFORMATION_SCHEMA.TAG_REFERENCES table function (object domain USER).
 // Unlike the ACCOUNT_USAGE.TAG_REFERENCES view this reflects changes immediately
 // (no propagation latency), so it backs the removable-chip tag editor in the
-// user properties modal — mirroring App.GetModelTags.
+// user properties modal. (A user carries an attached-policy list too, so it keeps
+// this dedicated reader rather than using the generic App.GetObjectTagReferences.)
 //
 // USER is an account-level object, so the reference is a bare user name and the
 // results aren't scoped to any database — but an INFORMATION_SCHEMA table

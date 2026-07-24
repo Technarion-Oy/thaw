@@ -18,7 +18,7 @@ to `TRUE` for them.
 
 - `BuildCreateStorageLifecyclePolicySql(db, schema, cfg)` → `internal/storagelifecyclepolicy`
 - `AlterStorageLifecyclePolicy(db, schema, name, clause)` → free-form `ALTER STORAGE LIFECYCLE POLICY <fqn> <clause>`
-- `GetStorageLifecyclePolicyTags(db, schema, name)` → `INFORMATION_SCHEMA.TAG_REFERENCES`
+- The **Tags** section uses the shared `TagsRow` + `useObjectTags` hook: current tags via `GetObjectTagReferences` (`INFORMATION_SCHEMA.TAG_REFERENCES`, object domain `STORAGE LIFECYCLE POLICY`), add/remove via `AlterStorageLifecyclePolicy`
 - `GetStorageLifecyclePolicyReferences(db, schema, name)` → `ACCOUNT_USAGE.POLICY_REFERENCES` (`POLICY_KIND = 'STORAGE_LIFECYCLE_POLICY'`)
 - `GetObjectProperties(db, schema, "STORAGE LIFECYCLE POLICY", name)` → `SHOW` + `DESCRIBE STORAGE LIFECYCLE POLICY` enrichment
 

@@ -20,9 +20,9 @@ user-defined functions that encode a data-quality rule and return a single
   DMF supports, all via `AlterDataMetricFunction`: **rename** (`RENAME TO` — on
   success calls the `onChanged` prop to refresh the tree, then closes since the
   identity changed), inline-editable **comment** (`SET`/`UNSET COMMENT`), a
-  `SECURE` toggle (`SET`/`UNSET SECURE`), and a **Tags** editor (current tags from
-  `GetDataMetricFunctionTags` as removable chips → `UNSET TAG`, plus an add form →
-  `SET TAG <tag> = '<value>'`). Then a **Data Metric Function Detail** section
+  `SECURE` toggle (`SET`/`UNSET SECURE`), and a **Tags** editor (the shared
+  `TagsRow` + `useObjectTags` hook — current tags via `GetObjectTagReferences`
+  with the TABLE-argument signature, add/remove via `AlterDataMetricFunction`). Then a **Data Metric Function Detail** section
   backed by `DescribeDataMetricFunction` (`DESCRIBE FUNCTION`): signature, returns,
   language, and the **body** (the metric expression `SHOW DATA METRIC FUNCTIONS`
   omits), and an on-demand **Associated Tables & Views** list from

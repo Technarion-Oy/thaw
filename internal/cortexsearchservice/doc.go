@@ -27,7 +27,7 @@
 // model, definition, serving/indexing state, plus the mutable primary key /
 // auto-suspend / request-logging / full-index-build-interval values) are read with
 // DESCRIBE CORTEX SEARCH SERVICE and merged into GetObjectProperties; currently
-// applied tags are read via App.GetCortexSearchServiceTags
+// applied tags are read via the shared App.GetObjectTagReferences
 // (INFORMATION_SCHEMA.TAG_REFERENCES). ALTER does not support RENAME and GET_DDL
 // does not support cortex search services, so there is no rename or DDL-export path
 // for this type.

@@ -107,8 +107,6 @@ export interface UseObjectTagsArgs {
   // ALTER builder keeps the correct object keyword (and the argument signature for
   // callable objects) without a per-domain generic write path.
   alter: (clause: string) => Promise<void>;
-  // When false, skips the tag read (for objects whose identity isn't ready yet).
-  enabled?: boolean;
 }
 
 export interface UseObjectTags {
@@ -129,19 +127,18 @@ export interface UseObjectTags {
 // domain-specific ALTER method. All reads are best-effort — a failed tag read or
 // catalog load degrades gracefully (empty chips / free-text name) and never blocks
 // the modal or the write path.
-export function useObjectTags({ kind, db, schema, name, args = "", alter, enabled = true }: UseObjectTagsArgs): UseObjectTags {
+export function useObjectTags({ kind, db, schema, name, args = "", alter }: UseObjectTagsArgs): UseObjectTags {
   const [tags, setTags] = useState<EditableTag[]>([]);
   const [nameOptions, setNameOptions] = useState<TagNameOption[] | undefined>(undefined);
 
   const reload = useCallback(async () => {
-    if (!enabled) { setTags([]); return; }
     try {
       const t = await GetObjectTagReferences(kind, db, schema, name, args);
       setTags(parseObjectTags(t, kind));
     } catch {
       setTags([]);
     }
-  }, [kind, db, schema, name, args, enabled]);
+  }, [kind, db, schema, name, args]);
 
   useEffect(() => { reload(); }, [reload]);
 

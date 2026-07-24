@@ -8,7 +8,7 @@
 |---|---|
 | `CreateModelModal.tsx` | Create form with a live `CREATE MODEL` SQL preview. Fields: name, OR REPLACE / IF NOT EXISTS (mutually exclusive — selecting one clears the other), optional `WITH VERSION` name, and the shared **`ModelSourcePicker`**. |
 | `ModelSourcePicker.tsx` | Reusable FROM-clause source selector for `CREATE MODEL` and `ALTER MODEL … ADD VERSION`: a **Source** toggle between *copy an existing model* (a searchable model dropdown from `ListModels` + optional source-version input) and *load from an internal stage* (an editable stage-path input plus the shared `components/shared/StageFilePicker` browser). The `ListModels` result (`SHOW MODELS IN ACCOUNT`, an account-wide scan) is cached at module scope so it runs at most once per session despite the picker remounting on every modal open; `invalidateModelsCache()` (called after a successful `CreateModel`) clears it. Props: `db`, `schema`, `value: ModelSourceValue`, `onChange(patch)`. Used by both the create modal and the Add-version dialog so the model dropdown + stage browser live in one place. |
-| `ModelPropertiesModal.tsx` | `SHOW MODELS` metadata: an **Overview** (model type, aliases), inline-editable **Default version** (`SET DEFAULT_VERSION`) and **Comment** (`SET`/`UNSET COMMENT`), a **Tags** editor (chips from `GetModelTags`; add → `SET TAG`, chip close → `UNSET TAG`), a lazily-loaded **Versions** table (`SHOW VERSIONS IN MODEL`) with a per-row Actions menu (`VERSION … SET/UNSET ALIAS`, `MODIFY VERSION … SET COMMENT/METADATA`, `DROP VERSION`) and an **Add version…** dialog (`ADD VERSION … FROM MODEL/stage`, reusing `ModelSourcePicker`), and the generic property rows. This surfaces every `ALTER MODEL` clause (RENAME is the one exception — it lives in the sidebar context menu). |
+| `ModelPropertiesModal.tsx` | `SHOW MODELS` metadata: an **Overview** (model type, aliases), inline-editable **Default version** (`SET DEFAULT_VERSION`) and **Comment** (`SET`/`UNSET COMMENT`), a **Tags** editor (the shared `TagsRow` + `useObjectTags` hook; add → `SET TAG`, chip close → `UNSET TAG`), a lazily-loaded **Versions** table (`SHOW VERSIONS IN MODEL`) with a per-row Actions menu (`VERSION … SET/UNSET ALIAS`, `MODIFY VERSION … SET COMMENT/METADATA`, `DROP VERSION`) and an **Add version…** dialog (`ADD VERSION … FROM MODEL/stage`, reusing `ModelSourcePicker`), and the generic property rows. This surfaces every `ALTER MODEL` clause (RENAME is the one exception — it lives in the sidebar context menu). |
 
 ## Integration
 
@@ -20,9 +20,11 @@
   `SET DEFAULT_VERSION`, `SET`/`UNSET TAG`, `VERSION … SET`/`UNSET ALIAS`,
   `MODIFY VERSION … SET COMMENT`/`METADATA`, `ADD VERSION`, `DROP VERSION`, and the
   context-menu **Rename** (`RENAME TO`).
-- `GetModelTags(db, schema, name)` reads the currently-applied tags from
-  `INFORMATION_SCHEMA.TAG_REFERENCES` (object domain MODEL); the read is
-  best-effort (an error shows a warning but `SET`/`UNSET TAG` still work).
+- The **Tags** editor is the shared `TagsRow` + `useObjectTags` hook (see
+  `../shared/README.md`): current tags are read via `GetObjectTagReferences`
+  (`INFORMATION_SCHEMA.TAG_REFERENCES`, object domain MODEL) and add/remove issue
+  `SET`/`UNSET TAG` through `AlterModel`; the read is best-effort (an error
+  degrades to "no tags" without blocking edits).
 - `ListModels()` (`SHOW MODELS IN ACCOUNT`) backs the source-model dropdown in
   `ModelSourcePicker` — every model the role can see, as quoted FQNs. A
   user-typed value not in the list is preserved as a selectable option.
