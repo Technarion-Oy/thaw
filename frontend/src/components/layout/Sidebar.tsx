@@ -304,6 +304,16 @@ interface ContextMenu {
   colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string; comment: string }; // set for nodeType === "col"
 }
 
+// INFORMATION_SCHEMA is a Snowflake-owned, read-only system schema: it holds only
+// views and table functions, supports no DDL / Time Travel / tagging. Given a
+// "schema:DB:SCHEMA" node key, report whether it points at that schema so the
+// sidebar can hide the infeasible actions (Create Object, Import Data, Backup
+// Sets, …) and open Properties read-only. Mirrors the backend's ListUserSchemas
+// exclusion (internal/app/objects.go).
+function isInfoSchema(nodeKey: string): boolean {
+  return nodeKey.split(":")[2] === "INFORMATION_SCHEMA";
+}
+
 // DROPPED_KIND_ORDER fixes the section order in the "Show Dropped Objects"
 // modals so groups render in a stable, familiar sequence rather than result
 // order. Kinds not listed here sort last (alphabetically among themselves).
@@ -810,7 +820,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [viewPropsModal, setViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createSequenceModal, setCreateSequenceModal] = useState<{ db: string; schema: string } | null>(null);
   const [sequencePropsModal, setSequencePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
-  const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string; readOnly?: boolean } | null>(null);
   const [dbPropsModal, setDbPropsModal] = useState<{ db: string; name: string } | null>(null);
   const [createStreamModal, setCreateStreamModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamPropsModal, setStreamPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -3959,8 +3969,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
 
     // Schemas get a dedicated editable properties modal (ALTER SCHEMA options).
+    // INFORMATION_SCHEMA is read-only, so it opens the same modal in a read-only
+    // mode (no ALTER controls, no Danger zone) rather than offering edits that
+    // Snowflake always rejects.
     if (kind === "SCHEMA") {
-      setSchemaPropsModal({ db, schema, name });
+      setSchemaPropsModal({ db, schema, name, readOnly: isInfoSchema(nodeKey) });
       return;
     }
 
@@ -4657,7 +4670,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
               {menuItemSub("Tables & Views", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
                 <>
@@ -4742,14 +4755,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               ), 1)}
             </>
           ))}
-          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
-          {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openSchemaTagReferences)}
+          {/* INFORMATION_SCHEMA is read-only: no Time Travel (Show Dropped),
+              no tables to export, no writes (Import), nothing backupable, and
+              tags can't be set on it — hide them all, leaving Insert Name +
+              read-only Properties. See isInfoSchema. */}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openSchemaTagReferences)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
-          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
-          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
@@ -5553,6 +5570,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={schemaPropsModal.db}
           schema={schemaPropsModal.schema}
           name={schemaPropsModal.name}
+          readOnly={schemaPropsModal.readOnly}
           onClose={() => setSchemaPropsModal(null)}
         />
       )}
