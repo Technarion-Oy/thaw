@@ -89,10 +89,12 @@ export default function EditorPreferencesModal({ onClose }: Props) {
   async function handleSave() {
     setSaving(true);
     setError(null);
+    // The tab-preview toggle is a purely frontend/local preference (no backend
+    // counterpart), so commit it independently — a transient failure of the unrelated
+    // SaveEditorPrefs IPC below must not silently drop the user's toggle change.
+    setPreviewTabsEnabled(previewTabs);
     try {
       await SaveEditorPrefs(prefs);
-      // Commit the frontend-only tab preference alongside the backend prefs.
-      setPreviewTabsEnabled(previewTabs);
       // Notify the editor so it can refresh its prefs reference.
       window.dispatchEvent(new CustomEvent("thaw:editor-prefs-changed", { detail: prefs }));
       onClose();
