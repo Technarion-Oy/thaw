@@ -971,7 +971,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     () => buildSearchPredicate(searchQuery, regexMode, caseSensitive, kindFilter),
     [searchQuery, regexMode, caseSensitive, kindFilter],
   );
-  const searchActive = searchPredicate.active;
+  // A search only runs once at least one object type is selected. Searching every
+  // kind means ~45 broad SHOW … IN ACCOUNT metadata queries (one per kind, each
+  // scanning all databases) with no cheaper account-wide alternative, so we make
+  // the type filter the required scope: one query per selected kind, always fast.
+  // `searchActive` = a real search is running; `needsKindSelection` = the user has
+  // typed a query but not yet chosen a type, so we prompt instead of scanning.
+  const searchActive = kindFilter.length > 0;
+  const needsKindSelection = !searchActive && !!searchQuery.trim();
+  const searchEngaged = searchActive || needsKindSelection;
 
   // ⌘⇧F / Ctrl+Shift+F — focus the object browser search input. The keydown
   // dispatcher lives here too: nothing else in the app fired the event, so the
@@ -1099,14 +1107,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const searchResultsRef = useRef<DataNode[]>([]);
   searchResultsRef.current = searchResults;
 
-  // What the backend query depends on. In regex mode the query text is NOT pushed
-  // to the server (we fetch all of the selected kinds and filter names
-  // client-side), so refining a regex doesn't refetch — only the kind set does.
-  // Substring mode pushes the debounced text as a LIKE. Using the *debounced*
-  // query as the trigger also means a non-empty query never fires the fetch until
-  // typing settles (no wasteful fetch-everything on the first keystroke).
+  // What the backend query depends on. The fetch runs only once ≥1 type is
+  // selected (one SHOW … IN ACCOUNT per selected kind). In regex mode the query
+  // text is NOT pushed to the server (we fetch all of the selected kinds and
+  // filter names client-side), so refining a regex doesn't refetch — only the
+  // kind set does. Substring mode pushes the debounced text as a LIKE, so a
+  // non-empty query only refetches once typing settles.
   const namePattern = regexMode ? "" : debouncedQuery.trim();
-  const fetchActive = debouncedQuery.trim() !== "" || kindFilter.length > 0;
+  const fetchActive = searchActive; // requires at least one object type
   const searchServerKey = fetchActive ? JSON.stringify([namePattern, [...kindFilter].sort()]) : "";
 
   // Run the account-wide backend search. One SHOW … IN ACCOUNT per selected kind
@@ -4507,7 +4515,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               size="small"
               mode="multiple"
               allowClear
-              placeholder="All object types"
+              placeholder="Select object type(s) to search"
               value={kindFilter}
               onChange={(v) => setKindFilter(v)}
               options={KIND_FILTER_OPTIONS}
@@ -4521,7 +4529,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
           {/* The account-wide search is independent of the loaded tree, so its
               results/spinner render even before databases have been listed. */}
-          {!loaded && !loading && !searchActive && (
+          {!loaded && !loading && !searchEngaged && (
             <div style={{ padding: "16px 12px" }}>
               <Text type="secondary" style={{ cursor: "pointer", fontSize: 12 }} onClick={loadDatabases}>
                 Click to load databases
@@ -4529,7 +4537,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             </div>
           )}
 
-          {loaded && treeData.length === 0 && !searchActive && <Empty description="No databases" imageStyle={{ height: 40 }} />}
+          {loaded && treeData.length === 0 && !searchEngaged && <Empty description="No databases" imageStyle={{ height: 40 }} />}
+
+          {/* A search runs only once ≥1 object type is chosen — prompt when the
+              user has typed but not yet picked a type. */}
+          {needsKindSelection && (
+            <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
+              Select at least one object type to search
+            </div>
+          )}
 
           {searchActive && displayData.length === 0 && searchSettling && (
             <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -4543,7 +4559,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             </div>
           )}
 
-          {(searchActive ? displayData.length > 0 : treeData.length > 0) && (
+          {(searchActive ? displayData.length > 0 : (!searchEngaged && treeData.length > 0)) && (
             <div
               // userSelect:none stops the browser from painting a text highlight
               // across node labels during Shift/Cmd+click multi-selection.

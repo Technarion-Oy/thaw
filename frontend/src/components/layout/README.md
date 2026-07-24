@@ -95,9 +95,15 @@ the loaded tree (issues #855 + follow-up):
   state and the matcher degrades to a literal substring match. Substring queries are pushed to the
   server as a `LIKE '%…%'` prefilter; **regex** queries fetch all of the selected kinds (no server
   filter) and match client-side.
-- **Type filter** — a flat multi-select of object kinds (`KIND_FILTER_OPTIONS`, in `KIND_ORDER`).
-  Each selected kind is one `SHOW … IN ACCOUNT`, so any subset is cheap (no fast/slow distinction —
-  the old cascade-depth story is gone).
+- **Type filter is the required scope.** A search runs only once **≥1 object type** is selected
+  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER`) — each selected kind is one
+  `SHOW … IN ACCOUNT`. Searching *every* kind would mean ~45 broad account-wide metadata queries (one
+  per kind, each scanning all databases) with no cheaper account-wide alternative, so instead of a slow
+  "all types" scan the type filter is mandatory: pick the kinds you want and each is a fast, targeted
+  query. A query typed with **no type selected** shows a "Select at least one object type to search"
+  prompt rather than scanning. `searchActive` = `kindFilter.length > 0` (a search is running);
+  `needsKindSelection` = a query is typed but no type chosen; `searchEngaged` = either (used to hide the
+  normal browse tree).
 - **The predicate** is built once per query by `buildSearchPredicate` (memoized on
   `{ query, regexMode, caseSensitive, kinds }`) and threaded into `filterTree(nodes, matches)`; the
   `RegExp` compiles a single time, not per node. It is the **precise client-side pass** (exact case,
@@ -106,15 +112,15 @@ the loaded tree (issues #855 + follow-up):
   parents, and **preserves the full loaded subtree of a matched object** (columns / stage / git / dbt
   files / task subtree) so expanding a hit shows real content instead of an empty node. A matched node
   with empty loaded children is emitted as a leaf so it never renders a dead expander.
-- **Fetch lifecycle.** The refetch trigger is `searchServerKey` — `[namePattern, kinds]`, where
-  `namePattern` is the **debounced** text (empty in regex mode). Keying off the debounced query means a
-  non-empty query never fires until typing settles (no fetch-everything on the first keystroke), and
-  refining a **regex** doesn't refetch (server key unchanged) — only the client filter + auto-expand
+- **Fetch lifecycle.** `fetchActive` = `searchActive` (≥1 type). The refetch trigger is
+  `searchServerKey` — `[namePattern, kinds]`, where `namePattern` is the **debounced** text (empty in
+  regex mode). Keying off the debounced query means a non-empty query only refetches once typing settles,
+  and refining a **regex** doesn't refetch (server key unchanged) — only the client filter + auto-expand
   recompute. A `searchGenRef` generation counter drops a response from a superseded/cleared search.
   `searchResults` is separate from `treeData` (the user's own expansion), so clearing the search
-  leaves the browsed tree intact. `searchActive` (query **or** kind filter present) drives search mode;
-  teardown lives in a `searchActive` effect. `searchSettling` (debounce pending or fetch in flight)
-  shows a "Searching…" spinner instead of flashing "no match".
+  leaves the browsed tree intact; teardown lives in a `searchActive` effect. `searchSettling` (debounce
+  pending or fetch in flight) shows a "Searching…" spinner instead of flashing "no match". A catalog
+  mutation re-runs the active search via `refreshActiveSearch()` → `searchRefreshToken` (see below).
 - **Focus shortcut** — **⌘⇧F / Ctrl+Shift+F** focuses the search box. A `keydown` listener in
   `Sidebar.tsx` dispatches the `thaw:focus-object-search` window event; the event is kept so menus/MCP
   can focus it too.
