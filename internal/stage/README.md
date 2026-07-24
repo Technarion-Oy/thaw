@@ -63,6 +63,7 @@ type StageFile struct {
 |----------|-----------|-------|
 | `ListStageFiles(ctx, client, stageName, pattern)` | `LIST @stage [PATTERN='...']` | Prepends `@` if absent (via `snowflake.NormalizeStageRef`); reads the result columns with the shared `snowflake.ColumnIndexes` + `snowflake.StrVal`; returns `[]StageFile` |
 | `UploadFileToStage(ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)` | `PUT 'file://...' @stage ...` | Internal stages only |
+| `UploadDirToStage(ctx, client, localDir, stageName, overwrite)` | one `PUT` per file (via `UploadFileToStage`, `AUTO_COMPRESS=FALSE`) | Recursively uploads a local folder, preserving subdirectories under `@stage/<reldir>`; skips `.git/`, `__pycache__/`, hidden files/dirs, `.DS_Store`. The walk/grouping is the pure, unit-tested `planDirUploads(root)`. Used by `streamlit.DeployStreamlit`. |
 | `DownloadFileFromStage(ctx, client, stageName, localDirPath, parallel, pattern)` | `GET @stage 'file://...' ...` | Internal stages only |
 | `RemoveStageFiles(ctx, client, stageName, pattern)` | `REMOVE @stage [PATTERN='...']` | Optional regex pattern |
 

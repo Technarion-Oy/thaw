@@ -23,7 +23,8 @@
 | File | Purpose |
 |------|---------|
 | `snowpark.go` | All domain logic; the embedded `kernelPyScript` Python program; all `Service` methods |
-| `doc.go` | Package doc and `// thaw:domain: Notebook & Developer Environment` annotation |
+| `streamlit.go` | Local **Streamlit preview**: `StartStreamlitPreview(appDir, mainFile)` runs `python -m streamlit run` from the app folder using the active env's Python (`snowparkPython`), streaming output as `snowpark:streamlit-*` events and announcing the local URL once the port is up; `StopStreamlitPreview()` kills it. Reused by the deploy modal for a pre-deploy look. |
+| `doc.go` | Package doc and `// thaw:domain: Snowpark & Developer Workflows` annotation |
 
 ## Key types & functions
 
@@ -85,6 +86,7 @@ func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error
 
 - **Working directory**: `defaultVenvPath` (`<workdir>/snowpark_venv`) resolves the working dir through `workingDir()`, which prefers the provider injected by `snowpark.SetWorkdirProvider` (set once in `App.startup` to `App.currentWorkdir`) over a bare `config.Load().Git.ExportDir`. This is required for **"Open Folder in New Window"** override instances, whose folder lives only in memory and is never persisted — reading config directly would wrongly pick the shared/main-window folder. All config writers (`SaveSnowparkConfig`, `SaveSnowparkVenvPath`, `SaveSnowparkPythonPath`, `SavePipRegistryConfig`, `ResetPipRegistryConfig`) go through `config.Update` (process-locked RMW) so a concurrent write can't revert them.
 - Each kernel subprocess is a long-lived process; `StopNotebookSession` must be called on tab close to avoid orphaned Python processes. `App.shutdown()` calls `StopAll()` on the service.
+- The Streamlit preview is likewise long-lived: the deploy modal calls `StopStreamlitPreview` when it closes (and on the "Stop preview" button), so the `streamlit run` process isn't orphaned. Only one preview runs at a time — starting another replaces it. A local preview is **not** a fidelity guarantee: Snowflake's Streamlit runtime pins specific Python/Streamlit versions and an allow-listed Anaconda set, so "runs locally" ≠ "runs in Snowflake" (this caveat is surfaced in the UI).
 - The kernel stdout/stdin protocol is synchronous (one request in-flight per kernel session). Concurrent cell executions on the same tab are serialized by the per-session mutex.
 - `externalbrowser` authenticator cannot be automated; the kernel prints a warning and leaves `session` uncreated. Users must call `Session.builder` manually in a cell.
 - The `kernelPyScript` filters Jedi completions whose names start with `_` or contain `thaw` to prevent internal kernel state from leaking into user autocomplete.

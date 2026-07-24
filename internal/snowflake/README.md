@@ -91,6 +91,10 @@ No business logic belongs here — callers pass SQL strings or high-level parame
 - `GetSessionID` (`SELECT CURRENT_SESSION()`), `GetCurrentUser` (`SELECT CURRENT_USER()`), and `GetCurrentUserCached` — the cached variant resolves the user once and stores it for the connection's lifetime (the user is constant per connection; used by the MCP `get_query_history` tool)
 - `SetPoolLimits(maxOpen, maxIdle)` — tab sessions use smaller limits (e.g. 4/1) vs. shared client default of 8/8; bulk callers (DDL export) request 32/32. When the login gate is active (MFA, or password auth with a TOTP passcode — `shouldSerializeLogins`) the request is clamped to `MFAMaxOpenConns` (1) — the session runs on a single non-recycling connection, re-authenticating interactively when it is lost (see `NewClient` / `WithPasscodePrompt`).
 
+### Deploy (local → Snowflake)
+- `DeployNotebook(ctx, DeployNotebookParams)` — PUTs a single local `.ipynb` (or in-memory `Content`) to a **temporary** stage, then `CREATE [OR REPLACE] NOTEBOOK … FROM @stage MAIN_FILE = …`, deferred `DROP STAGE`. A temp stage suffices because `CREATE NOTEBOOK` copies files once at creation time. The CREATE is built inline here (not via `internal/notebook`) because that package imports `internal/snowflake` — calling back would be an import cycle.
+- The **directory** analog for Streamlit lives outside this package: `streamlit.DeployStreamlit` (`internal/streamlit`) reuses `stage.UploadDirToStage` for the recursive upload and `BuildCreateStreamlitSql` for the CREATE. It sits above `internal/snowflake` (`streamlit → stage → snowflake`), so it composes those existing pieces instead of duplicating PUT/CREATE logic here.
+
 ## Patterns & integration
 
 - Domain packages (`warehouse`, `backup`, `table`, etc.) receive a `*Client` and call `Execute`/`ExecDDL`; they never construct the pool themselves.

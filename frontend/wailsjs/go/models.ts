@@ -5459,6 +5459,20 @@ export namespace snowpark {
 	        this.pythonPath = source["pythonPath"];
 	    }
 	}
+	export class StreamlitPreviewResult {
+	    url: string;
+	    port: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new StreamlitPreviewResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.port = source["port"];
+	    }
+	}
 
 }
 
@@ -6389,6 +6403,50 @@ export namespace stream {
 
 export namespace streamlit {
 	
+	export class DeployStreamlitParams {
+	    database: string;
+	    schema: string;
+	    name: string;
+	    caseSensitive: boolean;
+	    localDir: string;
+	    mainFile: string;
+	    orReplace: boolean;
+	    queryWarehouse: string;
+	    title: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeployStreamlitParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.localDir = source["localDir"];
+	        this.mainFile = source["mainFile"];
+	        this.orReplace = source["orReplace"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.title = source["title"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class MainFileResult {
+	    mainFile: string;
+	    candidates: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MainFileResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mainFile = source["mainFile"];
+	        this.candidates = source["candidates"];
+	    }
+	}
 	export class StreamlitConfig {
 	    name: string;
 	    caseSensitive: boolean;
@@ -6418,6 +6476,59 @@ export namespace streamlit {
 	        this.title = source["title"];
 	        this.comment = source["comment"];
 	    }
+	}
+
+}
+
+export namespace streamlittemplate {
+	
+	export class Template {
+	    name: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Template(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	    }
+	}
+	export class Catalog {
+	    templates: Template[];
+	    degraded: boolean;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Catalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.templates = this.convertValues(source["templates"], Template);
+	        this.degraded = source["degraded"];
+	        this.note = source["note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

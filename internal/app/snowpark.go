@@ -156,3 +156,13 @@ func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error
 func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]snowpark.NotebookSyntaxError, error) {
 	return a.snowparkSvc.CheckPythonSyntax(tabId, code, mode)
 }
+
+// StartStreamlitPreview runs `streamlit run <mainFile>` locally from appDir using
+// the Snowpark environment's Python, for a pre-deploy preview. Streams output as
+// "snowpark:streamlit-*" events and returns the local URL.
+func (a *App) StartStreamlitPreview(appDir, mainFile string) (snowpark.StreamlitPreviewResult, error) {
+	return a.snowparkSvc.StartStreamlitPreview(appDir, mainFile)
+}
+
+// StopStreamlitPreview terminates the running local Streamlit preview, if any.
+func (a *App) StopStreamlitPreview() { a.snowparkSvc.StopStreamlitPreview() }

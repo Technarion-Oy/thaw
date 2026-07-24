@@ -71,6 +71,7 @@ import {gitrepo} from '../models';
 import {backup} from '../models';
 import {filesystem} from '../models';
 import {mcp} from '../models';
+import {streamlittemplate} from '../models';
 import {sfconfig} from '../models';
 import {users} from '../models';
 
@@ -418,6 +419,8 @@ export function CreateSecurityIntegration(arg1:integrations.SecurityIntegrationP
 
 export function CreateStorageIntegration(arg1:integrations.StorageIntegrationParams):Promise<void>;
 
+export function CreateStreamlitFromTemplate(arg1:string,arg2:string):Promise<void>;
+
 export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
 
 export function DeclineLicense():Promise<void>;
@@ -433,6 +436,8 @@ export function DeleteProfile(arg1:string):Promise<void>;
 export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
+
+export function DeployStreamlit(arg1:streamlit.DeployStreamlitParams):Promise<void>;
 
 export function DescribeAgent(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
@@ -453,6 +458,8 @@ export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Prom
 export function DescribeSemanticView(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function DetectStreamlitMainFile(arg1:string):Promise<streamlit.MainFileResult>;
 
 export function Disconnect():Promise<void>;
 
@@ -944,6 +951,8 @@ export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.Stag
 
 export function ListStages(arg1:string,arg2:string):Promise<Array<snowflake.StageSummary>>;
 
+export function ListStreamlitTemplates():Promise<streamlittemplate.Catalog>;
+
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
 
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
@@ -1150,6 +1159,8 @@ export function StartQuery(arg1:string,arg2:string):Promise<string>;
 
 export function StartShell(arg1:string,arg2:string):Promise<void>;
 
+export function StartStreamlitPreview(arg1:string,arg2:string):Promise<snowpark.StreamlitPreviewResult>;
+
 export function StopDapProxy():Promise<void>;
 
 export function StopFileWatcher():Promise<void>;
@@ -1159,6 +1170,8 @@ export function StopMCPSession(arg1:string):Promise<void>;
 export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
+
+export function StopStreamlitPreview():Promise<void>;
 
 export function SubmitMFACode(arg1:string,arg2:string):Promise<void>;
 

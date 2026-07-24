@@ -13,6 +13,42 @@ object browser.
   Live SQL preview via `BuildCreateStreamlitSql`; runs through `ExecDDL`. Only
   the modern `FROM <stage location>` grammar is emitted (no legacy
   `ROOT_LOCATION`).
+- **`DeployStreamlitModal.tsx`** — deploys a **local** Streamlit app folder to
+  Snowflake (distinct from `CreateStreamlitModal`, which points `FROM` at files
+  already in a stage). Native folder picker (`PickDirectory`) → main-file
+  detection (`DetectStreamlitMainFile`: pre-fills `streamlit_app.py` / `app.py`,
+  else offers the root `*.py` candidates in an `AutoComplete`) → name (+ case
+  control, defaulting to the folder name), `OR REPLACE` toggle, query-warehouse
+  picker (`ListWarehouses`), title, and comment. Submits via `DeployStreamlit`
+  (upload → temp stage → `CREATE STREAMLIT` → drop stage, all backend). Uses the
+  shared `CreateModalShell` with `lockWhileBusy` so the upload isn't orphaned by
+  a mid-flight dismiss. No SQL preview — the backend builds the statement inline
+  around the temporary stage it creates. An `initialLocalDir` prop opens the modal
+  with a folder already selected and its main file auto-detected (the "Deploy now"
+  hand-off from `NewStreamlitFromTemplateModal`). **Update-existing path:** with an
+  `initialName` prop the modal runs in "redeploy" mode — the name is fixed to the
+  target app and `OR REPLACE` is enforced (Streamlit snapshots files at CREATE
+  time, so a plain re-upload can't refresh a running app); it re-uploads to a
+  fresh temp stage and issues `CREATE OR REPLACE STREAMLIT`, consistent with
+  notebook redeploy.
+- **`StreamlitPreviewControl.tsx`** — a compact "Preview locally" control embedded
+  in `DeployStreamlitModal`. Runs `streamlit run <main file>` in the Snowpark
+  Python environment via `StartStreamlitPreview` (backend `internal/snowpark`),
+  streams `snowpark:streamlit-*` events, opens the browser when the server is
+  ready, and offers Stop / Open-in-browser. Stops the process on unmount / Stop.
+  Surfaces the **runtime-parity caveat** (Snowflake pins Python/Streamlit versions
+  and an allow-listed Anaconda set, so local ≠ Snowflake).
+- **`NewStreamlitFromTemplateModal.tsx`** — scaffolds a new **local** Streamlit
+  app from a [`Snowflake-Labs/snowflake-demo-streamlit`](https://github.com/Snowflake-Labs/snowflake-demo-streamlit)
+  template (Apache-2.0), then the user deploys it with the local-deploy path.
+  Loads the catalog via `ListStreamlitTemplates` (searchable name + description
+  list; surfaces the `Degraded` fallback state as a warning), picks a destination
+  folder (`PickDirectory`), and scaffolds via `CreateStreamlitFromTemplate` with
+  progress/error/success states. On success it offers **Deploy now** — which
+  hands the scaffolded folder to `onDeployNow`, opening `DeployStreamlitModal`
+  pre-filled (`initialLocalDir`, main file auto-detected) — and **Open folder**
+  via `RevealInFinder`. Shows the **required attribution** line linking to the
+  source repo (`BrowserOpenURL`).
 - **`StreamlitPropertiesModal.tsx`** — `GetObjectProperties("STREAMLIT", …)`
   (SHOW STREAMLITS enriched with DESCRIBE `root_location`/`main_file`). Surfaces
   the **URL endpoint** — a clickable Snowsight deep-link built from the account
@@ -26,8 +62,20 @@ object browser.
 
 ## Wiring
 
-Registered in `components/layout/Sidebar.tsx` (kind `STREAMLIT`): Create-Object →
-Projects submenu, type-node "Create Streamlit…", object-node "Properties…", plus
-DROP / RENAME. Icon + colour live in `components/sidebar/objectIcons.tsx`
-(`AppstoreOutlined`, `--icon-streamlit`). Streamlit supports `GET_DDL`, so View
-Definition / comparison / rename are all available.
+The **object-store** actions are registered in `components/layout/Sidebar.tsx`
+(kind `STREAMLIT`) from two entry points — the schema's **Create-Object →
+Projects** submenu ("Streamlit…", "Deploy local Streamlit…") and the
+**"Streamlits" type-node** menu ("Create Streamlit…", "Deploy local Streamlit…";
+opens `DeployStreamlitModal`, refreshing the schema's `STREAMLIT` list via
+`refreshDatabaseByName` on success) — plus the object-node "Properties…" and
+"Redeploy from local folder…" (opens `DeployStreamlitModal` with `initialName`
+→ redeploy mode), DROP / RENAME. Icon + colour live in
+`components/sidebar/objectIcons.tsx` (`AppstoreOutlined`, `--icon-streamlit`).
+Streamlit supports `GET_DDL`, so View Definition / comparison / rename are all
+available.
+
+**`NewStreamlitFromTemplateModal`** is a local scaffolding workflow, so it is
+launched from the **menu bar** — *Tools → New Streamlit App from Template…*
+(`internal/app/menu.go` emits `menu:streamlit-template`, which Sidebar listens
+for), **not** the object browser. It seeds the optional "Deploy now" hand-off
+with the active session's db/schema (offered only when a schema is selected).

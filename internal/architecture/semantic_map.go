@@ -249,6 +249,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/stream/CreateStreamModal.tsx",
         "frontend/src/components/stream/StreamPropertiesModal.tsx",
         "frontend/src/components/streamlit/CreateStreamlitModal.tsx",
+        "frontend/src/components/streamlit/DeployStreamlitModal.tsx",
         "frontend/src/components/streamlit/StreamlitPropertiesModal.tsx",
         "frontend/src/components/tag/CreateTagModal.tsx",
         "frontend/src/components/tag/TagManagementModal.tsx",
@@ -291,15 +292,18 @@ func GetCodebaseSemanticMap() string {
       "name": "Snowpark \u0026 Developer Workflows",
       "backend_paths": [
         "internal/dbt/",
-        "internal/snowpark/"
+        "internal/snowpark/",
+        "internal/streamlittemplate/"
       ],
       "frontend_paths": [
         "frontend/src/components/notebook/NotebookTab.tsx",
         "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
+        "frontend/src/components/streamlit/NewStreamlitFromTemplateModal.tsx",
+        "frontend/src/components/streamlit/StreamlitPreviewControl.tsx",
         "frontend/src/store/notebookPrefsStore.ts",
         "frontend/src/store/notebookToolbarStore.ts"
       ],
-      "description": "Python environment management, Jupyter kernels, and dbt project scaffolding."
+      "description": "Python environment management, Jupyter kernels, dbt and Streamlit project scaffolding, and local Streamlit preview."
     },
     {
       "name": "Git Integration",

@@ -690,6 +690,10 @@ export function CreateStorageIntegration(arg1) {
   return window['go']['app']['App']['CreateStorageIntegration'](arg1);
 }
 
+export function CreateStreamlitFromTemplate(arg1, arg2) {
+  return window['go']['app']['App']['CreateStreamlitFromTemplate'](arg1, arg2);
+}
+
 export function DebugNotebookCell(arg1, arg2, arg3) {
   return window['go']['app']['App']['DebugNotebookCell'](arg1, arg2, arg3);
 }
@@ -720,6 +724,10 @@ export function DeleteVenvFolder() {
 
 export function DeployNotebook(arg1) {
   return window['go']['app']['App']['DeployNotebook'](arg1);
+}
+
+export function DeployStreamlit(arg1) {
+  return window['go']['app']['App']['DeployStreamlit'](arg1);
 }
 
 export function DescribeAgent(arg1, arg2, arg3) {
@@ -760,6 +768,10 @@ export function DescribeSemanticView(arg1, arg2, arg3) {
 
 export function DescribeSessionPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeSessionPolicy'](arg1, arg2, arg3);
+}
+
+export function DetectStreamlitMainFile(arg1) {
+  return window['go']['app']['App']['DetectStreamlitMainFile'](arg1);
 }
 
 export function Disconnect() {
@@ -1742,6 +1754,10 @@ export function ListStages(arg1, arg2) {
   return window['go']['app']['App']['ListStages'](arg1, arg2);
 }
 
+export function ListStreamlitTemplates() {
+  return window['go']['app']['App']['ListStreamlitTemplates']();
+}
+
 export function ListSupportedDbtVersions() {
   return window['go']['app']['App']['ListSupportedDbtVersions']();
 }
@@ -2154,6 +2170,10 @@ export function StartShell(arg1, arg2) {
   return window['go']['app']['App']['StartShell'](arg1, arg2);
 }
 
+export function StartStreamlitPreview(arg1, arg2) {
+  return window['go']['app']['App']['StartStreamlitPreview'](arg1, arg2);
+}
+
 export function StopDapProxy() {
   return window['go']['app']['App']['StopDapProxy']();
 }
@@ -2172,6 +2192,10 @@ export function StopNotebookSession(arg1) {
 
 export function StopShell() {
   return window['go']['app']['App']['StopShell']();
+}
+
+export function StopStreamlitPreview() {
+  return window['go']['app']['App']['StopStreamlitPreview']();
 }
 
 export function SubmitMFACode(arg1, arg2) {
