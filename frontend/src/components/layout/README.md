@@ -123,8 +123,13 @@ Pure matching logic (`buildSearchPredicate`, `filterTree`) lives in `objectSearc
 unit-tested in `objectSearch.test.ts`; the backend command planner (`planAccountSearchCommands`) is
 tested in `internal/snowflake/search_test.go`.
 
-Known follow-up: results aren't live-updated by tree mutations (DROP …) while a search is active, so a
-dropped object lingers until the search is re-run.
+- **Live updates on mutation.** A catalog mutation (drop / create / rename) calls `refreshActiveSearch()`,
+  which bumps `searchRefreshToken` (a dependency of the fetch effect) to re-run the account search when
+  one is active, so results reflect the change instead of showing a dropped object or missing a new one.
+  It's wired into `refreshDatabaseByName` (the common object create/drop/rename path, incl. bulk delete)
+  and the DROP DATABASE / DROP SCHEMA handlers; it's a no-op when no search is active. The re-query
+  reflects the committed DDL (SHOW … IN ACCOUNT is uncached), and old results stay visible until the new
+  ones arrive (no flash).
 
 ### Task tree
 `buildTaskTree` builds a nested `DataNode` hierarchy from a flat `SnowflakeObject[]` list using

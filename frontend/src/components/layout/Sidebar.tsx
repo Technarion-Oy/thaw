@@ -1001,6 +1001,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // search leaves the user's own expansion intact.
   const [searchResults, setSearchResults]           = useState<DataNode[]>([]);
   const [searchLoading, setSearchLoading]           = useState(false);
+  // Bumped after a catalog mutation (drop / create / rename) to re-run the active
+  // account search so its results reflect the change instead of showing stale or
+  // missing objects.
+  const [searchRefreshToken, setSearchRefreshToken] = useState(0);
   const loadingNodes    = useRef<Set<string>>(new Set());
   const [loadingGitNodes, setLoadingGitNodes] = useState<Set<string>>(new Set());
   const [loadingTreeNodes, setLoadingTreeNodes] = useState<Set<string>>(new Set());
@@ -1130,7 +1134,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         if (searchGenRef.current === gen) setSearchLoading(false);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchActive, searchServerKey, isConnected]);
+  }, [fetchActive, searchServerKey, isConnected, searchRefreshToken]);
 
   // Recompute the auto-expanded set when the predicate changes without a refetch
   // (regex text refinement, case toggle) — reads the current results via ref so
@@ -1703,10 +1707,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   //
   // `reveal` (used after a create) force-expands the new object's
   // schema → type path so a brand-new type group opens automatically.
+  // Re-run the active account search after a catalog mutation so its results
+  // don't show a dropped object (or miss a newly created / renamed one). No-op
+  // when no search is active; the backend SHOW … IN ACCOUNT re-query reflects the
+  // committed DDL, so callers just fire this after the mutation succeeds.
+  const refreshActiveSearch = () => {
+    if (searchWasActive.current) setSearchRefreshToken((t) => t + 1);
+  };
+
   const refreshDatabaseByName = async (
     db: string,
     reveal?: { schema: string; kind?: string },
   ) => {
+    refreshActiveSearch();
     await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
 
@@ -3706,6 +3719,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           await DropDatabase(db, dropMode);
           useObjectStore.getState().removeDatabase(db);
           setTreeData((prev) => prev.filter((n) => n.key !== `db:${db}`));
+          refreshActiveSearch();
         } catch (e) {
           contextMsg.error(String(e));
         }
@@ -3760,6 +3774,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           await DropSchema(db, schema, dropMode);
           useObjectStore.getState().removeSchema(db, schema);
           setTreeData((prev) => removeNode(prev, `schema:${db}:${schema}`));
+          refreshActiveSearch();
         } catch (e) {
           contextMsg.error(String(e));
         }
