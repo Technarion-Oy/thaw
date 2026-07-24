@@ -93,27 +93,6 @@ func showLikeClause(pattern string) string {
 	return " LIKE '%" + EscapeTextLit(pattern) + "%'"
 }
 
-// SearchAccountObjects finds objects across the whole account with one SHOW … IN
-// ACCOUNT query per object kind, instead of walking every schema of every
-// database (which is O(databases × schemas) round-trips). This makes a search
-// for, say, a single Streamlit one query rather than thousands. It powers the
-// sidebar object-browser search and — unlike the INFORMATION_SCHEMA-based
-// SearchObjects (MCP search_objects tool, tables/columns in one database) — it
-// covers every object kind account-wide via SHOW.
-//
-//   - namePattern: optional case-insensitive substring pushed to the server as a
-//     LIKE filter to bound large kinds (TABLE/VIEW). Pass "" to fetch all of the
-//     requested kinds (e.g. for regex search, where the caller filters names
-//     client-side).
-//   - kinds: object KINDs to search (e.g. "STREAMLIT", "PROCEDURE"). Empty means
-//     all kinds. SHOW OBJECTS is issued when any requested kind is not sourced
-//     from a dedicated SHOW command (TABLE/VIEW/SEQUENCE), and each requested
-//     extended kind gets its own SHOW … IN ACCOUNT.
-//
-// Per-kind failures (missing privileges, kinds an edition doesn't support IN
-// ACCOUNT) are skipped, mirroring ListExtendedObjects. Results carry their
-// Database/Schema from the SHOW row and are deduped by (db, schema, kind, name,
-// args).
 // accountShowCmd is a single planned SHOW … IN ACCOUNT command.
 type accountShowCmd struct {
 	query     string
@@ -177,6 +156,29 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 	return commands
 }
 
+// SearchAccountObjects finds objects across the whole account with one SHOW … IN
+// ACCOUNT query per object kind, instead of walking every schema of every
+// database (which is O(databases × schemas) round-trips). This makes a search
+// for, say, a single Streamlit one query rather than thousands. It powers the
+// sidebar object-browser search and — unlike the INFORMATION_SCHEMA-based
+// SearchObjects (MCP search_objects tool, tables/columns in one database) — it
+// covers every object kind account-wide via SHOW.
+//
+//   - namePattern: optional case-insensitive substring pushed to the server as a
+//     LIKE filter to bound large kinds (TABLE/VIEW). Pass "" to fetch all of the
+//     requested kinds (e.g. for regex search, where the caller filters names
+//     client-side).
+//   - kinds: object KINDs to search (e.g. "STREAMLIT", "PROCEDURE"). Empty means
+//     all kinds. SHOW OBJECTS is issued when any requested kind is not sourced
+//     from a dedicated SHOW command (TABLE/VIEW/SEQUENCE), and each requested
+//     extended kind gets its own SHOW … IN ACCOUNT.
+//
+// Per-kind failures (missing privileges, kinds an edition doesn't support IN
+// ACCOUNT) are skipped, mirroring ListExtendedObjects. Results carry their
+// Database/Schema from the SHOW row and are deduped by (db, schema, kind, name,
+// args); a plain FUNCTION that is really an EXTERNAL / DATA METRIC FUNCTION (on
+// editions without the discriminator column) is reconciled per database, the
+// same way ListExtendedObjects does within a schema.
 func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, kinds []string) ([]SnowflakeObject, error) {
 	want := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
@@ -220,5 +222,48 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 			out = append(out, o)
 		}
 	}
+
+	// The exact-key dedup above collapses the duplicate EXTERNAL / DATA METRIC
+	// FUNCTION rows (SHOW FUNCTIONS relabel + the dedicated SHOW command), but not
+	// the cross-kind collision: on editions lacking the is_external_function /
+	// is_data_metric column a plain FUNCTION row is really a variant. Reconcile it
+	// the way ListExtendedObjects does — but only when both a plain FUNCTION and a
+	// variant kind are present (the user selected both, or searched all kinds).
+	hasPlainFn, hasVariant := false, false
+	for _, o := range out {
+		switch o.Kind {
+		case "FUNCTION":
+			hasPlainFn = true
+		case "EXTERNAL FUNCTION", "DATA METRIC FUNCTION":
+			hasVariant = true
+		}
+	}
+	if hasPlainFn && hasVariant {
+		out = reconcileFunctionVariants(out)
+	}
 	return out, nil
+}
+
+// reconcileFunctionVariants applies the FUNCTION vs EXTERNAL / DATA METRIC
+// FUNCTION reconciliation (dedupeFunctionVariant) to account-wide results.
+// dedupeFunctionVariant keys by (schema, name, args) without a database, so we
+// group by database first: without that, two distinct functions that share a
+// schema/name/signature across different databases would wrongly collapse. Group
+// order is preserved (the frontend re-groups and sorts anyway).
+func reconcileFunctionVariants(objs []SnowflakeObject) []SnowflakeObject {
+	byDB := make(map[string][]SnowflakeObject)
+	order := make([]string, 0)
+	for _, o := range objs {
+		if _, ok := byDB[o.Database]; !ok {
+			order = append(order, o.Database)
+		}
+		byDB[o.Database] = append(byDB[o.Database], o)
+	}
+	out := make([]SnowflakeObject, 0, len(objs))
+	for _, db := range order {
+		g := dedupeFunctionVariant(byDB[db], "EXTERNAL FUNCTION")
+		g = dedupeFunctionVariant(g, "DATA METRIC FUNCTION")
+		out = append(out, g...)
+	}
+	return out
 }

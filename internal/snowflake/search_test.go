@@ -126,3 +126,54 @@ func TestPlanAccountSearchCommands_ExcludedKindsSkipped(t *testing.T) {
 		t.Errorf("want %d commands, got %d", len(extendedShowKinds), len(cmds))
 	}
 }
+
+func TestReconcileFunctionVariants(t *testing.T) {
+	// Edition without the is_external_function column: SHOW FUNCTIONS returns the
+	// external function as a plain FUNCTION, and SHOW EXTERNAL FUNCTIONS returns it
+	// as EXTERNAL FUNCTION. The plain FUNCTION duplicate must be dropped.
+	objs := []SnowflakeObject{
+		{Database: "DB1", Schema: "S", Kind: "FUNCTION", Name: "F", Arguments: "NUMBER"},
+		{Database: "DB1", Schema: "S", Kind: "EXTERNAL FUNCTION", Name: "F", Arguments: "NUMBER"},
+		{Database: "DB1", Schema: "S", Kind: "FUNCTION", Name: "PLAIN", Arguments: ""},
+	}
+	out := reconcileFunctionVariants(objs)
+	kinds := map[string]int{}
+	for _, o := range out {
+		if o.Name == "F" {
+			kinds[o.Kind]++
+		}
+	}
+	if kinds["FUNCTION"] != 0 || kinds["EXTERNAL FUNCTION"] != 1 {
+		t.Errorf("F should survive only as EXTERNAL FUNCTION, got %v", kinds)
+	}
+	// The unrelated plain function is untouched.
+	if !hasObj(out, "DB1", "S", "FUNCTION", "PLAIN") {
+		t.Errorf("unrelated plain FUNCTION was dropped")
+	}
+}
+
+func TestReconcileFunctionVariants_CrossDatabaseSafety(t *testing.T) {
+	// Same schema/name/args in two different databases: an EXTERNAL FUNCTION in DB1
+	// must NOT drop the distinct plain FUNCTION in DB2 (dedupeFunctionVariant keys
+	// by (schema, name, args) without a database, so grouping per DB is required).
+	objs := []SnowflakeObject{
+		{Database: "DB1", Schema: "S", Kind: "EXTERNAL FUNCTION", Name: "F", Arguments: "NUMBER"},
+		{Database: "DB2", Schema: "S", Kind: "FUNCTION", Name: "F", Arguments: "NUMBER"},
+	}
+	out := reconcileFunctionVariants(objs)
+	if !hasObj(out, "DB2", "S", "FUNCTION", "F") {
+		t.Errorf("DB2's distinct FUNCTION F was wrongly dropped by DB1's EXTERNAL FUNCTION")
+	}
+	if !hasObj(out, "DB1", "S", "EXTERNAL FUNCTION", "F") {
+		t.Errorf("DB1's EXTERNAL FUNCTION F missing")
+	}
+}
+
+func hasObj(objs []SnowflakeObject, db, schema, kind, name string) bool {
+	for _, o := range objs {
+		if o.Database == db && o.Schema == schema && o.Kind == kind && o.Name == name {
+			return true
+		}
+	}
+	return false
+}
