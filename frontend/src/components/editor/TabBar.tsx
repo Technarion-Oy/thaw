@@ -104,15 +104,16 @@ function OverflowTooltip({
 export function tabStripSignature(t: Tab): string {
   return [
     t.id, t.title, t.path ?? "", t.kind ?? "",
-    `${t.diff ? 1 : 0}${t.mcpOrigin ? 1 : 0}${t.orphaned ? 1 : 0}${t.sql !== t.savedSql ? 1 : 0}`,
+    `${t.diff ? 1 : 0}${t.mcpOrigin ? 1 : 0}${t.orphaned ? 1 : 0}${t.sql !== t.savedSql ? 1 : 0}${t.preview ? 1 : 0}`,
   ].join("\u0000");
 }
 
 export default function TabBar() {
   // Re-render only when tab *metadata* the strip actually shows changes — NOT on
   // every keystroke. A per-keystroke SQL edit rebuilds the `tabs` array, but the
-  // tab strip renders only id/title/path/kind/diff/mcpOrigin/orphaned and the
-  // dirty flag (`sql !== savedSql`, which flips at most once). Subscribing to a
+  // tab strip renders only id/title/path/kind/diff/mcpOrigin/orphaned, the dirty
+  // flag (`sql !== savedSql`, which flips at most once) and the preview flag (which
+  // flips at most once, on promotion). Subscribing to a
   // signature of exactly those fields, then snapshotting the live array via a
   // `useMemo` keyed on that signature, keeps the strip off the typing hot path
   // while staying display-correct (every rendered field is in the signature, so a
@@ -124,6 +125,7 @@ export default function TabBar() {
   // closeTab is invoked via "thaw:request-close-tab" event handled in QueryPage.
   const moveTab     = useQueryStore((s) => s.moveTab);
   const renameTab   = useQueryStore((s) => s.renameTab);
+  const promoteTab  = useQueryStore((s) => s.promoteTab);
   const openScratch = useQueryStore((s) => s.openScratch);
   const splitTabId  = useQueryStore((s) => s.splitTabId);
   const setSplitTab = useQueryStore((s) => s.setSplitTab);
@@ -399,6 +401,10 @@ export default function TabBar() {
             ref={(el) => { tabRefs.current[tab.id] = el; }}
             draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
+            // Double-click a preview tab (italic) to pin it, mirroring VS Code and the
+            // file browser's double-click-to-promote. Non-preview tabs are unaffected;
+            // renameable (non-file) tabs stop the span's own dbl-click before it bubbles.
+            onDoubleClick={() => { if (tab.preview) promoteTab(tab.id); }}
             onMouseEnter={() => { setHoveredId(tab.id); fetchTab(tab.id); }}
             onMouseLeave={() => setHoveredId(null)}
             onDragStart={(e) => {
@@ -468,13 +474,21 @@ export default function TabBar() {
               />
             ) : (
               <span
-                onDoubleClick={(e) => { e.stopPropagation(); startRename(tab); }}
+                // File/diff/orphan tabs aren't renameable — let their double-click
+                // bubble to the tab div's promote handler. Only renameable (non-file)
+                // tabs consume it to start an inline rename.
+                onDoubleClick={(e) => {
+                  if (tab.path || tab.diff || tab.orphaned) return;
+                  e.stopPropagation();
+                  startRename(tab);
+                }}
                 onMouseEnter={(e) =>
                   setTruncatedTabId(e.currentTarget.scrollWidth > e.currentTarget.clientWidth ? tab.id : null)}
                 style={{
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
+                  fontStyle: tab.preview ? "italic" : undefined,
                   flex: 1,
                 }}>
                 {tabPrefix(tab)}{tab.title}
@@ -615,7 +629,7 @@ export default function TabBar() {
                         is truncated. overlayStyle lifts the portal above the panel
                         (z-index 9999), same reason the context menu needs it. (#829) */}
                     <OverflowTooltip fullText={tabFullLabel(t)} overlayStyle={{ zIndex: 10000 }}>
-                      {tabPrefix(t)}{t.title}
+                      <span style={{ fontStyle: t.preview ? "italic" : undefined }}>{tabPrefix(t)}{t.title}</span>
                     </OverflowTooltip>
                     {/* Close button — revealed on row hover (see .ctx-item-close).
                         Routes through the same request-close-tab flow as the strip

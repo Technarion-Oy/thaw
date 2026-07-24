@@ -51,6 +51,7 @@ import { openFileInTab } from "../../utils/openFileInTab";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -381,6 +382,9 @@ export default function FileBrowser() {
 
   const fileWatcherEnabled = useFeatureFlagsStore((s) => s.flags.fileWatcher);
   const gitEnabled         = useFeatureFlagsStore((s) => s.flags.gitIntegration);
+  // VS Code–style preview tabs: single-click / search-result opens go to the
+  // reusable preview tab; double-click promotes to permanent. Toggle in Editor Prefs.
+  const previewTabsEnabled = useEditorTabPrefsStore((s) => s.previewTabsEnabled);
 
   // The standalone Git panel was folded into this panel, so the Files panel now
   // owns loading the git/export config on first mount (idempotent).
@@ -729,11 +733,34 @@ export default function FileBrowser() {
     setAnchorKey(path);
     setSelKeys([path]);
     if (isDir) return;
-    const err = await openFileInTab(path);
+    // Single click opens in the reusable preview tab (when enabled); a double-click
+    // promotes it to permanent via onTreeDoubleClick below.
+    const err = await openFileInTab(path, previewTabsEnabled);
     if (err) {
       message.error(`Could not open file: ${err}`);
       setSelKeys([]);
     }
+  };
+
+  // Double-click a file in the tree → promote it to a permanent tab (VS Code
+  // behavior). rc-tree has no double-click prop, so we bind a native handler on the
+  // tree wrapper and recover the node key from the `data-fbkey` attribute set in
+  // titleRender. The preceding click already opened the file as a preview, but its
+  // openFileInTab is async (awaits ReadFile), so the tab may not exist yet when this
+  // fires: promote the existing tab if present, else open it permanently directly
+  // (openFile de-dupes by path, so the in-flight preview open can't duplicate it).
+  const onTreeDoubleClick = (e: React.MouseEvent) => {
+    const el = (e.target as HTMLElement).closest?.("[data-fbkey]") as HTMLElement | null;
+    const key = el?.dataset.fbkey;
+    if (!key || isDirKey(key)) return;
+    const existing = useQueryStore.getState().tabs.find((t) => t.path === key);
+    if (existing) {
+      useQueryStore.getState().promoteTab(existing.id);
+      return;
+    }
+    void openFileInTab(key, false).then((err) => {
+      if (err) message.error(`Could not open file: ${err}`);
+    });
   };
 
   const toggleExpanded = () => {
@@ -756,7 +783,7 @@ export default function FileBrowser() {
   };
 
   const handleResultClick = async (match: SearchMatch) => {
-    const err = await openFileInTab(match.path);
+    const err = await openFileInTab(match.path, previewTabsEnabled);
     if (err) {
       message.error(`Could not open file: ${err}`);
       return;
@@ -1794,6 +1821,7 @@ export default function FileBrowser() {
               // still paints despite user-select:none). preventDefault on the
               // shift mousedown suppresses that without blocking the click.
               onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+              onDoubleClick={onTreeDoubleClick}
             >
               <Tree
                 treeData={treeForRender}

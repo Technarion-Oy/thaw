@@ -55,3 +55,81 @@ describe("queryStore.loadInNewTab", () => {
     expect(state.tabs.find((t) => t.id === original)?.sql).toBe("SELECT unsaved_work();");
   });
 });
+
+describe("queryStore preview tabs (#849)", () => {
+  beforeEach(() => stubBrowserGlobals());
+
+  it("opens a single preview tab and reuses it for the next file", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    let state = useQueryStore.getState();
+    const previewId = state.activeTabId;
+    const previewTab = state.tabs.find((t) => t.id === previewId)!;
+    expect(state.tabs.length).toBe(before + 1);
+    expect(previewTab.preview).toBe(true);
+    expect(previewTab.path).toBe("/tmp/a.sql");
+
+    // Opening another file as preview reuses the same tab (no new tab appended).
+    useQueryStore.getState().openFile("/tmp/b.sql", "-- b", true);
+    state = useQueryStore.getState();
+    expect(state.tabs.length).toBe(before + 1);
+    expect(state.activeTabId).toBe(previewId); // same tab, replaced content
+    const reused = state.tabs.find((t) => t.id === previewId)!;
+    expect(reused.path).toBe("/tmp/b.sql");
+    expect(reused.sql).toBe("-- b");
+    expect(reused.preview).toBe(true);
+  });
+
+  it("promotes the preview tab on edit and keeps the next preview separate", async () => {
+    const useQueryStore = await loadStore();
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+
+    // Editing the active preview tab pins it (clears the preview flag).
+    useQueryStore.getState().setSql("-- a edited");
+    let state = useQueryStore.getState();
+    expect(state.tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
+
+    // A dirty preview is never replaced: opening a new file makes a fresh preview tab.
+    useQueryStore.getState().openFile("/tmp/b.sql", "-- b", true);
+    state = useQueryStore.getState();
+    const newPreviewId = state.activeTabId;
+    expect(newPreviewId).not.toBe(previewId);
+    expect(state.tabs.find((t) => t.id === previewId)?.path).toBe("/tmp/a.sql"); // still open
+    expect(state.tabs.find((t) => t.id === newPreviewId)?.preview).toBe(true);
+    expect(state.tabs.filter((t) => t.preview).length).toBe(1); // only one preview ever
+  });
+
+  it("promoteTab pins a preview tab; a permanent open of the same file promotes it", async () => {
+    const useQueryStore = await loadStore();
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+
+    useQueryStore.getState().promoteTab(previewId);
+    expect(useQueryStore.getState().tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
+
+    // Re-open the same file as preview: the existing permanent tab is reused, never
+    // demoted back to preview.
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const state = useQueryStore.getState();
+    expect(state.activeTabId).toBe(previewId);
+    expect(state.tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
+  });
+
+  it("a permanent open (double-click) of a previewed file promotes it in place", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", false); // permanent open
+    const state = useQueryStore.getState();
+    expect(state.tabs.length).toBe(before + 1); // reused, not duplicated
+    expect(state.tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
+  });
+});

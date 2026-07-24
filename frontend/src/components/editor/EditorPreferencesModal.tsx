@@ -10,10 +10,12 @@ import {
   Row,
   Segmented,
   Space,
+  Switch,
   Typography,
 } from "antd";
 import { GetEditorPrefs, SaveEditorPrefs } from "../../../wailsjs/go/app/App";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
+import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
 
 const { Text } = Typography;
 
@@ -63,6 +65,13 @@ export default function EditorPreferencesModal({ onClose }: Props) {
   const [error, setError]       = useState<string | null>(null);
   const [preview, setPreview]   = useState("");
 
+  // Frontend-only tab preference (not part of backend EditorPrefs). Staged in local
+  // state so Cancel discards it; committed to the store in handleSave.
+  const setPreviewTabsEnabled = useEditorTabPrefsStore((s) => s.setPreviewTabsEnabled);
+  const [previewTabs, setPreviewTabs] = useState(
+    () => useEditorTabPrefsStore.getState().previewTabsEnabled,
+  );
+
   // Load persisted prefs on mount.
   useEffect(() => {
     GetEditorPrefs().then((p) => setPrefs(p as unknown as EditorPrefs)).catch(() => {});
@@ -82,6 +91,8 @@ export default function EditorPreferencesModal({ onClose }: Props) {
     setError(null);
     try {
       await SaveEditorPrefs(prefs);
+      // Commit the frontend-only tab preference alongside the backend prefs.
+      setPreviewTabsEnabled(previewTabs);
       // Notify the editor so it can refresh its prefs reference.
       window.dispatchEvent(new CustomEvent("thaw:editor-prefs-changed", { detail: prefs }));
       onClose();
@@ -250,6 +261,24 @@ export default function EditorPreferencesModal({ onClose }: Props) {
                   { label: "After new line",  value: "after"  },
                 ])}
               </Radio.Group>
+            </Form.Item>
+          </Form>
+
+          {/* Tabs */}
+          <Section title="Tabs" />
+
+          <Form layout="horizontal" size="small">
+            <Form.Item
+              label={<Text style={{ fontSize: 12 }}>Single-click opens a preview tab</Text>}
+              help={
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  VS Code–style: clicking a file in the browser opens a reusable
+                  <i> preview </i>tab (italic). Double-click, or edit it, to keep it open.
+                </Text>
+              }
+              style={{ marginBottom: 0 }}
+            >
+              <Switch checked={previewTabs} onChange={setPreviewTabs} />
             </Form.Item>
           </Form>
 
