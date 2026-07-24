@@ -14,6 +14,12 @@ discard across the selection. When the `fileWatcher` feature flag is enabled it 
 backend FS watcher and incrementally refreshes only the changed directory node on
 `fs:changed` events.
 
+**Root-level creation** is reachable without an existing folder: right-clicking the
+**header title area** (top-left) or the **empty area** of the panel opens a minimal root
+context menu (New Folder…, New SQL File…, Paste) targeting the **workspace root**. It
+deliberately omits destructive actions on the root directory itself. (No toolbar buttons —
+the header row is icon-dense already.)
+
 The header also carries a **folder-switch button** (open-folder icon) whose dropdown offers
 **Open Folder…** (native directory picker → `gitStore.pickExportDir`), **Open Folder in New
 Window…** (`gitStore.openInNewWindow` → `OpenFolderInNewInstance` IPC — spawns a second Thaw
@@ -23,8 +29,15 @@ always-visible way to change the operating folder without opening Git Operations
 **Open Folder…** action is bound to **File → Open Folder…** (`⌘⇧O`) and **Open Folder in New
 Window…** to its File-menu twin.
 
-The **git surface is folded into this panel** (there is no separate Git panel): the header
-shows a branch chip + changed-file count + a Git Operations button, and the tree itself is
+The header is laid out in **two rows** so a narrow sidebar never crushes the folder name:
+row 1 is the folder title (caret + name) plus the action strip (paste, folder-switch,
+search, refresh); row 2 is a dedicated **git status row** — a branch pill (with ↑ahead)
+and a changed-file count pill, each opening Git Operations — shown only in a repo, where
+the branch name finally has room to display in full. The standalone Git Operations icon
+survives on row 1 **only for non-repo folders** (a repo's entry point is the row-2 pills),
+so the action strip stays uncluttered in the common repo case.
+
+The **git surface is folded into this panel** (there is no separate Git panel): the tree itself is
 **color-coded by git status**. The `gitOverlay` memo builds its color map from the status's
 **uncapped `changedPaths`** map (so the whole tree is covered even in huge change sets) and
 matches it to absolute tree node keys via `relOf` — an **exact** export-dir prefix strip
