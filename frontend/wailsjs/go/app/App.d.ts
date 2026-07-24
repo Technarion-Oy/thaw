@@ -1104,6 +1104,8 @@ export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
 
 export function ScanMigrationSource(arg1:string):Promise<Array<migration.MigrationObject>>;
 
+export function SearchAccountObjects(arg1:string,arg2:Array<string>):Promise<snowflake.SearchAccountResult>;
+
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 
 export function SetAccountParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
