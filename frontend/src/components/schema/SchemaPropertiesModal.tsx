@@ -38,10 +38,15 @@ interface Props {
   db: string;
   schema: string;
   name: string;
+  // When true, every ALTER control is swapped for a plain read-only value and
+  // the Danger zone (SWAP WITH) is hidden. Used for INFORMATION_SCHEMA, a
+  // Snowflake-owned system schema that rejects all DDL — offering edits there
+  // only surfaces errors on round-trip.
+  readOnly?: boolean;
   onClose: () => void;
 }
 
-export default function SchemaPropertiesModal({ db, schema, name, onClose }: Props) {
+export default function SchemaPropertiesModal({ db, schema, name, readOnly, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [params, setParams] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -267,6 +272,15 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
       )}
       {rows && (
         <>
+          {readOnly && (
+            <Alert
+              type="info"
+              showIcon
+              message="Read-only system schema"
+              description="INFORMATION_SCHEMA is owned by Snowflake and can't be altered, renamed, tagged, or swapped. These properties are shown for reference only."
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {actionError && (
             <Alert
               type="error"
@@ -289,70 +303,102 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow
-                label="Comment"
-                value={comment}
-                canUnset={comment !== ""}
-                onSave={saveComment}
-                onUnset={() => saveComment("")}
-              />
-              {/* Editable (not InfoRow, which reads as read-only): the Tag shows
-                  the current state and the Select applies the change. */}
-              <tr>
-                <td style={LABEL_TD}>Managed access</td>
-                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Space>
-                    <Tag color={managed ? "green" : "default"}>{managed ? "ENABLED" : "DISABLED"}</Tag>
-                    <Select
-                      size="small"
-                      value={managed ? "on" : "off"}
-                      onChange={(v) => setManagedAccess(v === "on")}
-                      loading={managedBusy}
-                      style={{ width: 110 }}
-                      options={[{ value: "on", label: "Enabled" }, { value: "off", label: "Disabled" }]}
-                    />
-                  </Space>
-                </td>
-              </tr>
-              <EditRow
-                label="Data retention (days)"
-                value={retention}
-                canUnset={retention !== ""}
-                onSave={saveIntParam("DATA_RETENTION_TIME_IN_DAYS")}
-                onUnset={() => saveIntParam("DATA_RETENTION_TIME_IN_DAYS")("")}
-              />
-              <EditRow
-                label="Max data extension (days)"
-                value={maxExtension}
-                canUnset={maxExtension !== ""}
-                onSave={saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")}
-                onUnset={() => saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")("")}
-              />
-              <EditRow
-                label="Default DDL collation"
-                value={collation}
-                canUnset={collation !== ""}
-                onSave={saveCollation}
-                onUnset={() => saveCollation("")}
-              />
-              <EditRow
-                label="Rename to"
-                value={name}
-                onSave={saveRename}
-              />
+              {readOnly ? (
+                <>
+                  <InfoRow label="Comment" value={comment} />
+                  <InfoRow label="Managed access" value={managed ? "ENABLED" : "DISABLED"} />
+                  <InfoRow label="Data retention (days)" value={retention} />
+                  <InfoRow label="Max data extension (days)" value={maxExtension} />
+                  <InfoRow label="Default DDL collation" value={collation} />
+                </>
+              ) : (
+                <>
+                  <EditRow
+                    label="Comment"
+                    value={comment}
+                    canUnset={comment !== ""}
+                    onSave={saveComment}
+                    onUnset={() => saveComment("")}
+                  />
+                  {/* Editable (not InfoRow, which reads as read-only): the Tag shows
+                      the current state and the Select applies the change. */}
+                  <tr>
+                    <td style={LABEL_TD}>Managed access</td>
+                    <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                      <Space>
+                        <Tag color={managed ? "green" : "default"}>{managed ? "ENABLED" : "DISABLED"}</Tag>
+                        <Select
+                          size="small"
+                          value={managed ? "on" : "off"}
+                          onChange={(v) => setManagedAccess(v === "on")}
+                          loading={managedBusy}
+                          style={{ width: 110 }}
+                          options={[{ value: "on", label: "Enabled" }, { value: "off", label: "Disabled" }]}
+                        />
+                      </Space>
+                    </td>
+                  </tr>
+                  <EditRow
+                    label="Data retention (days)"
+                    value={retention}
+                    canUnset={retention !== ""}
+                    onSave={saveIntParam("DATA_RETENTION_TIME_IN_DAYS")}
+                    onUnset={() => saveIntParam("DATA_RETENTION_TIME_IN_DAYS")("")}
+                  />
+                  <EditRow
+                    label="Max data extension (days)"
+                    value={maxExtension}
+                    canUnset={maxExtension !== ""}
+                    onSave={saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")}
+                    onUnset={() => saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")("")}
+                  />
+                  <EditRow
+                    label="Default DDL collation"
+                    value={collation}
+                    canUnset={collation !== ""}
+                    onSave={saveCollation}
+                    onUnset={() => saveCollation("")}
+                  />
+                  <EditRow
+                    label="Rename to"
+                    value={name}
+                    onSave={saveRename}
+                  />
+                </>
+              )}
             </tbody>
           </table>
 
           <div style={SECTION_HEAD}>Tags</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+              {readOnly ? (
+                <InfoRow
+                  label="Tags"
+                  value={objTags.tags.length ? objTags.tags.map((t) => `${t.name}: ${t.value}`).join(", ") : ""}
+                />
+              ) : (
+                <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+              )}
             </tbody>
           </table>
 
           <div style={SECTION_HEAD}>Storage &amp; Iceberg</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
+              {readOnly ? (
+                <>
+                  <InfoRow label="External volume" value={externalVolume} />
+                  <InfoRow label="Catalog" value={catalog} />
+                  <InfoRow label="Catalog sync" value={catalogSync} />
+                  <InfoRow label="Iceberg default DDL collation" value={icebergCollation} />
+                  <InfoRow label="Iceberg version default" value={icebergVersion} />
+                  <InfoRow label="Iceberg merge-on-read behavior" value={icebergMerge} />
+                  <InfoRow label="Enable Iceberg merge-on-read" value={enableIcebergMerge} />
+                  <InfoRow label="Base location prefix" value={baseLocationPrefix} />
+                </>
+              ) : (
+                <>
               <PickerRow
                 label="External volume"
                 value={externalVolume}
@@ -414,12 +460,22 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSave={saveTextParam("BASE_LOCATION_PREFIX")}
                 onUnset={() => saveTextParam("BASE_LOCATION_PREFIX")("")}
               />
+                </>
+              )}
             </tbody>
           </table>
 
           <div style={SECTION_HEAD}>Notebook &amp; Streamlit</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
+              {readOnly ? (
+                <>
+                  <InfoRow label="Default notebook compute pool (CPU)" value={notebookCpu} />
+                  <InfoRow label="Default notebook compute pool (GPU)" value={notebookGpu} />
+                  <InfoRow label="Default Streamlit notebook warehouse" value={streamlitWh} />
+                </>
+              ) : (
+                <>
               <PickerRow
                 label="Default notebook compute pool (CPU)"
                 value={notebookCpu}
@@ -444,12 +500,26 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSet={(v) => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")(`SET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE = ${q1(v)}`)}
                 onUnset={() => applyParam("DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")("UNSET DEFAULT_STREAMLIT_NOTEBOOK_WAREHOUSE")}
               />
+                </>
+              )}
             </tbody>
           </table>
 
           <div style={SECTION_HEAD}>Parameters</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
+              {readOnly ? (
+                <>
+                  <InfoRow label="Log level" value={logLevel} />
+                  <InfoRow label="Trace level" value={traceLevel} />
+                  <InfoRow label="Storage serialization policy" value={serialization} />
+                  <InfoRow label="Replace invalid characters" value={replaceInvalid} />
+                  <InfoRow label="Object visibility" value={objectVisibility} />
+                  <InfoRow label="Enable data compaction" value={dataCompaction} />
+                  <InfoRow label="Replicable with failover groups" value={replicableFailover} />
+                </>
+              ) : (
+                <>
               <SelectRow
                 label="Log level"
                 value={logLevel}
@@ -506,33 +576,41 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
                 onSet={(v) => applyParam("REPLICABLE_WITH_FAILOVER_GROUPS")(`SET REPLICABLE_WITH_FAILOVER_GROUPS = ${q1(v)}`)}
                 onUnset={() => applyParam("REPLICABLE_WITH_FAILOVER_GROUPS")("UNSET REPLICABLE_WITH_FAILOVER_GROUPS")}
               />
+                </>
+              )}
             </tbody>
           </table>
 
-          <div style={SECTION_HEAD}>Danger zone</div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <tbody>
-              <tr>
-                <td style={LABEL_TD}>Swap with</td>
-                <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-                  <Space>
-                    <Select
-                      size="small"
-                      showSearch
-                      value={swapTarget}
-                      placeholder="Target schema"
-                      style={{ width: 240 }}
-                      options={siblings.map((s) => ({ value: s, label: s }))}
-                      onChange={setSwapTarget}
-                    />
-                    <Button size="small" danger disabled={!swapTarget} loading={swapBusy} onClick={doSwap}>
-                      Swap…
-                    </Button>
-                  </Space>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {/* Danger zone (SWAP WITH) is destructive DDL — hidden for read-only
+              system schemas, which can't be swapped. */}
+          {!readOnly && (
+            <>
+              <div style={SECTION_HEAD}>Danger zone</div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <tbody>
+                  <tr>
+                    <td style={LABEL_TD}>Swap with</td>
+                    <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+                      <Space>
+                        <Select
+                          size="small"
+                          showSearch
+                          value={swapTarget}
+                          placeholder="Target schema"
+                          style={{ width: 240 }}
+                          options={siblings.map((s) => ({ value: s, label: s }))}
+                          onChange={setSwapTarget}
+                        />
+                        <Button size="small" danger disabled={!swapTarget} loading={swapBusy} onClick={doSwap}>
+                          Swap…
+                        </Button>
+                      </Space>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
 
           <div style={SECTION_HEAD}>Properties</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -552,6 +630,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
         objectType="SCHEMA"
         nameParts={[db, schema]}
         title={schemaRef}
+        readOnly={readOnly}
         onClose={() => setShowParams(false)}
       />
     )}

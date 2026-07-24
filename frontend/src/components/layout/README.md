@@ -43,6 +43,16 @@ a flat list, so the shared `obj` entries (Tag References…, Insert Full Name, V
 Properties, Select for Comparison, Compare with…, Rename…) carry an explicit `objKind !== "TABLE"`
 guard to avoid double-rendering once they also appear inside a table submenu.
 
+### `isInfoSchema` — read-only system-schema guard
+`INFORMATION_SCHEMA` is Snowflake-owned and read-only (views + table functions only; no DDL,
+Time Travel, or tagging). The module-level `isInfoSchema(nodeKey)` helper reports whether a
+`schema:DB:SCHEMA` key points at it, and the schema context menu uses it to hide the infeasible
+items (**Create Object**, **Show Dropped Objects…**, **Export Data…**, **Import Data…**,
+**Backup Sets…**, **Tag References…**, and **Drop Schema…**), leaving only **Insert Name** and
+**Properties**. Properties opens `SchemaPropertiesModal` with `readOnly` set, so it renders as a
+value dump with no ALTER controls (issue #854). Mirrors the backend's `ListUserSchemas` exclusion
+(`internal/app/objects.go`).
+
 ### Three-tier object-listing cache
 1. `objectStore` — previously expanded schemas (instant, all types).
 2. Go TTL cache (`ListObjects` / `ListBasicObjects`) — 30 s backend cache.
