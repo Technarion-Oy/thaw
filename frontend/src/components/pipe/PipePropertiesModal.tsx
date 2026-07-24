@@ -9,7 +9,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterPipe } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import TagsRow, { EditableTag } from "../shared/TagsRow";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -143,7 +144,6 @@ interface Props {
 export default function PipePropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tags, setTags] = useState<EditableTag[]>([]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -158,6 +158,11 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "PIPE", db, schema, name,
+    alter: (clause) => AlterPipe(db, schema, name, clause),
+  });
+
   const pipeRef = `"${db}"."${schema}"."${name}"`;
 
   const saveComment = async (comment: string) => {
@@ -167,19 +172,6 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
       await AlterPipe(db, schema, name, `SET COMMENT = ${q1(comment)}`);
     }
     await reload();
-  };
-
-  const setTag = async (tagName: string, tagValue: string) => {
-    await AlterPipe(db, schema, name, `SET TAG "${tagName.replace(/"/g, '""')}" = ${q1(tagValue)}`);
-    setTags((prev) => {
-      const next = prev.filter((t) => t.key !== tagName);
-      return [...next, { key: tagName, name: tagName, value: tagValue }];
-    });
-  };
-
-  const unsetTag = async (tagName: string) => {
-    await AlterPipe(db, schema, name, `UNSET TAG "${tagName.replace(/"/g, '""')}"`);
-    setTags((prev) => prev.filter((t) => t.key !== tagName));
   };
 
   const comment = rows ? (rows.find((r) => r.key.toUpperCase() === "COMMENT")?.value ?? "") : "";
@@ -239,9 +231,10 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
                 onUnset={() => saveComment("")}
               />
               <TagsRow
-                tags={tags}
-                onSetTag={setTag}
-                onUnsetTag={unsetTag}
+                tags={objTags.tags}
+                nameOptions={objTags.nameOptions}
+                onSetTag={objTags.setTag}
+                onUnsetTag={objTags.unsetTag}
               />
             </tbody>
           </table>

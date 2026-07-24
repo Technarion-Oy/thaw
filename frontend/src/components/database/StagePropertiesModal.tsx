@@ -3,17 +3,19 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Modal, Input, Button, Alert, Space, Typography, Checkbox, Select,
-  Spin, Tag, message,
+  Spin, message,
 } from "antd";
 import {
   InboxOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PlusOutlined, SyncOutlined, SearchOutlined,
+  SyncOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import {
   GetObjectProperties, ListIntegrations, AlterStage,
   ListFileFormats,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -176,60 +178,6 @@ function ReadOnlyRow({ label, value, search }: { label: string; value: string; s
   );
 }
 
-// ─── TagsRow component ────────────────────────────────────────────────────────
-
-function TagsRow({ db, schema, name, search, onAlter }: { db: string, schema: string, name: string, search?: string, onAlter: (c: string) => Promise<void> }) {
-  const [tags, setTags] = useState<{ key: string, value: string }[]>([]);
-  const [newTag, setNewTag] = useState({ key: "", value: "" });
-
-  const loadTags = useCallback(async () => {
-    try {
-      // For now we use a simplified approach since TAG_REFERENCES might be slow or restricted.
-      // In a real app we'd fetch them properly.
-    } catch (e) {}
-  }, [db, schema, name]);
-
-  useEffect(() => { loadTags(); }, [loadTags]);
-
-  const addTag = async () => {
-    if (!newTag.key || !newTag.value) return;
-    try {
-      await onAlter(`SET TAG ${newTag.key} = '${newTag.value}'`);
-      setTags([...tags, { ...newTag }]);
-      setNewTag({ key: "", value: "" });
-    } catch (e) { message.error(String(e)); }
-  };
-
-  const removeTag = async (key: string) => {
-    try {
-      await onAlter(`UNSET TAG ${key}`);
-      setTags(tags.filter(t => t.key !== key));
-    } catch (e) { message.error(String(e)); }
-  };
-
-  if (search && !"tags".includes(search.toLowerCase())) return null;
-
-  return (
-    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={{ ...LABEL_TD, verticalAlign: "top", paddingTop: 8 }}>Tags</td>
-      <td style={{ padding: "4px 0" }}>
-        <Space direction="vertical" style={{ width: "100%" }}>
-          {tags.map(t => (
-            <Tag key={t.key} closable onClose={() => removeTag(t.key)} style={{ marginBottom: 4 }}>
-              {t.key} = {t.value}
-            </Tag>
-          ))}
-          <div style={{ display: "flex", gap: 4 }}>
-            <Input size="small" placeholder="Key" value={newTag.key} onChange={e => setNewTag({ ...newTag, key: e.target.value })} />
-            <Input size="small" placeholder="Value" value={newTag.value} onChange={e => setNewTag({ ...newTag, value: e.target.value })} />
-            <Button size="small" icon={<PlusOutlined />} onClick={addTag} />
-          </div>
-        </Space>
-      </td>
-    </tr>
-  );
-}
-
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 interface Props {
@@ -276,6 +224,8 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
     await load();
     onSuccess?.();
   };
+
+  const objTags = useObjectTags({ kind: "STAGE", db, schema, name, alter });
 
   const handleRename = async (newName: string) => {
     const t = newName.trim();
@@ -376,7 +326,9 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
                 onSave={async (v) => await alter(`SET COMMENT = ${q1(v)}`)}
                 onUnset={async () => await alter("UNSET COMMENT")}
               />
-              <TagsRow search={search} db={db} schema={schema} name={name} onAlter={alter} />
+              {(!search || "tags".includes(search.toLowerCase())) && (
+                <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+              )}
               {(!search || "DCM Project".toLowerCase().includes(search.toLowerCase())) && (
                 <tr style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={LABEL_TD}>DCM Project</td>

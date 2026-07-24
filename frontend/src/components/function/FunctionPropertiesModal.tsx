@@ -12,6 +12,8 @@ import {
 import { GetRoutineProperties, AlterFunction } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { ConfirmSwitch } from "../common/ConfirmSwitch";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -157,6 +159,11 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "FUNCTION", db, schema, name, args,
+    alter: (clause) => AlterFunction(db, schema, name, args, clause),
+  });
+
   const fnRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -225,6 +232,7 @@ export default function FunctionPropertiesModal({ db, schema, name, args, onClos
                   <ConfirmSwitch checked={isSecure} onConfirm={toggleSecure} />
                 </td>
               </tr>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

@@ -9,10 +9,11 @@ import { FolderOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterSchema, GetSchemaParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
-  ListUserSchemas, GetObjectTagReferences,
+  ListUserSchemas,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import TagsRow, { EditableTag } from "../shared/TagsRow";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import ObjectParametersModal from "../common/ObjectParametersModal";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import {
@@ -47,7 +48,6 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
   const [actionError, setActionError] = useState<string | null>(null);
   const [managedBusy, setManagedBusy] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [tags, setTags] = useState<EditableTag[]>([]);
   const [siblings, setSiblings] = useState<string[]>([]);
   const [swapTarget, setSwapTarget] = useState<string | undefined>();
   const [swapBusy, setSwapBusy] = useState(false);
@@ -76,37 +76,10 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
 
   useEffect(() => { reload(); }, [reload]);
 
-  // Tags use the no-latency INFORMATION_SCHEMA.TAG_REFERENCES read so a SET/UNSET
-  // reflects immediately. Best-effort: SET/UNSET still work if the read fails.
-  // Tags inherited from the database/account are shown for context but can't be
-  // unset here — that has to happen where they were applied.
-  const reloadTags = useCallback(async () => {
-    try {
-      const t = await GetObjectTagReferences("SCHEMA", db, schema, name, "");
-      const cols = (t?.columns ?? []).map((c) => c.toLowerCase());
-      const ci = (n: string) => cols.indexOf(n);
-      const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
-        vlI = ci("tag_value"), lvI = ci("level");
-      setTags((t?.rows ?? []).map((row): EditableTag => {
-        const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
-        const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
-        const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
-        const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
-        const inherited = lvI >= 0 && String(row[lvI] ?? "").toUpperCase() !== "SCHEMA";
-        return {
-          key: qualified,
-          name: tnm,
-          value: vlI >= 0 ? String(row[vlI] ?? "") : "",
-          removable: !inherited,
-          suffix: inherited ? " (inherited)" : "",
-        };
-      }));
-    } catch {
-      setTags([]);
-    }
-  }, [db, schema, name]);
-
-  useEffect(() => { reloadTags(); }, [reloadTags]);
+  const objTags = useObjectTags({
+    kind: "SCHEMA", db, schema, name,
+    alter: (clause) => AlterSchema(db, schema, clause),
+  });
 
   // Sibling schemas in the same database, for the SWAP WITH target picker.
   // ListUserSchemas excludes the read-only INFORMATION_SCHEMA (not swappable).
@@ -201,18 +174,6 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
     } finally {
       setManagedBusy(false);
     }
-  };
-
-  const setTag = async (tagName: string, tagValue: string) => {
-    // Tag name may be a qualified identifier (db.schema.tag) — inserted verbatim;
-    // the value is a quoted string literal.
-    await AlterSchema(db, schema, `SET TAG ${tagName} = ${q1(tagValue)}`);
-    await reloadTags();
-  };
-
-  const unsetTag = async (qualified: string) => {
-    await AlterSchema(db, schema, `UNSET TAG ${qualified}`);
-    await reloadTags();
   };
 
   // SWAP WITH exchanges ALL contents of two schemas — destructive, so confirm
@@ -385,7 +346,7 @@ export default function SchemaPropertiesModal({ db, schema, name, onClose }: Pro
           <div style={SECTION_HEAD}>Tags</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <TagsRow tags={tags} onSetTag={setTag} onUnsetTag={unsetTag} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

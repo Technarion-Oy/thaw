@@ -12,6 +12,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterAlert, ExecuteAlert } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -164,6 +166,11 @@ export default function AlertPropertiesModal({ db, schema, name, onClose }: Prop
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "ALERT", db, schema, name,
+    alter: (clause) => AlterAlert(db, schema, name, clause),
+  });
+
   const alertRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -277,6 +284,7 @@ export default function AlertPropertiesModal({ db, schema, name, onClose }: Prop
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

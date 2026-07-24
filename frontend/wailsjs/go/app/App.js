@@ -194,6 +194,10 @@ export function AlterStreamlit(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStreamlit'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -212,6 +216,10 @@ export function AlterUserProperty(arg1, arg2, arg3) {
 
 export function AlterView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterView'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterWarehouse(arg1, arg2) {
+  return window['go']['app']['App']['AlterWarehouse'](arg1, arg2);
 }
 
 export function AlterWarehouseAbortAllQueries(arg1) {

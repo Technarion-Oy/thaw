@@ -11,6 +11,8 @@ import {
   PauseCircleOutlined, PlayCircleOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterMaterializedView } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { ConfirmSwitch } from "../common/ConfirmSwitch";
 
@@ -156,6 +158,11 @@ export default function MaterializedViewPropertiesModal({ db, schema, name, onCl
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "MATERIALIZED VIEW", db, schema, name,
+    alter: (clause) => AlterMaterializedView(db, schema, name, clause),
+  });
+
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -267,6 +274,7 @@ export default function MaterializedViewPropertiesModal({ db, schema, name, onCl
                   <ConfirmSwitch checked={isSecure} onConfirm={toggleSecure} />
                 </td>
               </tr>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

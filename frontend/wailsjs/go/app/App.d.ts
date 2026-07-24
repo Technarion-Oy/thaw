@@ -170,6 +170,8 @@ export function AlterStream(arg1:string,arg2:string,arg3:string,arg4:string):Pro
 
 export function AlterStreamlit(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -179,6 +181,8 @@ export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 export function AlterUserProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AlterView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterWarehouse(arg1:string,arg2:string):Promise<void>;
 
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
 

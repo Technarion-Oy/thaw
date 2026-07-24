@@ -11,6 +11,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterSequence } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -151,6 +153,11 @@ export default function SequencePropertiesModal({ db, schema, name, onClose }: P
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "SEQUENCE", db, schema, name,
+    alter: (clause) => AlterSequence(db, schema, name, clause),
+  });
+
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -209,6 +216,7 @@ export default function SequencePropertiesModal({ db, schema, name, onClose }: P
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 
