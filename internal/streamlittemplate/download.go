@@ -11,6 +11,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // DownloadTemplate scaffolds a single template folder from the demo repo into
@@ -49,21 +51,33 @@ func DownloadTemplate(ctx context.Context, name, destDir string) error {
 		return fmt.Errorf("create destination: %w", err)
 	}
 
+	// Fetch + write each file with bounded parallelism (mirrors the SetLimit(8)
+	// used by ListTemplates' description fetch) so a multi-file template scaffolds
+	// as fast as its slowest file rather than the sum of them.
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
 	for _, rel := range rels {
-		data, err := httpGet(ctx, rawURL(path.Join(name, rel)), "")
-		if err != nil {
-			return fmt.Errorf("download %s: %w", rel, err)
-		}
+		// Reject unsafe paths before any download so a bad tree entry fails fast.
 		target, err := safeJoin(destDir, rel)
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", filepath.Dir(rel), err)
-		}
-		if err := os.WriteFile(target, data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", rel, err)
-		}
+		g.Go(func() error {
+			data, err := httpGet(gctx, rawURL(path.Join(name, rel)), "")
+			if err != nil {
+				return fmt.Errorf("download %s: %w", rel, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return fmt.Errorf("create %s: %w", filepath.Dir(rel), err)
+			}
+			if err := os.WriteFile(target, data, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", rel, err)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	if err := writeLicenseAndNotice(ctx, name, destDir); err != nil {

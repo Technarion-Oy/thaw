@@ -44,17 +44,20 @@ func relPlan(t *testing.T, root string, ups []dirUpload) []dirUpload {
 
 func TestPlanDirUploads_PreservesTreeAndSkipsJunk(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"streamlit_app.py":         "app",
-		"environment.yml":          "deps",
-		".DS_Store":                "junk",   // skipped
-		".git/config":              "vcs",    // junk dir → skipped
-		"pages/page1.py":           "p1",
-		"pages/page2.py":           "p2",
-		"assets/logo.png":          "img",
-		"assets/__pycache__/x.pyc": "cache",  // junk dir → skipped
-		"utils/helper.py":          "help",
-		"utils/.secret.py":         "hidden", // hidden file → skipped
-		"emptyish/.DS_Store":       "junk",   // only junk → no uploads
+		"streamlit_app.py":          "app",
+		"environment.yml":           "deps",
+		".DS_Store":                 "junk", // skipped
+		".git/config":               "vcs",  // junk dir → skipped
+		"pages/page1.py":            "p1",
+		"pages/page2.py":            "p2",
+		"assets/logo.png":           "img",
+		"assets/__pycache__/x.pyc":  "cache", // junk dir → skipped
+		"utils/helper.py":           "help",
+		"utils/.secret.py":          "hidden", // hidden file → skipped
+		"emptyish/.DS_Store":        "junk",   // only junk → no uploads
+		".streamlit/config.toml":    "theme",  // config dir → KEPT
+		"venv/bin/activate":         "venv",   // virtualenv → skipped
+		"node_modules/pkg/index.js": "dep",    // JS deps → skipped
 	})
 
 	ups, err := planDirUploads(root)
@@ -63,6 +66,7 @@ func TestPlanDirUploads_PreservesTreeAndSkipsJunk(t *testing.T) {
 	}
 
 	want := []dirUpload{
+		{Path: ".streamlit/config.toml", RelDir: ".streamlit"},
 		{Path: "assets/logo.png", RelDir: "assets"},
 		{Path: "environment.yml", RelDir: ""},
 		{Path: "pages/page1.py", RelDir: "pages"},
@@ -91,12 +95,12 @@ func TestPlanDirUploads_AllJunkIsEmpty(t *testing.T) {
 }
 
 func TestIsJunk(t *testing.T) {
-	for _, n := range []string{".git", "__pycache__", ".venv", ".idea"} {
+	for _, n := range []string{".git", "__pycache__", ".venv", ".idea", "venv", "env", "node_modules"} {
 		if !isJunkDir(n) {
 			t.Errorf("isJunkDir(%q) = false, want true", n)
 		}
 	}
-	for _, n := range []string{"pages", "assets", "data"} {
+	for _, n := range []string{"pages", "assets", "data", ".streamlit"} {
 		if isJunkDir(n) {
 			t.Errorf("isJunkDir(%q) = true, want false", n)
 		}

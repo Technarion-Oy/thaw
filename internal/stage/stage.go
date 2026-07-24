@@ -303,10 +303,28 @@ type dirUpload struct {
 	RelDir string
 }
 
+// bulkDirs are non-hidden directories that commonly sit alongside a Streamlit
+// app but must never be uploaded to a stage: local virtualenvs and JS dependency
+// trees. Each can hold thousands of tiny files (one PUT apiece), and all are
+// reconstructed from requirements/environment specs — they aren't part of the
+// app. `python -m venv venv` / `python -m venv env` are the standard tutorial
+// invocations, so these are the common case, not an edge case.
+var bulkDirs = map[string]bool{
+	"venv":         true,
+	"env":          true,
+	"node_modules": true,
+}
+
 // isJunkDir reports whether a directory should be skipped when uploading a local
-// folder: VCS metadata, Python bytecode caches, and any hidden (dot) directory.
+// folder: VCS metadata, Python bytecode caches, local virtualenv / JS dependency
+// trees (see bulkDirs), and any hidden (dot) directory — except ".streamlit",
+// which holds the app's config.toml (theming/client options) and is a genuine
+// part of the deployable app, not junk.
 func isJunkDir(name string) bool {
-	return name == ".git" || name == "__pycache__" || strings.HasPrefix(name, ".")
+	if name == ".streamlit" {
+		return false
+	}
+	return name == ".git" || name == "__pycache__" || bulkDirs[name] || strings.HasPrefix(name, ".")
 }
 
 // isJunkFile reports whether a file should be skipped: OS junk and any hidden
@@ -318,8 +336,9 @@ func isJunkFile(name string) bool {
 // planDirUploads walks the folder at root and returns an ordered, deterministic
 // set of file uploads that reproduce its non-junk tree, preserving relative
 // paths. It performs no I/O beyond the walk, so it is unit-testable without a
-// live connection. Skips .git/, __pycache__/, other hidden directories, hidden
-// files, and .DS_Store (see isJunkDir / isJunkFile).
+// live connection. Skips .git/, __pycache__/, venv/env/node_modules/, other
+// hidden directories, hidden files, and .DS_Store — but keeps .streamlit/ (see
+// isJunkDir / isJunkFile).
 func planDirUploads(root string) ([]dirUpload, error) {
 	var ups []dirUpload
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -357,7 +376,8 @@ func planDirUploads(root string) ([]dirUpload, error) {
 // stageName, preserving each file's path relative to localDir — one PUT per file
 // via UploadFileToStage (AUTO_COMPRESS=FALSE). stageName is the stage root (e.g.
 // "@DB.SCHEMA.STAGE"); files land under "<stageName>/<relative subdir>". VCS
-// metadata, hidden files, __pycache__, and .DS_Store are skipped.
+// metadata, hidden files, __pycache__, virtualenv/dependency trees
+// (venv/env/node_modules), and .DS_Store are skipped; .streamlit/ is kept.
 func UploadDirToStage(ctx context.Context, client *snowflake.Client, localDir, stageName string, overwrite bool) error {
 	root, err := filepath.Abs(localDir)
 	if err != nil {

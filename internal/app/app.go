@@ -191,7 +191,6 @@ func (a *App) currentConnectParams() *snowflake.ConnectParams {
 	return a.connectParams
 }
 
-
 // workdirOverrideArg returns the directory passed via --workdir=<dir> on the
 // command line, or "" if absent. Set by "Open Folder in New Window" when it
 // relaunches the executable so the new instance opens that folder. Deliberately
@@ -536,6 +535,12 @@ func (a *App) shutdown(_ context.Context) {
 
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
+
+	// Stop any running local Streamlit preview so its `streamlit run` subprocess
+	// (and the localhost port it binds) isn't orphaned when Thaw quits.
+	if a.snowparkSvc != nil {
+		a.snowparkSvc.StopStreamlitPreview()
+	}
 
 	// Cancel any in-flight queries across all tab sessions so they stop
 	// consuming Snowflake credits.  CancelQuery issues SYSTEM$CANCEL_QUERY in

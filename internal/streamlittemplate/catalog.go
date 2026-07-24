@@ -192,13 +192,13 @@ func stripInlineMarkdown(s string) string {
 		switch c {
 		case '[':
 			// [label](url) → label
-			close := strings.IndexByte(s[i:], ']')
-			if close > 0 && i+close+1 < len(s) && s[i+close+1] == '(' {
-				label := s[i+1 : i+close]
+			closeIdx := strings.IndexByte(s[i:], ']')
+			if closeIdx > 0 && i+closeIdx+1 < len(s) && s[i+closeIdx+1] == '(' {
+				label := s[i+1 : i+closeIdx]
 				b.WriteString(label)
-				end := strings.IndexByte(s[i+close+1:], ')')
+				end := strings.IndexByte(s[i+closeIdx+1:], ')')
 				if end >= 0 {
-					i = i + close + 1 + end
+					i = i + closeIdx + 1 + end
 					continue
 				}
 			}

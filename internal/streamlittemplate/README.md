@@ -22,7 +22,8 @@ single chosen folder locally — never a full clone of the 30+ demos.
 - `DownloadTemplate(ctx, name, destDir) error` — scaffolds one folder into
   `destDir`, preserving its relative structure. Fetches **only the chosen
   folder's files** via the GitHub git-tree API (one request) + raw file
-  downloads. Refuses a non-empty destination. Writes the repo's Apache-2.0
+  downloads (fetched with bounded parallelism, `errgroup.SetLimit(8)`, matching
+  `ListTemplates`' description fetch). Refuses a non-empty destination. Writes the repo's Apache-2.0
   `LICENSE` (best-effort download, bundled fallback header if unreachable) and a
   `NOTICE` provenance line for attribution; the template's own `README.md` is
   kept.
