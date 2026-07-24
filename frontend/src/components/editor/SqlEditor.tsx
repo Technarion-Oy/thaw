@@ -868,8 +868,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
-  // ── Git gutter: clear HEAD cache and re-run when active tab changes ───────
+  // ── Git gutter: clear HEAD cache and re-run when the shown tab OR file changes ──
   const activeFilePath = activeTab?.path ?? null;
+  // Depend on activeFilePath too, not just the tab id: a recycled preview tab (and a
+  // Save-As) keeps the same id while swapping the file underneath it, so keying on id
+  // alone would leave the previous file's gutter markers up until the 400ms-debounced
+  // onDidChangeModelContent refresh runs. Path changes only on switch/recycle/save-as,
+  // never on a keystroke, so this stays off the typing hot path.
   useEffect(() => {
     if (activeFilePath) {
       // Evict cached HEAD content so the next refresh re-fetches from go-git.
@@ -879,7 +884,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     gitGutterDecRef.current?.set([]);
     if (gitGutterTimerRef.current) clearTimeout(gitGutterTimerRef.current);
     gitGutterTimerRef.current = setTimeout(() => { refreshGitGutterRef.current?.(); }, 0);
-  }, [tabId ?? activeTabId]);
+  }, [tabId ?? activeTabId, activeFilePath]);
 
   // ── "Explain SQL" context menu handler ───────────────────────────────────
   useEffect(() => {
