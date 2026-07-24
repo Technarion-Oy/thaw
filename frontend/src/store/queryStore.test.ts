@@ -140,6 +140,26 @@ describe("queryStore preview tabs (#849)", () => {
     expect(state.tabs.find((t) => t.id === state.activeTabId)?.preview).toBe(true);
   });
 
+  it("does not recycle a preview tab that is the current split target (promotes it)", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const splitId = useQueryStore.getState().activeTabId;
+    // Split another editor with the preview tab — recycling it in place would pull
+    // the split pane onto the new file (and collapse both panes onto one tab).
+    useQueryStore.getState().setSplitTab(splitId);
+
+    useQueryStore.getState().openFile("/tmp/b.sql", "-- b", true);
+    const state = useQueryStore.getState();
+    expect(state.tabs.length).toBe(before + 2); // fresh preview appended, split tab kept
+    expect(state.splitTabId).toBe(splitId);     // split still points at its own tab
+    const split = state.tabs.find((t) => t.id === splitId)!;
+    expect(split.path).toBe("/tmp/a.sql");      // still shows its own file
+    expect(split.preview).toBeFalsy();          // promoted
+    expect(state.tabs.find((t) => t.id === state.activeTabId)?.preview).toBe(true);
+  });
+
   it("a permanent open (double-click) of a previewed file promotes it in place", async () => {
     const useQueryStore = await loadStore();
     const before = useQueryStore.getState().tabs.length;

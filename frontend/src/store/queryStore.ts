@@ -288,9 +288,18 @@ export const useQueryStore = create<QueryState>()(
       // *running* preview is likewise not recycled: an in-flight query is bound to
       // this tab id (runQuery/WaitForQueryResult/setTabRunning capture it) and must
       // not land on a tab now showing a different file — promote it and open fresh.
+      // A preview that is the current split target is also not recycled: swapping its
+      // file in place would silently pull the split pane onto the new file (and, since
+      // we also reassign activeTabId, collapse both panes onto the same tab) — promote
+      // it (keeping the split on its file) and open the new file as a fresh preview.
       if (preview) {
         const previewTab = state.tabs.find((t) => t.preview);
-        if (previewTab && previewTab.sql === previewTab.savedSql && !previewTab.isRunning) {
+        if (
+          previewTab &&
+          previewTab.id !== state.splitTabId &&
+          previewTab.sql === previewTab.savedSql &&
+          !previewTab.isRunning
+        ) {
           reusedTabId = previewTab.id;
           const updatedTabs = patchTab(state.tabs, previewTab.id, {
             path, kind, title, sql: content, savedSql: content,

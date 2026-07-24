@@ -355,9 +355,12 @@ export default function QueryPage() {
       setTabHistories(drop);
       setTabHistoryIds(drop);
       setTabCompareIds(drop);
-      // Supersede any in-flight re-read of the *previous* file so its late
-      // completion can't clobber the reused tab with stale content.
-      readSeqRef.current.delete(tabId);
+      // Supersede any in-flight re-read of the *previous* file so its late completion
+      // can't clobber the reused tab with stale content. Bump (not delete) the
+      // sequence: deleting resets it to 0, so the next rereadTab would restart at
+      // seq=1 and could collide with a still-pending seq=1 read; bumping guarantees
+      // every future read gets a seq strictly greater than any captured before reuse.
+      readSeqRef.current.set(tabId, (readSeqRef.current.get(tabId) ?? 0) + 1);
     };
     window.addEventListener("thaw:tab-reused", handler);
     return () => window.removeEventListener("thaw:tab-reused", handler);
