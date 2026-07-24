@@ -1533,107 +1533,116 @@ export default function FileBrowser() {
 
   return (
     <div style={{ padding: "4px 4px" }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
-        <div
-          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
-          onClick={toggleExpanded}
-          // Right-click the header title area to create at the workspace root
-          // (New Folder… / New SQL File…) — no toolbar buttons needed.
-          onContextMenu={onRootContextMenu}
-          title={exportDir || "No folder open"}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          {expanded
-            ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
-            : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
-          }
-          <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
-          <Text
-            ellipsis
-            style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
-          >
-            {pathBase(exportDir) || "Files"}
-          </Text>
-        </div>
-        {/* Branch chip — folded in from the former Git panel; opens Git Operations */}
-        {gitRepo && (
+      {/* Header — two rows: (1) title + actions always fit; (2) a dedicated git
+          status row (repo only) so the branch name has room instead of being
+          crushed into the action strip. */}
+      <div style={{ padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0 }}>
+        {/* Row 1: folder title + primary actions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div
-            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-            title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
-            style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+            style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
+            onClick={toggleExpanded}
+            // Right-click the header title area to create at the workspace root
+            // (New Folder… / New SQL File…) — no toolbar buttons needed.
+            onContextMenu={onRootContextMenu}
+            title={exportDir || "No folder open"}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />
-            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
-            </span>
+            {expanded
+              ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+              : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            }
+            <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
+            <Text
+              ellipsis
+              style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
+            >
+              {pathBase(exportDir) || "Files"}
+            </Text>
           </div>
-        )}
-        {/* Changed-file count — at a glance, and opens Git Operations */}
-        {gitRepo && gitChanged > 0 && (
-          <div
-            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-            title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
-            style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
+          {clipboard && exportDir && (
+            <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
+              <Button
+                size="small"
+                type="text"
+                icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
+                onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          )}
+          <Dropdown
+            menu={{ items: folderMenu, onClick: onFolderMenuClick }}
+            trigger={["click"]}
           >
-            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
-              {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""}
-            </span>
-          </div>
-        )}
-        {clipboard && exportDir && (
-          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
-            <Button
-              size="small"
-              type="text"
-              icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
-              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        )}
-        <Dropdown
-          menu={{ items: folderMenu, onClick: onFolderMenuClick }}
-          trigger={["click"]}
-        >
-          <Tooltip title="Open / change working folder">
-            <Button
-              size="small"
-              type="text"
-              icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
-              onClick={(e) => e.stopPropagation()}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        </Dropdown>
-        <Button
-          size="small"
-          type="text"
-          icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
-          onClick={toggleSearch}
-          style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-        />
-        {gitEnabled && exportDir && (
-          <Tooltip title="Git Operations…">
-            <Button
-              size="small"
-              type="text"
-              icon={<BranchesOutlined style={{ fontSize: 11 }} />}
-              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        )}
-        {loaded && (
+            <Tooltip title="Open / change working folder">
+              <Button
+                size="small"
+                type="text"
+                icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
+                onClick={(e) => e.stopPropagation()}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          </Dropdown>
           <Button
             size="small"
             type="text"
-            icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-            loading={loading}
-            onClick={(e) => { e.stopPropagation(); refresh(); }}
+            icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
+            onClick={toggleSearch}
             style={{ height: 20, padding: "0 4px", minWidth: 0 }}
           />
+          {/* Git Operations button only when the folder isn't a repo — a repo's
+              entry point is the branch/changes pills on row 2 below. */}
+          {gitEnabled && exportDir && !gitRepo && (
+            <Tooltip title="Git Operations…">
+              <Button
+                size="small"
+                type="text"
+                icon={<BranchesOutlined style={{ fontSize: 11 }} />}
+                onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          )}
+          {loaded && (
+            <Button
+              size="small"
+              type="text"
+              icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+              loading={loading}
+              onClick={(e) => { e.stopPropagation(); refresh(); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          )}
+        </div>
+
+        {/* Row 2: git status — branch + changed-file count, each opens Git Operations */}
+        {gitRepo && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px 1px", minWidth: 0 }}>
+            <div
+              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+              title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
+              style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, flexShrink: 1, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+            >
+              <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }} />
+              <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
+              </span>
+            </div>
+            {gitChanged > 0 && (
+              <div
+                onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+                title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
+                style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
+              >
+                <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
+                  {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""} changed
+                </span>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
