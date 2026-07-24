@@ -794,10 +794,15 @@ export default function FileBrowser() {
   // the tree's onRightClick and are skipped here (they carry a data-fbkey title).
   const onRootContextMenu = (event: React.MouseEvent) => {
     if (!exportDir) return;
+    // In search mode the content wrapper hosts the search input and result rows —
+    // leave those to the native context menu (right-click paste into the field,
+    // etc.) rather than popping a folder-creation menu that makes no sense there.
+    if (searchOpen) return;
     // A right-click anywhere on a tree node (title, icon, or indent) is handled by
     // the tree's onRightClick — .ant-tree-treenode covers the whole row, so guard
-    // on it rather than the narrower data-fbkey title span.
-    if ((event.target as HTMLElement).closest?.(".ant-tree-treenode")) return;
+    // on it rather than the narrower data-fbkey title span. An input/textarea guard
+    // preserves the native menu for any editable field inside the wrapper.
+    if ((event.target as HTMLElement).closest?.("input, textarea, .ant-tree-treenode")) return;
     event.preventDefault();
     setSelKeys([]);
     setAnchorKey(null);
