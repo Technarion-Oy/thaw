@@ -437,6 +437,17 @@ export default function FileBrowser() {
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
 
+  // Coalesce the redundant file opens a click/double-click gesture would otherwise
+  // fire. rc-tree runs onSelect on *every* click (including both clicks of a
+  // double-click), and a double-click adds a native dblclick on top — so one
+  // "open and pin" gesture could fire up to three concurrent ReadFile round-trips for
+  // one file. `openingPathsRef` skips a same-path open already in flight;
+  // `pendingPromoteRef` lets a double-click that lands before the open resolves
+  // request promotion (via onSelect, once the tab exists) instead of firing its own
+  // extra read.
+  const openingPathsRef   = useRef<Set<string>>(new Set());
+  const pendingPromoteRef = useRef<Set<string>>(new Set());
+
   // Debounced git-status refresh so the tree's status colors update live (on
   // save, external edits, file ops) without a manual refresh, while coalescing
   // bursts so we don't run the (potentially expensive) status scan repeatedly.
@@ -733,22 +744,39 @@ export default function FileBrowser() {
     setAnchorKey(path);
     setSelKeys([path]);
     if (isDir) return;
+    // A same-path open already in flight (e.g. the two clicks of a double-click)
+    // shouldn't fire a second read — the first open already covers this file.
+    if (openingPathsRef.current.has(path)) return;
+    openingPathsRef.current.add(path);
     // Single click opens in the reusable preview tab (when enabled); a double-click
-    // promotes it to permanent via onTreeDoubleClick below.
-    const err = await openFileInTab(path, previewTabsEnabled);
+    // promotes it to permanent (see onTreeDoubleClick).
+    let err: string | null = null;
+    try {
+      err = await openFileInTab(path, previewTabsEnabled);
+    } finally {
+      openingPathsRef.current.delete(path);
+    }
     if (err) {
       message.error(`Could not open file: ${err}`);
       setSelKeys([]);
+      pendingPromoteRef.current.delete(path); // open failed — drop any pending promote
+      return;
+    }
+    // If a double-click landed while this open was in flight, honor its promote intent
+    // now that the tab exists (instead of it having fired a third redundant read).
+    if (pendingPromoteRef.current.delete(path)) {
+      const tab = useQueryStore.getState().tabs.find((t) => t.path === path);
+      if (tab) useQueryStore.getState().promoteTab(tab.id);
     }
   };
 
   // Double-click a file in the tree → promote it to a permanent tab (VS Code
   // behavior). rc-tree has no double-click prop, so we bind a native handler on the
   // tree wrapper and recover the node key from the `data-fbkey` attribute set in
-  // titleRender. The preceding click already opened the file as a preview, but its
-  // openFileInTab is async (awaits ReadFile), so the tab may not exist yet when this
-  // fires: promote the existing tab if present, else open it permanently directly
-  // (openFile de-dupes by path, so the in-flight preview open can't duplicate it).
+  // titleRender. The preceding click already opened (or is opening) the file as a
+  // preview, so: promote the tab if it already exists, else record the intent and let
+  // onSelect promote it once its in-flight open resolves — avoiding a redundant
+  // ReadFile of a file the click is already fetching.
   const onTreeDoubleClick = (e: React.MouseEvent) => {
     const el = (e.target as HTMLElement).closest?.("[data-fbkey]") as HTMLElement | null;
     const key = el?.dataset.fbkey;
@@ -758,9 +786,7 @@ export default function FileBrowser() {
       useQueryStore.getState().promoteTab(existing.id);
       return;
     }
-    void openFileInTab(key, false).then((err) => {
-      if (err) message.error(`Could not open file: ${err}`);
-    });
+    pendingPromoteRef.current.add(key);
   };
 
   const toggleExpanded = () => {
