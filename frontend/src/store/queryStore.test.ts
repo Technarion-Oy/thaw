@@ -120,6 +120,26 @@ describe("queryStore preview tabs (#849)", () => {
     expect(state.tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
   });
 
+  it("does not recycle a preview tab that has a query running (promotes it instead)", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const runningId = useQueryStore.getState().activeTabId;
+    // A running query is bound to this tab id, so browsing away must not swap the
+    // tab's file out from under it — the preview is promoted and a fresh one opened.
+    useQueryStore.getState().setTabRunning(runningId, true);
+
+    useQueryStore.getState().openFile("/tmp/b.sql", "-- b", true);
+    const state = useQueryStore.getState();
+    expect(state.tabs.length).toBe(before + 2); // new preview appended, not reused
+    expect(state.activeTabId).not.toBe(runningId);
+    const running = state.tabs.find((t) => t.id === runningId)!;
+    expect(running.path).toBe("/tmp/a.sql"); // still shows its own file
+    expect(running.preview).toBeFalsy();     // promoted
+    expect(state.tabs.find((t) => t.id === state.activeTabId)?.preview).toBe(true);
+  });
+
   it("a permanent open (double-click) of a previewed file promotes it in place", async () => {
     const useQueryStore = await loadStore();
     const before = useQueryStore.getState().tabs.length;
