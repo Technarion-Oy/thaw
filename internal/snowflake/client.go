@@ -3462,10 +3462,15 @@ func hasReturnsTable(ddl string) bool {
 // the "kind" column in the result set is read (as in SHOW OBJECTS).
 // For PROCEDURE and FUNCTION kinds the "arguments" column is also captured so
 // that GET_DDL can be called with the correct overload signature.
-func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, error) {
+//
+// The second return value is the number of rows the SHOW actually returned
+// (before any SYSTEM$/is_builtin/is_* skipping) — used by SearchAccountObjects to
+// detect when a `LIMIT n` was hit (scanned == n) so it can warn that results for
+// that kind may be incomplete.
+func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, int, error) {
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close() //nolint:errcheck
 
@@ -3512,23 +3517,25 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		}
 	}
 	if nameIdx < 0 {
-		return nil, fmt.Errorf("no 'name' column in: %s cols=%v", query, cols)
+		return nil, 0, fmt.Errorf("no 'name' column in: %s cols=%v", query, cols)
 	}
 	if fixedKind == "" && kindIdx < 0 {
-		return nil, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
+		return nil, 0, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
 	}
 
 	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION" || fixedKind == "EXTERNAL FUNCTION" || fixedKind == "DATA METRIC FUNCTION"
 
 	var objects []SnowflakeObject
+	scanned := 0
 	for rows.Next() {
+		scanned++
 		vals := make([]interface{}, len(cols))
 		ptrs := make([]interface{}, len(cols))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
+			return nil, scanned, err
 		}
 		name := fmt.Sprintf("%v", vals[nameIdx])
 		// Skip Snowflake-internal procedures/functions. These show up in SHOW
@@ -3661,7 +3668,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		}
 		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Database: rowDB, Schema: rowSchema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds, Finalize: finalize})
 	}
-	return objects, rows.Err()
+	return objects, scanned, rows.Err()
 }
 
 // parseFinalizeFromRelJSON extracts the root-task name from a task_relations
@@ -3750,7 +3757,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 	}
 
 	q := Qualify(database, schema)
-	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
+	objs, _, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
 	if err != nil {
 		return nil, err
 	}
@@ -3806,7 +3813,8 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		wg.Add(1)
 		go func(i int, cmd showCmd) {
 			defer wg.Done()
-			results[i].objs, results[i].err = c.showInSchema(ctx, cmd.query, cmd.kind, schema)
+			objs, _, err := c.showInSchema(ctx, cmd.query, cmd.kind, schema)
+			results[i].objs, results[i].err = objs, err
 		}(i, cmd)
 	}
 	wg.Wait()

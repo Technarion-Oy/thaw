@@ -106,10 +106,10 @@ func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeOb
 // to fetch all objects of the requested kinds (the frontend then filters names
 // client-side, e.g. for regex mode); pass an empty kinds slice to search every
 // kind. Each result carries its Database/Schema.
-func (a *App) SearchAccountObjects(namePattern string, kinds []string) ([]snowflake.SnowflakeObject, error) {
+func (a *App) SearchAccountObjects(namePattern string, kinds []string) (snowflake.SearchAccountResult, error) {
 	client := a.currentClient()
 	if client == nil {
-		return nil, apperrors.ErrNotConnected
+		return snowflake.SearchAccountResult{}, apperrors.ErrNotConnected
 	}
 	return client.SearchAccountObjects(a.fctx(FeatureObjectBrowser), namePattern, kinds)
 }

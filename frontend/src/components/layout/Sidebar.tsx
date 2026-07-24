@@ -964,14 +964,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [regexMode, setRegexMode]                   = useState(false);
   const [caseSensitive, setCaseSensitive]           = useState(false);
   const [kindFilter, setKindFilter]                 = useState<string[]>([]);
-  // Debounced copy of the query — the account-wide cascade only extends once the
-  // query settles (~250 ms) so a fast typist doesn't kick off SHOW SCHEMAS /
-  // SHOW OBJECTS for every keystroke (issue #855, finding 4).
+  // Debounced copy of the query — the account-wide backend search only fires once
+  // the query settles (~250 ms) so a fast typist doesn't issue a SearchAccountObjects
+  // request per keystroke.
   const [debouncedQuery, setDebouncedQuery]         = useState("");
+  // Object kinds whose SHOW … IN ACCOUNT hit the backend row cap, so their results
+  // may be incomplete — surfaced as a distinct warning (separate from the render cap).
+  const [searchCappedKinds, setSearchCappedKinds]   = useState<string[]>([]);
   const searchInputRef = useRef<InputRef>(null);
-  // Bumped whenever the search is torn down or its cascade depth changes; in-flight
-  // cascade loads compare their captured generation before committing so a cleared
-  // or superseded search never writes stale results (finding 4).
+  // Bumped whenever the search is torn down or superseded; the in-flight
+  // SearchAccountObjects fetch compares its captured generation before committing,
+  // so a cleared or stale response never overwrites the current results.
   const searchGenRef = useRef(0);
 
   const searchPredicate = useMemo(
@@ -1134,16 +1137,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     searchWasActive.current = true;
     setSearchLoading(true);
     SearchAccountObjects(namePattern, kindFilter)
-      .then((hits) => {
+      .then((res) => {
         if (searchGenRef.current !== gen) return;
-        const tree = buildSearchTree(hits ?? [], featureFlags.dbtProjectBrowser);
+        const tree = buildSearchTree(res?.objects ?? [], featureFlags.dbtProjectBrowser);
         setSearchResults(tree);
+        setSearchCappedKinds(res?.cappedKinds ?? []);
         setSearchExpandedKeys(getAllParentKeys(filterTreeLimited(tree, searchPredicate.matches, SEARCH_RESULT_LIMIT).nodes));
       })
       .catch((e) => {
         if (searchGenRef.current !== gen) return;
         console.error(e);
         setSearchResults([]);
+        setSearchCappedKinds([]);
       })
       .finally(() => {
         if (searchGenRef.current === gen) setSearchLoading(false);
@@ -1170,6 +1175,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       searchWasActive.current = false;
       setSearchResults([]);
       setSearchExpandedKeys([]);
+      setSearchCappedKinds([]);
       setSearchLoading(false);
     }
   }, [searchActive]);
@@ -1255,6 +1261,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDebouncedQuery("");
     setKindFilter([]);
     setSearchResults([]);
+    setSearchCappedKinds([]);
     setExpandedKeys([]);
     setSearchExpandedKeys([]);
     searchWasActive.current = false;
@@ -4569,6 +4576,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {searchActive && displayData.length === 0 && !searchSettling && (
             <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
               {searchQuery ? <>No objects match &quot;{searchQuery}&quot;</> : "No objects of the selected type(s)"}
+            </div>
+          )}
+
+          {/* A kind whose SHOW … IN ACCOUNT hit the backend row cap may be missing
+              matches entirely (its name filter runs client-side, after the cap),
+              so this is a stronger signal than the render-cap notice below. */}
+          {searchActive && !searchSettling && searchCappedKinds.length > 0 && (
+            <div style={{ padding: "6px 12px", fontSize: 11 }}>
+              <Text type="warning" style={{ fontSize: 11 }}>
+                Results may be incomplete for {searchCappedKinds.map((k) => KIND_LABEL[k] ?? k).join(", ")} — this object type has more objects than the search scans. Add a name filter or narrow the type(s).
+              </Text>
             </div>
           )}
 

@@ -119,6 +119,12 @@ the loaded tree (issues #855 + follow-up):
   order and reports `truncated`; `displayData` and the auto-expand set both use it, and `searchTruncated`
   drives a *"Showing first 500 matches — refine…"* notice. The backend `LIMIT` (2000/kind) bounds the
   fetch upstream; this bounds the render.
+- **Incomplete-results warning.** The backend `LIMIT` truncates **before** a regex/wildcard-widened name
+  filter runs client-side, so a kind with more objects than the cap can silently miss matches. The
+  backend flags any such kind in `SearchAccountResult.cappedKinds`; the sidebar stores it in
+  `searchCappedKinds` and shows a distinct **warning** (*"Results may be incomplete for Tables, … — add a
+  name filter or narrow the type(s)"*), separate from — and stronger than — the render-cap notice (which
+  only reports matches *within what was fetched*).
 - **Fetch lifecycle.** `fetchActive` = `searchActive` (≥1 type). The refetch trigger is
   `searchServerKey` — `[namePattern, kinds]`, where `namePattern` is the **debounced** text (empty in
   regex mode). Keying off the debounced query means a non-empty query only refetches once typing settles,

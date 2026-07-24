@@ -5,8 +5,17 @@ package snowflake
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 )
+
+// SearchAccountResult is the result of SearchAccountObjects: the matched objects
+// plus the kinds whose SHOW … IN ACCOUNT hit the row cap (so their results may be
+// incomplete and the UI can say so).
+type SearchAccountResult struct {
+	Objects     []SnowflakeObject `json:"objects"`
+	CappedKinds []string          `json:"cappedKinds"`
+}
 
 // kindShow pairs an object KIND with the plural noun used in its SHOW command.
 type kindShow struct {
@@ -179,7 +188,14 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 // args); a plain FUNCTION that is really an EXTERNAL / DATA METRIC FUNCTION (on
 // editions without the discriminator column) is reconciled per database, the
 // same way ListExtendedObjects does within a schema.
-func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, kinds []string) ([]SnowflakeObject, error) {
+//
+// Because each SHOW is capped with LIMIT accountSearchRowLimit and, for regex
+// (or wildcard-widened) searches, the name filter runs client-side *after* the
+// fetch, a kind with more objects than the cap returns an arbitrary slice and
+// real matches beyond it are never seen. SearchAccountResult.CappedKinds lists
+// any kind whose SHOW hit the cap so the caller can warn that its results may be
+// incomplete.
+func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, kinds []string) (SearchAccountResult, error) {
 	want := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
 		want[k] = true
@@ -188,8 +204,10 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 	commands := planAccountSearchCommands(namePattern, kinds, c.getExcludedExtendedKinds(), accountSearchRowLimit)
 
 	type result struct {
-		objs []SnowflakeObject
-		err  error
+		objs    []SnowflakeObject
+		scanned int
+		cmd     accountShowCmd
+		err     error
 	}
 	results := make([]result, len(commands))
 	var wg sync.WaitGroup
@@ -198,17 +216,20 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 		go func(i int, cmd accountShowCmd) {
 			defer wg.Done()
 			// schema="" → showInSchema reads database_name/schema_name per row.
-			results[i].objs, results[i].err = c.showInSchema(ctx, cmd.query, cmd.fixedKind, "")
+			objs, scanned, err := c.showInSchema(ctx, cmd.query, cmd.fixedKind, "")
+			results[i] = result{objs: objs, scanned: scanned, cmd: cmd, err: err}
 		}(i, cmd)
 	}
 	wg.Wait()
 
 	seen := make(map[string]bool)
 	var out []SnowflakeObject
+	outcomes := make([]searchCommandOutcome, 0, len(results))
 	for _, r := range results {
 		if r.err != nil {
 			continue // skip kinds we can't access / that don't support IN ACCOUNT
 		}
+		keptKinds := make(map[string]bool)
 		for _, o := range r.objs {
 			// SHOW OBJECTS returns every basic kind; keep only requested ones.
 			if !all && !want[o.Kind] {
@@ -220,7 +241,13 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 			}
 			seen[key] = true
 			out = append(out, o)
+			keptKinds[o.Kind] = true
 		}
+		kinds := make([]string, 0, len(keptKinds))
+		for k := range keptKinds {
+			kinds = append(kinds, k)
+		}
+		outcomes = append(outcomes, searchCommandOutcome{fixedKind: r.cmd.fixedKind, scanned: r.scanned, keptKinds: kinds})
 	}
 
 	// The exact-key dedup above collapses the duplicate EXTERNAL / DATA METRIC
@@ -241,7 +268,50 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 	if hasPlainFn && hasVariant {
 		out = reconcileFunctionVariants(out)
 	}
-	return out, nil
+
+	return SearchAccountResult{Objects: out, CappedKinds: collectCappedKinds(outcomes, accountSearchRowLimit)}, nil
+}
+
+// searchCommandOutcome is one SHOW … IN ACCOUNT command's contribution to cap
+// detection: the raw rows it scanned, the kind it's fixed to ("" for SHOW
+// OBJECTS), and the distinct kinds actually kept from it.
+type searchCommandOutcome struct {
+	fixedKind string
+	scanned   int
+	keptKinds []string
+}
+
+// collectCappedKinds returns, sorted, the object kinds whose command hit the row
+// cap (scanned >= limit) — meaning the SHOW returned a truncated slice and the
+// client-side name filter (regex / wildcard-widened) may have never seen real
+// matches beyond it. A dedicated command maps to its one kind; SHOW OBJECTS maps
+// to the kinds it actually returned. limit <= 0 means uncapped (nothing flagged).
+func collectCappedKinds(outcomes []searchCommandOutcome, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	capped := make(map[string]bool)
+	for _, o := range outcomes {
+		if o.scanned < limit {
+			continue
+		}
+		if o.fixedKind != "" {
+			capped[o.fixedKind] = true
+		} else {
+			for _, k := range o.keptKinds {
+				capped[k] = true
+			}
+		}
+	}
+	if len(capped) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, len(capped))
+	for k := range capped {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
 }
 
 // reconcileFunctionVariants applies the FUNCTION vs EXTERNAL / DATA METRIC

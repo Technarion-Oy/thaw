@@ -177,3 +177,32 @@ func hasObj(objs []SnowflakeObject, db, schema, kind, name string) bool {
 	}
 	return false
 }
+
+func TestCollectCappedKinds(t *testing.T) {
+	// A dedicated command that hit the cap flags its kind; one under the cap does not.
+	out := collectCappedKinds([]searchCommandOutcome{
+		{fixedKind: "TABLE", scanned: 2000},     // SHOW OBJECTS-style would be "", but a dedicated cap here
+		{fixedKind: "STREAMLIT", scanned: 3},    // well under cap
+		{fixedKind: "PROCEDURE", scanned: 2000}, // hit cap
+	}, 2000)
+	if got := strings.Join(out, ","); got != "PROCEDURE,TABLE" {
+		t.Errorf("want PROCEDURE,TABLE (sorted), got %q", got)
+	}
+
+	// SHOW OBJECTS (fixedKind "") maps to the kinds it actually returned.
+	out = collectCappedKinds([]searchCommandOutcome{
+		{fixedKind: "", scanned: 2000, keptKinds: []string{"VIEW", "TABLE"}},
+	}, 2000)
+	if got := strings.Join(out, ","); got != "TABLE,VIEW" {
+		t.Errorf("want TABLE,VIEW, got %q", got)
+	}
+
+	// Nothing over the cap → nil.
+	if collectCappedKinds([]searchCommandOutcome{{fixedKind: "TABLE", scanned: 10}}, 2000) != nil {
+		t.Errorf("expected nil when nothing hit the cap")
+	}
+	// limit <= 0 → uncapped, never flags.
+	if collectCappedKinds([]searchCommandOutcome{{fixedKind: "TABLE", scanned: 9999}}, 0) != nil {
+		t.Errorf("expected nil when limit is 0")
+	}
+}
