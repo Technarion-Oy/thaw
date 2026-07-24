@@ -12,6 +12,8 @@ import {
 import {
   GetObjectProperties, AlterContact, ListUsers, FormatContactUsers, ParseSqlList,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -134,6 +136,11 @@ export default function ContactPropertiesModal({ db, schema, name, onClose }: Pr
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const objTags = useObjectTags({
+    kind: "CONTACT", db, schema, name,
+    alter: (clause) => AlterContact(db, schema, name, clause),
+  });
 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
@@ -295,6 +302,7 @@ export default function ContactPropertiesModal({ db, schema, name, onClose }: Pr
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <EditRow label="Comment" value={comment} onSave={saveComment} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

@@ -11,6 +11,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, DescribeExternalFunction, AlterExternalFunction } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 
@@ -181,6 +183,11 @@ export default function ExternalFunctionPropertiesModal({ db, schema, name, args
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "EXTERNAL FUNCTION", db, schema, name, args,
+    alter: (clause) => AlterExternalFunction(db, schema, name, args, clause),
+  });
+
   const fnRef = `"${db}"."${schema}"."${name}"(${args})`;
 
   const find = (key: string) =>
@@ -314,6 +321,7 @@ export default function ExternalFunctionPropertiesModal({ db, schema, name, args
                   </Space>
                 </td>
               </tr>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

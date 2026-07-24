@@ -3,6 +3,8 @@
 package app
 
 import (
+	"fmt"
+
 	"thaw/internal/apperrors"
 	"thaw/internal/snowflake"
 	"thaw/internal/warehouse"
@@ -37,6 +39,22 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 		return apperrors.ErrNotConnected
 	}
 	return warehouse.AlterProperty(a.fctx(FeatureWarehouses), client, name, property, value)
+}
+
+// AlterWarehouse runs an `ALTER WAREHOUSE <name> <clause>` statement. clause is
+// everything after the warehouse name, e.g. "SET TAG "DB"."S"."COST_CENTER" = 'x'"
+// or "UNSET TAG "DB"."S"."COST_CENTER"". A warehouse is account-level, so the name
+// is a bare double-quoted identifier (no database / schema qualification). It backs
+// the Tags section of the Warehouse Properties modal; the caller is responsible for
+// correct SQL quoting inside the clause.
+func (a *App) AlterWarehouse(name, clause string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	_, err := client.Execute(a.fctx(FeatureWarehouses),
+		fmt.Sprintf("ALTER WAREHOUSE %s %s", snowflake.QuoteIdent(name), clause))
+	return err
 }
 
 // AlterWarehouseSuspend suspends the named warehouse.

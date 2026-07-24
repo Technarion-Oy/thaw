@@ -11,6 +11,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterImageRepository, ListImagesInRepository } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -154,6 +156,11 @@ export default function ImageRepositoryPropertiesModal({ db, schema, name, onClo
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "IMAGE REPOSITORY", db, schema, name,
+    alter: (clause) => AlterImageRepository(db, schema, name, clause),
+  });
+
   const repoRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -279,6 +286,7 @@ export default function ImageRepositoryPropertiesModal({ db, schema, name, onClo
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

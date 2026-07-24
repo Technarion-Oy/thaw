@@ -10,6 +10,8 @@ import {
   EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, GroupOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterAggregationPolicy, GetAggregationPolicyReferences } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
@@ -167,6 +169,11 @@ export default function AggregationPolicyPropertiesModal({ db, schema, name, onC
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "AGGREGATION POLICY", db, schema, name,
+    alter: (clause) => AlterAggregationPolicy(db, schema, name, clause),
+  });
+
   const policyRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -312,6 +319,7 @@ export default function AggregationPolicyPropertiesModal({ db, schema, name, onC
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

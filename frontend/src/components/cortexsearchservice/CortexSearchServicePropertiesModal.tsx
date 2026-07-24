@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Input, InputNumber, Select, Space, Typography, Alert, Tag,
-  Tooltip, Dropdown, Popconfirm,
+  Tooltip, Dropdown,
 } from "antd";
 import {
   FileSearchOutlined, EditOutlined, CheckOutlined, CloseOutlined,
@@ -14,8 +14,10 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterCortexSearchService, ListWarehouses,
-  FormatCortexSearchAttributes, GetCortexSearchServiceTags,
+  FormatCortexSearchAttributes,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -489,13 +491,6 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
 
-  // Tags currently applied (best-effort; TAG_REFERENCES needs privileges).
-  // `qualified` is the fully-qualified, quoted FQN used for UNSET TAG; `label` is
-  // the human-readable "name = value" rendered on the chip.
-  const [tags, setTags] = useState<{ qualified: string; label: string }[]>([]);
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagValue, setNewTagValue] = useState("");
-
   // Scoring-profile composer.
   const [profileName, setProfileName] = useState("");
   const [profileDef, setProfileDef] = useState("");
@@ -509,32 +504,6 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
       .finally(() => setLoadingWarehouses(false));
   }, []);
 
-  const reloadTags = useCallback(async () => {
-    try {
-      const res = await GetCortexSearchServiceTags(db, schema, name);
-      const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
-      const cell = (row: unknown[], label: string) => {
-        const idx = cols.indexOf(label);
-        return idx >= 0 ? String(row[idx] ?? "") : "";
-      };
-      const out = (res?.rows ?? []).map((row) => {
-        const tdb = cell(row, "tag_database");
-        const tsc = cell(row, "tag_schema");
-        const tnm = cell(row, "tag_name");
-        const tval = cell(row, "tag_value");
-        // Qualify with database/schema so UNSET resolves the correct tag even when
-        // it lives in a central governance schema; quote every part so names that
-        // need quoting round-trip. Mirrors the Model modal.
-        const qualified = [tdb, tsc, tnm].filter(Boolean).map(qId).join(".");
-        return { qualified, label: `${tnm}${tval ? ` = ${tval}` : ""}` };
-      }).filter((t) => t.qualified);
-      setTags(out);
-    } catch {
-      // No governance privilege / unsupported domain — SET/UNSET still work.
-      setTags([]);
-    }
-  }, [db, schema, name]);
-
   const reload = useCallback(async () => {
     setRows(null);
     setError(null);
@@ -546,12 +515,17 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
     }
   }, [db, schema, name]);
 
-  useEffect(() => { reload(); reloadTags(); }, [reload, reloadTags]);
+  useEffect(() => { reload(); }, [reload]);
 
   const objRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
+
+  const objTags = useObjectTags({
+    kind: "CORTEX SEARCH SERVICE", db, schema, name,
+    alter: (clause) => AlterCortexSearchService(db, schema, name, clause),
+  });
 
   const runAction = async (clause: string, label: string) => {
     setBusy(true);
@@ -630,39 +604,6 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
   const clearAutoSuspend = async () => {
     await AlterCortexSearchService(db, schema, name, "SET AUTO_SUSPEND = NULL");
     await reload();
-  };
-
-  const setTag = async () => {
-    const tn = newTagName.trim();
-    if (tn === "") return;
-    setBusy(true);
-    setActionError(null);
-    try {
-      // Tag name may be a qualified identifier the user typed verbatim; the value
-      // is a string literal.
-      await AlterCortexSearchService(db, schema, name, `SET TAG ${tn} = ${q1(newTagValue)}`);
-      setNewTagName("");
-      setNewTagValue("");
-      await reloadTags();
-    } catch (e) {
-      setActionError(`Set tag failed: ${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // qualifiedName is the quoted, db/schema-qualified FQN built in reloadTags.
-  const unsetTag = async (qualifiedName: string) => {
-    setBusy(true);
-    setActionError(null);
-    try {
-      await AlterCortexSearchService(db, schema, name, `UNSET TAG ${qualifiedName}`);
-      await reloadTags();
-    } catch (e) {
-      setActionError(`Unset tag failed: ${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
   };
 
   const addScoringProfile = async () => {
@@ -890,45 +831,11 @@ export default function CortexSearchServicePropertiesModal({ db, schema, name, o
           </table>
 
           <div style={SECTION_HEAD}>Tags</div>
-          <Space direction="vertical" size={8} style={{ width: "100%" }}>
-            <Space wrap>
-              {tags.length > 0
-                ? tags.map((t) => (
-                    <Popconfirm
-                      key={t.qualified}
-                      title={`Unset tag ${t.label}?`}
-                      onConfirm={() => unsetTag(t.qualified)}
-                      okText="Unset"
-                      cancelText="Cancel"
-                    >
-                      <Tag closable onClose={(e) => e.preventDefault()} style={{ cursor: "pointer" }}>
-                        {t.label}
-                      </Tag>
-                    </Popconfirm>
-                  ))
-                : <Text type="secondary" style={{ fontSize: 12 }}>(no tags, or insufficient privilege to read them)</Text>}
-            </Space>
-            <Space>
-              <Input
-                size="small"
-                placeholder="tag name (e.g. COST_CENTER)"
-                value={newTagName}
-                onChange={(e) => setNewTagName(e.target.value)}
-                style={{ width: 220 }}
-              />
-              <Input
-                size="small"
-                placeholder="tag value"
-                value={newTagValue}
-                onChange={(e) => setNewTagValue(e.target.value)}
-                onPressEnter={setTag}
-                style={{ width: 180 }}
-              />
-              <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy} disabled={newTagName.trim() === ""} onClick={setTag}>
-                Set tag
-              </Button>
-            </Space>
-          </Space>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            </tbody>
+          </table>
 
           <div style={SECTION_HEAD}>Scoring Profiles</div>
           <Space direction="vertical" size={8} style={{ width: "100%" }}>

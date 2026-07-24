@@ -38,17 +38,37 @@ function cell(row: unknown[], idx: number): string {
 
 // ─── Domain → object-name shape ──────────────────────────────────────────────
 
-// Domains commonly available in the Apply-tag form, ordered roughly by how often
-// they carry tags. The full set Snowflake supports is larger; users can type any
-// other domain via the "Other…" option.
+// Domains offered in the Apply-tag form, ordered roughly by how often they carry
+// tags. The list covers every object kind Thaw can tag; for anything beyond it,
+// the trailing OTHER_DOMAIN entry reveals a free-text field so any taggable domain
+// Snowflake supports can be targeted.
 const COMMON_DOMAINS = [
+  // Tables & views
   "TABLE", "VIEW", "COLUMN", "MATERIALIZED VIEW", "EXTERNAL TABLE", "DYNAMIC TABLE",
-  "SCHEMA", "DATABASE", "STAGE", "STREAM", "TASK", "PIPE", "FUNCTION", "PROCEDURE",
+  "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
+  // Callables
+  "FUNCTION", "PROCEDURE",
+  // Schema-level objects
+  "SCHEMA", "DATABASE", "STAGE", "STREAM", "TASK", "PIPE", "SEQUENCE", "ALERT",
+  "STREAMLIT", "NOTEBOOK", "SERVICE", "NETWORK RULE", "IMAGE REPOSITORY",
+  "GIT REPOSITORY", "SECRET", "CORTEX SEARCH SERVICE", "SEMANTIC VIEW",
+  "MODEL", "MODEL MONITOR", "DATASET", "CONTACT",
+  // Policies
+  "MASKING POLICY", "ROW ACCESS POLICY", "AGGREGATION POLICY", "PROJECTION POLICY",
+  "JOIN POLICY", "PRIVACY POLICY", "PASSWORD POLICY", "SESSION POLICY",
+  "AUTHENTICATION POLICY", "STORAGE LIFECYCLE POLICY",
+  // Account-level objects
   "WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT",
 ];
 
-// Account-level domains have no database/schema qualification.
-const ACCOUNT_LEVEL = new Set(["WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT", "DATABASE"]);
+// Sentinel option that swaps the domain dropdown for a free-text field, so any
+// taggable domain not in COMMON_DOMAINS can still be targeted.
+const OTHER_DOMAIN = "__OTHER__";
+
+// Account-level domains have no database/schema qualification. A domain typed via
+// the OTHER_DOMAIN free-text field is matched against this set too, so e.g. a typed
+// COMPUTE POOL is still treated as account-level.
+const ACCOUNT_LEVEL = new Set(["WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT", "DATABASE", "COMPUTE POOL", "NETWORK POLICY"]);
 
 // Parent objects offered when tagging a COLUMN. Restricted to the kinds whose
 // columns Snowflake lets you tag via `ALTER … ALTER COLUMN SET TAG` — tables and
@@ -122,7 +142,13 @@ interface ApplyTagModalProps {
 
 function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
   const [tagKey, setTagKey] = useState<string | null>(catalog.length ? `${catalog[0].database}.${catalog[0].schema}.${catalog[0].name}` : null);
-  const [domain, setDomain] = useState("TABLE");
+  // domainSel is the dropdown selection (may be the OTHER_DOMAIN sentinel);
+  // customDomain holds the free-text domain typed when OTHER_DOMAIN is picked. The
+  // effective `domain` used throughout the form is derived from the two.
+  const [domainSel, setDomainSel] = useState("TABLE");
+  const [customDomain, setCustomDomain] = useState("");
+  const isOther = domainSel === OTHER_DOMAIN;
+  const domain = isOther ? customDomain.trim().toUpperCase() : domainSel;
   const [database, setDatabase] = useState("");
   const [schema, setSchema] = useState("");
   const [objName, setObjName] = useState("");
@@ -153,7 +179,9 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
   // For SCHEMA the name is itself a schema, so its dropdown reuses the schema
   // list; account-level objects (WAREHOUSE/ROLE/USER/INTEGRATION) have no cheap
   // listing, so their name is typed free-form.
-  const nameFromObjects = schemaLevel;
+  // A custom (Other…) schema-level domain can't be listed by kind, so its object
+  // name is typed free-form rather than picked from a dropdown.
+  const nameFromObjects = schemaLevel && !isOther;
   const nameFromSchemas = domain === "SCHEMA";
   const nameIsFreeText = showName && !nameFromObjects && !nameFromSchemas;
 
@@ -229,7 +257,8 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
 
   // ── Reset dependent selections on upstream change ──
   const onDomainChange = (d: string) => {
-    setDomain(d);
+    setDomainSel(d);
+    if (d !== OTHER_DOMAIN) setCustomDomain("");
     setSchema(""); setObjName(""); setColumn("");
   };
   const onDatabaseChange = (d: string) => {
@@ -247,6 +276,7 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
 
   // A value and every identifying field shown for the chosen domain must be set.
   const canApply = !!selectedTag
+    && (!isOther || !!customDomain.trim())
     && !!value.trim()
     && (!showDatabase || !!database.trim())
     && (!showSchema || !!schema.trim())
@@ -307,12 +337,25 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
           />
         </Form.Item>
 
-        <Form.Item label="Object domain">
+        <Form.Item label="Object domain" help={isOther ? "Type the Snowflake object domain exactly (e.g. COMPUTE POOL)." : undefined}>
           <Select
-            value={domain}
+            showSearch
+            value={domainSel}
             onChange={onDomainChange}
-            options={COMMON_DOMAINS.map((d) => ({ value: d, label: d }))}
+            optionFilterProp="label"
+            options={[
+              ...COMMON_DOMAINS.map((d) => ({ value: d, label: d })),
+              { value: OTHER_DOMAIN, label: "Other…" },
+            ]}
           />
+          {isOther && (
+            <Input
+              style={{ marginTop: 8 }}
+              value={customDomain}
+              onChange={(e) => { setCustomDomain(e.target.value); setSchema(""); setObjName(""); setColumn(""); }}
+              placeholder="DOMAIN (e.g. COMPUTE POOL)"
+            />
+          )}
         </Form.Item>
 
         {domain !== "ACCOUNT" && (
