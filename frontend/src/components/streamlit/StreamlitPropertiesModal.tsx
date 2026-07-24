@@ -12,6 +12,8 @@ import {
 import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -159,6 +161,11 @@ export default function StreamlitPropertiesModal({ db, schema, name, onClose }: 
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "STREAMLIT", db, schema, name,
+    alter: (clause) => AlterStreamlit(db, schema, name, clause),
+  });
+
   const appRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -304,6 +311,7 @@ export default function StreamlitPropertiesModal({ db, schema, name, onClose }: 
               <EditRow label="Main file" value={mainFile} onSave={saveMainFile} />
               <EditRow label="Query warehouse" value={queryWarehouse} canUnset={queryWarehouse !== ""} onSave={saveWarehouse} onUnset={() => saveWarehouse("")} />
               <EditRow label="Comment" value={comment} canUnset={comment !== ""} onSave={saveComment} onUnset={() => saveComment("")} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

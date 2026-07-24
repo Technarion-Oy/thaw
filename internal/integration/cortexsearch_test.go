@@ -148,7 +148,7 @@ func TestCortexSearchServiceGrammar(t *testing.T) {
 	alter("add_scoring_profile", fmt.Sprintf(`ADD SCORING PROFILE "SP1" %s`, profileBody))
 	alter("drop_scoring_profile", `DROP SCORING PROFILE IF EXISTS "SP1"`)
 
-	// ── TAG_REFERENCES object domain used by GetCortexSearchServiceTags ───────
+	// ── TAG_REFERENCES object domain used by the shared GetObjectTagReferences ─
 	t.Run("tag_references_domain", func(t *testing.T) {
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()

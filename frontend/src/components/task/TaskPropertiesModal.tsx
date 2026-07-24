@@ -16,6 +16,8 @@ import type { snowflake, tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -539,6 +541,11 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   }, [db, schema, name]);
 
   useEffect(() => { load(); }, [load]);
+
+  const objTags = useObjectTags({
+    kind: "TASK", db, schema, name,
+    alter: (clause) => AlterTask(db, schema, name, clause),
+  });
 
   // ── Property lookup (case-insensitive) ──────────────────────────────────────
 
@@ -1269,6 +1276,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 onSave={setText("COMMENT")}
                 onUnset={async () => { await alter("UNSET COMMENT"); await load(); }}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
         </>

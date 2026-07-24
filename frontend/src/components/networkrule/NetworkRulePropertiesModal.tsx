@@ -10,6 +10,8 @@ import {
   GlobalOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterNetworkRule } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { parseValueList, setValueListClause, q1 } from "./valueList";
 
@@ -147,6 +149,11 @@ export default function NetworkRulePropertiesModal({ db, schema, name, onClose }
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const objTags = useObjectTags({
+    kind: "NETWORK RULE", db, schema, name,
+    alter: (clause) => AlterNetworkRule(db, schema, name, clause),
+  });
 
   const ruleRef = `"${db}"."${schema}"."${name}"`;
 
@@ -331,6 +338,7 @@ export default function NetworkRulePropertiesModal({ db, schema, name, onClose }
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

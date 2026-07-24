@@ -10,6 +10,8 @@ import {
   AuditOutlined, EditOutlined, CheckOutlined, CloseOutlined, ThunderboltOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterEventTable, GetEventTableParameters } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -177,6 +179,11 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const objTags = useObjectTags({
+    kind: "EVENT TABLE", db, schema, name,
+    alter: (clause) => AlterEventTable(db, schema, name, clause),
+  });
 
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
@@ -361,6 +368,7 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
                 onSave={saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")}
                 onUnset={() => saveIntParam("MAX_DATA_EXTENSION_TIME_IN_DAYS")("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

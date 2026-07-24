@@ -12,6 +12,8 @@ import {
 import {
   GetObjectProperties, AlterService, ListServiceEndpoints, GetServiceContainers, GetServiceLogs,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -211,6 +213,11 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "SERVICE", db, schema, name,
+    alter: (clause) => AlterService(db, schema, name, clause),
+  });
+
   const svcRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -347,6 +354,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
               <EditRow label="Max instances" value={maxInstances} numeric canUnset={maxInstances !== ""} onSave={saveMaxInstances} onUnset={() => saveMaxInstances("")} />
               <EditRow label="Auto resume" value={autoResume} options={["TRUE", "FALSE"]} canUnset={autoResume !== ""} onSave={saveAutoResume} onUnset={() => saveAutoResume("")} />
               <EditRow label="Query warehouse" value={queryWarehouse} canUnset={queryWarehouse !== ""} onSave={saveQueryWarehouse} onUnset={() => saveQueryWarehouse("")} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

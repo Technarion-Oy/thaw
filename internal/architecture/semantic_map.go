@@ -242,6 +242,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/shared/TagInput.tsx",
         "frontend/src/components/shared/TagsRow.tsx",
         "frontend/src/components/shared/createModalHooks.ts",
+        "frontend/src/components/shared/useObjectTags.ts",
         "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/stage/UploadToStageModal.tsx",
         "frontend/src/components/storagelifecyclepolicy/CreateStorageLifecyclePolicyModal.tsx",

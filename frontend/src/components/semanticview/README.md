@@ -15,8 +15,9 @@ describe the data.
   required order) + an optional comment + a `COPY GRANTS` checkbox. Calls
   `BuildCreateSemanticViewSql` for the live preview and `ExecDDL` to run it.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
-  comment via `AlterSemanticView`), a **Tags** section (chips from
-  `GetSemanticViewTags`; add / remove via `SET` / `UNSET TAG`), and lazily-loaded
+  comment via `AlterSemanticView`), a **Tags** section (the shared
+  `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /
+  remove via `AlterSemanticView`), and lazily-loaded
   sections that surface the view's structure on demand: **Structure**
   (`DescribeSemanticView`), **Dimensions** (`ListSemanticDimensions`), **Facts**
   (`ListSemanticFacts`), **Metrics** (`ListSemanticMetrics`), and a

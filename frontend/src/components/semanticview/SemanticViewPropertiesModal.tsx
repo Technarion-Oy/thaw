@@ -4,17 +4,18 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table, Empty, Popconfirm,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table, Empty,
 } from "antd";
 import {
   ApartmentOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
-  PlusOutlined,
 } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterSemanticView, GetSemanticViewTags,
+  GetObjectProperties, AlterSemanticView,
   DescribeSemanticView, ListSemanticDimensions, ListSemanticFacts, ListSemanticMetrics,
   ListSemanticDimensionsForMetric,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -217,29 +218,12 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Tags — loaded with the properties (immediate-consistency INFORMATION_SCHEMA
-  // read); SET/UNSET TAG to edit.
-  const [tags, setTags] = useState<snowflake.QueryResult | null>(null);
-  const [addingTag, setAddingTag] = useState(false);
-  const [tagName, setTagName] = useState("");
-  const [tagValue, setTagValue] = useState("");
-
   // Dimensions-for-metric lookup — which dimensions are queryable alongside a
   // given metric.
   const [metricName, setMetricName] = useState("");
   const [forMetric, setForMetric] = useState<snowflake.QueryResult | null>(null);
   const [forMetricError, setForMetricError] = useState<string | null>(null);
   const [forMetricLoading, setForMetricLoading] = useState(false);
-
-  const reloadTags = useCallback(async () => {
-    try {
-      const t = await GetSemanticViewTags(db, schema, name);
-      setTags(t);
-    } catch {
-      // Tag listing is best-effort; SET/UNSET TAG still work if the read fails.
-      setTags(null);
-    }
-  }, [db, schema, name]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -250,8 +234,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     } catch (e) {
       setError(String(e));
     }
-    reloadTags();
-  }, [db, schema, name, reloadTags]);
+  }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -260,6 +243,11 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
+  const objTags = useObjectTags({
+    kind: "SEMANTIC VIEW", db, schema, name,
+    alter: (clause) => AlterSemanticView(db, schema, name, clause),
+  });
+
   const saveComment = async (comment: string) => {
     if (comment.trim() === "") {
       await AlterSemanticView(db, schema, name, "UNSET COMMENT");
@@ -267,33 +255,6 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
       await AlterSemanticView(db, schema, name, `SET COMMENT = ${q1(comment)}`);
     }
     await reload();
-  };
-
-  const addTag = async () => {
-    const tn = tagName.trim();
-    if (tn === "") return;
-    setActionError(null);
-    try {
-      // Tag name may be a qualified identifier (db.schema.tag) — inserted
-      // verbatim; the value is a quoted string literal.
-      await AlterSemanticView(db, schema, name, `SET TAG ${tn} = ${q1(tagValue)}`);
-      setAddingTag(false);
-      setTagName("");
-      setTagValue("");
-      await reloadTags();
-    } catch (e) {
-      setActionError(`Set tag failed: ${String(e)}`);
-    }
-  };
-
-  const removeTag = async (qualifiedName: string) => {
-    setActionError(null);
-    try {
-      await AlterSemanticView(db, schema, name, `UNSET TAG ${qualifiedName}`);
-      await reloadTags();
-    } catch (e) {
-      setActionError(`Unset tag failed: ${String(e)}`);
-    }
   };
 
   const loadForMetric = async () => {
@@ -315,22 +276,6 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
 
   // Keys handled by dedicated sections above the generic Properties table.
   const handledKeys = new Set(["comment", "owner", "created_on"]);
-
-  // Resolve the tag columns once (GetSemanticViewTags returns INFORMATION_SCHEMA
-  // TAG_REFERENCES rows: tag_database/tag_schema/tag_name/tag_value).
-  const tagRows = (() => {
-    if (!tags || !tags.columns || !tags.rows) return [];
-    const idx = (n: string) => tags.columns.findIndex((c) => c.toLowerCase() === n);
-    const dbI = idx("tag_database"), scI = idx("tag_schema"), nmI = idx("tag_name"), vlI = idx("tag_value");
-    if (nmI < 0) return [];
-    return tags.rows.map((row) => {
-      const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
-      const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
-      const tnm = String(row[nmI] ?? "");
-      const qualified = [tdb, tsc, tnm].filter(Boolean).map((p) => `"${p}"`).join(".");
-      return { name: tnm, qualified, value: vlI >= 0 ? String(row[vlI] ?? "") : "" };
-    });
-  })();
 
   return (
     <Modal
@@ -392,40 +337,11 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
           </table>
 
           <div style={SECTION_HEAD}>Tags</div>
-          <Space direction="vertical" size={8} style={{ width: "100%" }}>
-            <Space wrap>
-              {tagRows.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>No tags set.</Text>}
-              {tagRows.map((t) => (
-                <Popconfirm
-                  key={t.qualified}
-                  title={`Unset tag ${t.name}?`}
-                  onConfirm={() => removeTag(t.qualified)}
-                  okText="Unset"
-                  cancelText="Cancel"
-                >
-                  <span style={{
-                    display: "inline-flex", alignItems: "center", gap: 4,
-                    border: "1px solid var(--border)", borderRadius: 4,
-                    padding: "1px 6px", fontSize: 12, cursor: "pointer",
-                  }}>
-                    <span style={{ color: "var(--text)" }}>{t.name}</span>
-                    {t.value !== "" && <span style={{ color: "var(--text-muted)" }}>= {t.value}</span>}
-                    <CloseOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />
-                  </span>
-                </Popconfirm>
-              ))}
-            </Space>
-            {addingTag ? (
-              <Space>
-                <Input size="small" placeholder="tag name (or db.schema.tag)" value={tagName} onChange={(e) => setTagName(e.target.value)} style={{ width: 220 }} />
-                <Input size="small" placeholder="value" value={tagValue} onChange={(e) => setTagValue(e.target.value)} style={{ width: 160 }} onPressEnter={addTag} />
-                <Button size="small" type="primary" icon={<CheckOutlined />} onClick={addTag} disabled={tagName.trim() === ""} />
-                <Button size="small" icon={<CloseOutlined />} onClick={() => { setAddingTag(false); setTagName(""); setTagValue(""); }} />
-              </Space>
-            ) : (
-              <Button size="small" icon={<PlusOutlined />} onClick={() => setAddingTag(true)}>Add tag</Button>
-            )}
-          </Space>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            </tbody>
+          </table>
 
           <LazySection
             title="Structure"

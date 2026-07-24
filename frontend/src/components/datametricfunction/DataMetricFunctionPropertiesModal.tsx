@@ -4,12 +4,14 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Tag, Select, Table, Popconfirm,
+  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Tag, Select, Table,
 } from "antd";
 import {
-  FundOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, PlusOutlined,
+  FundOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, DescribeDataMetricFunction, AlterDataMetricFunction, GetDataMetricFunctionReferences, GetDataMetricFunctionTags } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, DescribeDataMetricFunction, AlterDataMetricFunction, GetDataMetricFunctionReferences } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -187,41 +189,6 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
     }
   };
 
-  // Tags currently applied to the DMF (no-latency INFORMATION_SCHEMA lookup),
-  // each rendered as a removable chip; an add form issues SET TAG.
-  type DmfTag = { qualified: string; label: string; value: string };
-  const [tags, setTags] = useState<DmfTag[]>([]);
-  const [tagsError, setTagsError] = useState<string | null>(null);
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagValue, setNewTagValue] = useState("");
-  const [tagBusy, setTagBusy] = useState(false);
-
-  const loadTags = useCallback(async () => {
-    setTagsError(null);
-    try {
-      const res = await GetDataMetricFunctionTags(db, schema, name, args);
-      const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
-      const di = cols.indexOf("tag_database");
-      const si = cols.indexOf("tag_schema");
-      const ni = cols.indexOf("tag_name");
-      const vi = cols.indexOf("tag_value");
-      const parsed: DmfTag[] = (res?.rows ?? []).map((r) => {
-        const tdb = String(r[di] ?? "");
-        const tsc = String(r[si] ?? "");
-        const tnm = String(r[ni] ?? "");
-        return {
-          qualified: `${quoteIdent(tdb)}.${quoteIdent(tsc)}.${quoteIdent(tnm)}`,
-          label: `${tdb}.${tsc}.${tnm}`,
-          value: String(r[vi] ?? ""),
-        };
-      });
-      setTags(parsed);
-    } catch (e) {
-      setTags([]);
-      setTagsError(String(e));
-    }
-  }, [db, schema, name, args]);
-
   const reload = useCallback(async () => {
     setError(null);
     try {
@@ -236,11 +203,10 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
       }
       setRows(props ?? []);
       setDetail(d);
-      await loadTags();
     } catch (e) {
       setError(String(e));
     }
-  }, [db, schema, name, args, loadTags]);
+  }, [db, schema, name, args]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -248,6 +214,11 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
 
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
+
+  const objTags = useObjectTags({
+    kind: "DATA METRIC FUNCTION", db, schema, name, args,
+    alter: (clause) => AlterDataMetricFunction(db, schema, name, args, clause),
+  });
 
   // Project the DESCRIBE FUNCTION result (property / value columns) into a map.
   const describeMap = (): Record<string, string> => {
@@ -298,38 +269,6 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
     await AlterDataMetricFunction(db, schema, name, args, `RENAME TO ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(trimmed)}`);
     onChanged?.();
     onClose();
-  };
-
-  const addTag = async () => {
-    const tn = newTagName.trim();
-    if (tn === "") return;
-    setTagBusy(true);
-    setActionError(null);
-    try {
-      // The tag name may already be qualified (db.schema.tag); pass it through
-      // verbatim. The value is a string literal.
-      await AlterDataMetricFunction(db, schema, name, args, `SET TAG ${tn} = ${q1(newTagValue)}`);
-      setNewTagName("");
-      setNewTagValue("");
-      await loadTags();
-    } catch (e) {
-      setActionError(`Set tag failed: ${String(e)}`);
-    } finally {
-      setTagBusy(false);
-    }
-  };
-
-  const removeTag = async (qualified: string) => {
-    setTagBusy(true);
-    setActionError(null);
-    try {
-      await AlterDataMetricFunction(db, schema, name, args, `UNSET TAG ${qualified}`);
-      await loadTags();
-    } catch (e) {
-      setActionError(`Unset tag failed: ${String(e)}`);
-    } finally {
-      setTagBusy(false);
-    }
   };
 
   const comment = find("description") || find("comment");
@@ -430,57 +369,11 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
           </table>
 
           <div style={SECTION_HEAD}>Tags</div>
-          {tagsError ? (
-            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-              Could not read applied tags ({tagsError}). You can still set a tag below.
-            </Text>
-          ) : tags.length === 0 ? (
-            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-              No tags applied.
-            </Text>
-          ) : (
-            <Space size={[6, 6]} wrap style={{ marginBottom: 8 }}>
-              {tags.map((t) => (
-                <Popconfirm
-                  key={t.qualified}
-                  title={`Unset tag ${t.label}?`}
-                  okText="Unset"
-                  okButtonProps={{ danger: true, loading: tagBusy }}
-                  onConfirm={() => removeTag(t.qualified)}
-                >
-                  <Tag closable onClose={(e) => e.preventDefault()} style={{ cursor: "pointer" }}>
-                    {t.label}{t.value !== "" ? ` = ${t.value}` : ""}
-                  </Tag>
-                </Popconfirm>
-              ))}
-            </Space>
-          )}
-          <Space.Compact style={{ width: "100%" }}>
-            <Input
-              size="small"
-              placeholder="tag (e.g. governance.pii)"
-              value={newTagName}
-              onChange={(e) => setNewTagName(e.target.value)}
-              style={{ width: "45%" }}
-            />
-            <Input
-              size="small"
-              placeholder="value"
-              value={newTagValue}
-              onChange={(e) => setNewTagValue(e.target.value)}
-              onPressEnter={addTag}
-              style={{ width: "40%" }}
-            />
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={addTag}
-              loading={tagBusy}
-              disabled={newTagName.trim() === ""}
-            >
-              Set
-            </Button>
-          </Space.Compact>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            </tbody>
+          </table>
 
           <div style={SECTION_HEAD}>Data Metric Function Detail</div>
           {detail ? (

@@ -15,6 +15,8 @@ import {
   ParseSqlList, NormalizeSqlScalar, QuoteSqlText,
   AuthenticationPolicyListParams, AuthenticationPolicyMFAEnrollmentOptions,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake, authenticationpolicy } from "../../../wailsjs/go/models";
 import { MFAPolicyRow, PATPolicyRow, WorkloadIdentityPolicyRow, ClientPolicyRow, useReconciledSelection } from "./PolicyBagRows";
 
@@ -396,6 +398,11 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "AUTHENTICATION POLICY", db, schema, name,
+    alter: (clause) => AlterAuthenticationPolicy(db, schema, name, clause),
+  });
+
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
@@ -597,6 +604,7 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
                   </Space>
                 </td>
               </tr>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

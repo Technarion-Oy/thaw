@@ -10,6 +10,8 @@ import {
   CloudServerOutlined, EditOutlined, CheckOutlined, CloseOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterExternalTable, ExecDDL } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -199,6 +201,11 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "EXTERNAL TABLE", db, schema, name,
+    alter: (clause) => AlterExternalTable(db, schema, name, clause),
+  });
+
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -308,6 +315,7 @@ export default function ExternalTablePropertiesModal({ db, schema, name, onClose
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

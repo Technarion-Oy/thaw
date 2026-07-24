@@ -5,14 +5,16 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table,
-  Tag, Popconfirm, Dropdown, Form,
+  Dropdown, Form,
 } from "antd";
 import {
   RobotOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
   PlusOutlined, MoreOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterModel, ListModelVersions, GetModelTags } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterModel, ListModelVersions } from "../../../wailsjs/go/app/App";
 import ModelSourcePicker, { type ModelSourceValue } from "./ModelSourcePicker";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -165,13 +167,6 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionsError, setVersionsError] = useState<string | null>(null);
 
-  // Tags (INFORMATION_SCHEMA.TAG_REFERENCES, object domain MODEL).
-  const [tags, setTags] = useState<snowflake.QueryResult | null>(null);
-  const [tagsLoading, setTagsLoading] = useState(false);
-  const [tagsError, setTagsError] = useState<string | null>(null);
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagValue, setNewTagValue] = useState("");
-
   // Per-version input action + the add-version dialog.
   const [versionInput, setVersionInput] = useState<VersionInputAction | null>(null);
   const [versionInputDraft, setVersionInputDraft] = useState("");
@@ -201,6 +196,11 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
   const alterModel = async (clause: string) => {
     await AlterModel(db, schema, name, clause);
   };
+
+  const objTags = useObjectTags({
+    kind: "MODEL", db, schema, name,
+    alter: alterModel,
+  });
 
   const saveComment = async (comment: string) => {
     setActionError(null);
@@ -242,47 +242,6 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
       setVersionsLoading(false);
     }
   }, [db, schema, name]);
-
-  const loadTags = useCallback(async () => {
-    setTagsLoading(true);
-    setTagsError(null);
-    try {
-      const res = await GetModelTags(db, schema, name);
-      setTags(res ?? null);
-    } catch (e) {
-      setTagsError(String(e));
-    } finally {
-      setTagsLoading(false);
-    }
-  }, [db, schema, name]);
-
-  // Load tags once on open (cheap, no governance latency on INFORMATION_SCHEMA).
-  useEffect(() => { loadTags(); }, [loadTags]);
-
-  const addTag = async () => {
-    const n = newTagName.trim();
-    if (n === "") return;
-    setActionError(null);
-    try {
-      // Tag name may be qualified (db.schema.tag); insert verbatim, quote value.
-      await alterModel(`SET TAG ${n} = ${q1(newTagValue)}`);
-      setNewTagName("");
-      setNewTagValue("");
-      await loadTags();
-    } catch (e) {
-      setActionError(`Set tag failed: ${String(e)}`);
-    }
-  };
-
-  const removeTag = async (qualifiedName: string) => {
-    setActionError(null);
-    try {
-      await alterModel(`UNSET TAG ${qualifiedName}`);
-      await loadTags();
-    } catch (e) {
-      setActionError(`Unset tag failed: ${String(e)}`);
-    }
-  };
 
   // Run a version-scoped clause, then refresh versions + the SHOW MODELS header
   // (aliases / default version may have changed).
@@ -331,21 +290,6 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
   // (Overview: model_type/aliases; Settings: default_version_name/comment) — so
   // they aren't duplicated in the raw SHOW MODELS dump at the bottom.
   const handledKeys = new Set(["comment", "default_version_name", "model_type", "aliases"]);
-
-  // ── Tags → chips ──────────────────────────────────────────────────────────
-  const tagChips = (tags?.rows ?? []).map((row) => {
-    const cols = tags?.columns ?? [];
-    const cell = (label: string) => {
-      const idx = cols.findIndex((c) => c.toLowerCase() === label);
-      return idx >= 0 ? String(row[idx] ?? "") : "";
-    };
-    const tdb = cell("tag_database");
-    const tsc = cell("tag_schema");
-    const tnm = cell("tag_name");
-    const tval = cell("tag_value");
-    const qualified = [tdb, tsc, tnm].filter(Boolean).map(qId).join(".");
-    return { qualified, label: `${tnm}${tval ? ` = ${tval}` : ""}` };
-  }).filter((t) => t.qualified);
 
   // ── Versions → table ──────────────────────────────────────────────────────
   const versionCols = versions?.columns ?? [];
@@ -493,43 +437,11 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
           </table>
 
           <div style={SECTION_HEAD}>Tags</div>
-          {tagsError && (
-            <Alert type="warning" message="Could not read current tags" description={tagsError} showIcon style={{ marginBottom: 8 }} />
-          )}
-          <Space size={[6, 6]} wrap style={{ marginBottom: 8 }}>
-            {tagsLoading && <Spin size="small" />}
-            {!tagsLoading && tagChips.length === 0 && !tagsError && (
-              <Text type="secondary" style={{ fontSize: 11 }}>No tags applied.</Text>
-            )}
-            {tagChips.map((t) => (
-              <Popconfirm
-                key={t.qualified}
-                title="Unset this tag?"
-                onConfirm={() => removeTag(t.qualified)}
-                okText="Unset"
-              >
-                <Tag closable onClose={(e) => e.preventDefault()} style={{ cursor: "pointer" }}>
-                  {t.label}
-                </Tag>
-              </Popconfirm>
-            ))}
-          </Space>
-          <Space.Compact style={{ display: "flex", maxWidth: 560 }}>
-            <Input
-              size="small"
-              placeholder="tag name (e.g. cost_center or DB.SCHEMA.TAG)"
-              value={newTagName}
-              onChange={(e) => setNewTagName(e.target.value)}
-            />
-            <Input
-              size="small"
-              placeholder="value"
-              value={newTagValue}
-              onChange={(e) => setNewTagValue(e.target.value)}
-              onPressEnter={addTag}
-            />
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={addTag}>Set tag</Button>
-          </Space.Compact>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            </tbody>
+          </table>
 
           <div style={SECTION_HEAD}>Versions</div>
           {versionsError && (

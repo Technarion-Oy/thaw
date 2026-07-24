@@ -37,7 +37,7 @@ dedicated builder, and is reachable from the properties modal:
 - `SET` / `UNSET`: `TARGET_LAG`, `WAREHOUSE`, `ATTRIBUTES`, `PRIMARY KEY`,
   `AUTO_SUSPEND` (NULL clears it), `FULL_INDEX_BUILD_INTERVAL_DAYS`,
   `REQUEST_LOGGING`, `COMMENT`.
-- `SET` / `UNSET TAG` (current tags read via `App.GetCortexSearchServiceTags`).
+- `SET` / `UNSET TAG` (current tags read via the shared `App.GetObjectTagReferences`).
 - `ADD` / `DROP SCORING PROFILE` (raw scoring-profile definition).
 
 `EMBEDDING_MODEL` is fixed at creation and so is not alterable.
@@ -57,7 +57,7 @@ dedicated builder, and is reachable from the properties modal:
 | `CortexSearchServiceConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `IndexMode` (`"single"`/`"multi"`), `SearchColumn` (ON, single), `TextIndexes` / `VectorIndexes` (multi), `PrimaryKey`, `Attributes`, `Warehouse`, `TargetLag`, `EmbeddingModel` (single), `RefreshMode`, `Initialize`, `FullIndexBuildIntervalDays`, `RequestLogging`, `AutoSuspend`, `Comment`, `Query` (AS) |
 | `IndexModeSingle` / `IndexModeMulti` | String constants for `IndexMode` |
 | `BuildCreateCortexSearchServiceSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] CORTEX SEARCH SERVICE [IF NOT EXISTS] <fqn> ON <col> [ATTRIBUTES …] WAREHOUSE = … TARGET_LAG = '…' [EMBEDDING_MODEL = '…'] [COMMENT = '…'] AS <query>;` |
-| `App.GetCortexSearchServiceTags(db, schema, name)` | Reads currently applied tags via `INFORMATION_SCHEMA.TAG_REFERENCES` for the properties modal's tag chips (best-effort; needs privileges) |
+| `App.GetObjectTagReferences("CORTEX SEARCH SERVICE", db, schema, name, "")` | Reads currently applied tags via `INFORMATION_SCHEMA.TAG_REFERENCES` for the properties modal's Tags section (the shared reader; best-effort, needs privileges) |
 
 The column-list joining for the `SET ATTRIBUTES ( … )` / `SET PRIMARY KEY ( … )`
 ALTER clauses is exposed over IPC by `App.FormatCortexSearchAttributes`, which

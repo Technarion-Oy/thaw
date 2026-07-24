@@ -42,6 +42,32 @@ func TestTagReferenceDomain(t *testing.T) {
 	}
 }
 
+func TestAccountLevelTagDomain(t *testing.T) {
+	// Account-level domains resolve their INFORMATION_SCHEMA host database via
+	// accountLevelFuncDatabase and use a bare object name; everything else is
+	// scoped to its own database.
+	accountLevel := []string{
+		"WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT",
+		"COMPUTE POOL", "NETWORK POLICY",
+		// Case / whitespace are normalized.
+		"  warehouse ", "role",
+	}
+	for _, d := range accountLevel {
+		if !accountLevelTagDomain(d) {
+			t.Errorf("accountLevelTagDomain(%q) = false, want true", d)
+		}
+	}
+	schemaLevel := []string{
+		"TABLE", "VIEW", "SCHEMA", "DATABASE", "STAGE", "STREAM", "TASK",
+		"STREAMLIT", "NETWORK RULE", "FUNCTION", "", "  ",
+	}
+	for _, d := range schemaLevel {
+		if accountLevelTagDomain(d) {
+			t.Errorf("accountLevelTagDomain(%q) = true, want false", d)
+		}
+	}
+}
+
 func TestTagReferenceObjectName(t *testing.T) {
 	tests := []struct {
 		name                  string
@@ -56,6 +82,12 @@ func TestTagReferenceObjectName(t *testing.T) {
 		{"procedure carries signature", "PROCEDURE", "DB", "SC", "P", "NUMBER, VARCHAR", `"DB"."SC"."P"(NUMBER, VARCHAR)`},
 		{"function variant carries signature", "DATA METRIC FUNCTION", "DB", "SC", "F", "TABLE(NUMBER)", `"DB"."SC"."F"(TABLE(NUMBER))`},
 		{"no-arg procedure still has parens", "PROCEDURE", "DB", "SC", "P", "", `"DB"."SC"."P"()`},
+		// Account-level objects carry only a bare name — the db/schema the caller
+		// passes are ignored (GetObjectTagReferences leaves them empty anyway).
+		{"warehouse is bare", "WAREHOUSE", "", "", "WH", "", `"WH"`},
+		{"role is bare", "ROLE", "", "", "MY_ROLE", "", `"MY_ROLE"`},
+		{"integration is bare", "INTEGRATION", "", "", "MY_INT", "", `"MY_INT"`},
+		{"user is bare", "USER", "", "", "ALICE", "", `"ALICE"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -11,6 +11,8 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterModelMonitor, ListWarehouses, ParseSqlList } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -202,6 +204,11 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "MODEL MONITOR", db, schema, name,
+    alter: (clause) => AlterModelMonitor(db, schema, name, clause),
+  });
+
   // Parse the segment-column list from the (variably-shaped) SHOW cell via the
   // shared backend tokenizer (App.ParseSqlList handles SQL tuples, bracketed
   // lists, and JSON arrays — quote/comma-safe). It is async, so the result lives
@@ -317,6 +324,7 @@ export default function ModelMonitorPropertiesModal({ db, schema, name, onClose 
               <EditRow label="Baseline" value={baseline} onSave={saveBaseline} />
               <EditRow label="Refresh Interval" value={refreshInterval} help="e.g. 1 hour, 30 minutes, 1 day" onSave={saveRefreshInterval} />
               <SelectEditRow label="Warehouse" value={warehouse} options={warehouses} loading={loadingWarehouses} onSave={saveWarehouse} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 
