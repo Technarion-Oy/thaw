@@ -49,7 +49,7 @@ read from:
   the `SHOW SEMANTIC DIMENSIONS|FACTS|METRICS IN <fqn>` commands.
 - `App.ListSemanticDimensionsForMetric` — `SHOW SEMANTIC DIMENSIONS IN <fqn> FOR
   METRIC <metric>` (which dimensions are queryable alongside a given metric).
-- `App.GetSemanticViewTags` — the tags applied to the view, for the tag editor.
+- The Tags editor reads the view's tags through the shared `App.GetObjectTagReferences`.
 
 `GET_DDL` **supports** semantic views directly (object_type `'SEMANTIC VIEW'`),
 so View Definition / object comparison work without any special handling in

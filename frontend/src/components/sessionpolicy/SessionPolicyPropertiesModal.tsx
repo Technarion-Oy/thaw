@@ -13,6 +13,8 @@ import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
   ParseSecondaryRoles, FormatSecondaryRoles, ReconcileSecondaryRoles,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -434,6 +436,11 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "SESSION POLICY", db, schema, name,
+    alter: (clause) => AlterSessionPolicy(db, schema, name, clause),
+  });
+
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
 
@@ -609,6 +616,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

@@ -69,26 +69,3 @@ func (a *App) GetDataMetricFunctionReferences(database, schema, name string) (*s
 		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name))
 	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
-
-// GetDataMetricFunctionTags returns the tags currently applied to the given data
-// metric function, via the INFORMATION_SCHEMA.TAG_REFERENCES table function
-// (object domain FUNCTION). Unlike the ACCOUNT_USAGE.TAG_REFERENCES view this
-// reflects changes immediately (no propagation latency), which suits an
-// interactive tag editor. args is the TABLE argument signature that resolves the
-// overload. The raw QueryResult is returned (tag_database / tag_schema / tag_name
-// / tag_value columns) so the properties modal can render each tag as a removable
-// chip.
-func (a *App) GetDataMetricFunctionTags(database, schema, name, args string) (*snowflake.QueryResult, error) {
-	client := a.currentClient()
-	if client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	fqn := fmt.Sprintf("%s.%s.%s(%s)",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), args)
-	sql := fmt.Sprintf(
-		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
-			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'FUNCTION')) "+
-			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
-		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(fqn))
-	return client.Execute(a.fctx(FeatureObjectEditor), sql)
-}

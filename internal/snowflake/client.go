@@ -116,6 +116,10 @@ type SnowflakeObject struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
 	Schema string `json:"schema"`
+	// Database is populated by account-wide listings (SearchObjects) from the
+	// SHOW command's database_name column. Empty for schema-scoped listings,
+	// where the caller already knows the database.
+	Database string `json:"database,omitempty"`
 	// Arguments holds the parameter type list for procedures and functions,
 	// e.g. "NUMBER, VARCHAR". Empty for all other object kinds.
 	Arguments string `json:"arguments"`
@@ -3458,19 +3462,32 @@ func hasReturnsTable(ddl string) bool {
 // the "kind" column in the result set is read (as in SHOW OBJECTS).
 // For PROCEDURE and FUNCTION kinds the "arguments" column is also captured so
 // that GET_DDL can be called with the correct overload signature.
-func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, error) {
+//
+// The second return value is the number of rows the SHOW actually returned
+// (before any SYSTEM$/is_builtin/is_* skipping) — used by SearchAccountObjects to
+// detect when a `LIMIT n` was hit (scanned == n) so it can warn that results for
+// that kind may be incomplete.
+func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, int, error) {
 	rows, err := c.queryCtx(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx, isDynamicIdx, isExternalIdx, isIcebergIdx, isHybridIdx, isExternalFnIdx, isDataMetricIdx := -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+	// database_name / schema_name let account-wide SHOW … IN ACCOUNT results
+	// carry their own location (SearchObjects). For IN SCHEMA calls these
+	// columns are also present and simply reaffirm the caller's schema.
+	dbNameIdx, schemaNameIdx := -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
 			nameIdx = i
+		case "database_name":
+			dbNameIdx = i
+		case "schema_name":
+			schemaNameIdx = i
 		case "kind":
 			kindIdx = i
 		case "arguments":
@@ -3500,23 +3517,25 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		}
 	}
 	if nameIdx < 0 {
-		return nil, fmt.Errorf("no 'name' column in: %s cols=%v", query, cols)
+		return nil, 0, fmt.Errorf("no 'name' column in: %s cols=%v", query, cols)
 	}
 	if fixedKind == "" && kindIdx < 0 {
-		return nil, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
+		return nil, 0, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
 	}
 
 	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION" || fixedKind == "EXTERNAL FUNCTION" || fixedKind == "DATA METRIC FUNCTION"
 
 	var objects []SnowflakeObject
+	scanned := 0
 	for rows.Next() {
+		scanned++
 		vals := make([]interface{}, len(cols))
 		ptrs := make([]interface{}, len(cols))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
+			return nil, scanned, err
 		}
 		name := fmt.Sprintf("%v", vals[nameIdx])
 		// Skip Snowflake-internal procedures/functions. These show up in SHOW
@@ -3635,9 +3654,21 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 				finalize = parseFinalizeFromRelJSON(vals[taskRelIdx])
 			}
 		}
-		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds, Finalize: finalize})
+		rowSchema := schema
+		if schemaNameIdx >= 0 && vals[schemaNameIdx] != nil {
+			if s := fmt.Sprintf("%v", vals[schemaNameIdx]); s != "" && s != "<nil>" {
+				rowSchema = s
+			}
+		}
+		var rowDB string
+		if dbNameIdx >= 0 && vals[dbNameIdx] != nil {
+			if s := fmt.Sprintf("%v", vals[dbNameIdx]); s != "" && s != "<nil>" {
+				rowDB = s
+			}
+		}
+		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Database: rowDB, Schema: rowSchema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds, Finalize: finalize})
 	}
-	return objects, rows.Err()
+	return objects, scanned, rows.Err()
 }
 
 // parseFinalizeFromRelJSON extracts the root-task name from a task_relations
@@ -3726,7 +3757,7 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 	}
 
 	q := Qualify(database, schema)
-	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
+	objs, _, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
 	if err != nil {
 		return nil, err
 	}
@@ -3754,53 +3785,9 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		query string
 		kind  string
 	}
-	commands := []showCmd{
-		{fmt.Sprintf("SHOW DYNAMIC TABLES IN SCHEMA %s", q), "DYNAMIC TABLE"},
-		{fmt.Sprintf("SHOW EXTERNAL TABLES IN SCHEMA %s", q), "EXTERNAL TABLE"},
-		{fmt.Sprintf("SHOW ICEBERG TABLES IN SCHEMA %s", q), "ICEBERG TABLE"},
-		{fmt.Sprintf("SHOW HYBRID TABLES IN SCHEMA %s", q), "HYBRID TABLE"},
-		{fmt.Sprintf("SHOW EVENT TABLES IN SCHEMA %s", q), "EVENT TABLE"},
-		{fmt.Sprintf("SHOW MATERIALIZED VIEWS IN SCHEMA %s", q), "MATERIALIZED VIEW"},
-		{fmt.Sprintf("SHOW ALERTS IN SCHEMA %s", q), "ALERT"},
-		{fmt.Sprintf("SHOW TAGS IN SCHEMA %s", q), "TAG"},
-		{fmt.Sprintf("SHOW MASKING POLICIES IN SCHEMA %s", q), "MASKING POLICY"},
-		{fmt.Sprintf("SHOW ROW ACCESS POLICIES IN SCHEMA %s", q), "ROW ACCESS POLICY"},
-		{fmt.Sprintf("SHOW JOIN POLICIES IN SCHEMA %s", q), "JOIN POLICY"},
-		{fmt.Sprintf("SHOW PRIVACY POLICIES IN SCHEMA %s", q), "PRIVACY POLICY"},
-		{fmt.Sprintf("SHOW STORAGE LIFECYCLE POLICIES IN SCHEMA %s", q), "STORAGE LIFECYCLE POLICY"},
-		{fmt.Sprintf("SHOW PASSWORD POLICIES IN SCHEMA %s", q), "PASSWORD POLICY"},
-		{fmt.Sprintf("SHOW SESSION POLICIES IN SCHEMA %s", q), "SESSION POLICY"},
-		{fmt.Sprintf("SHOW AGGREGATION POLICIES IN SCHEMA %s", q), "AGGREGATION POLICY"},
-		{fmt.Sprintf("SHOW PROJECTION POLICIES IN SCHEMA %s", q), "PROJECTION POLICY"},
-		{fmt.Sprintf("SHOW AUTHENTICATION POLICIES IN SCHEMA %s", q), "AUTHENTICATION POLICY"},
-		{fmt.Sprintf("SHOW PACKAGES POLICIES IN SCHEMA %s", q), "PACKAGES POLICY"},
-		{fmt.Sprintf("SHOW NETWORK RULES IN SCHEMA %s", q), "NETWORK RULE"},
-		{fmt.Sprintf("SHOW IMAGE REPOSITORIES IN SCHEMA %s", q), "IMAGE REPOSITORY"},
-		{fmt.Sprintf("SHOW SERVICES IN SCHEMA %s", q), "SERVICE"},
-		{fmt.Sprintf("SHOW GATEWAYS IN SCHEMA %s", q), "GATEWAY"},
-		{fmt.Sprintf("SHOW CONTACTS IN SCHEMA %s", q), "CONTACT"},
-		{fmt.Sprintf("SHOW STREAMLITS IN SCHEMA %s", q), "STREAMLIT"},
-		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
-		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
-		{fmt.Sprintf("SHOW EXTERNAL FUNCTIONS IN SCHEMA %s", q), "EXTERNAL FUNCTION"},
-		{fmt.Sprintf("SHOW DATA METRIC FUNCTIONS IN SCHEMA %s", q), "DATA METRIC FUNCTION"},
-		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
-		{fmt.Sprintf("SHOW STREAMS IN SCHEMA %s", q), "STREAM"},
-		{fmt.Sprintf("SHOW STAGES IN SCHEMA %s", q), "STAGE"},
-		{fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), "FILE FORMAT"},
-		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
-		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
-		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
-		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
-		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
-		{fmt.Sprintf("SHOW MODELS IN SCHEMA %s", q), "MODEL"},
-		{fmt.Sprintf("SHOW MODEL MONITORS IN SCHEMA %s", q), "MODEL MONITOR"},
-		{fmt.Sprintf("SHOW DATASETS IN SCHEMA %s", q), "DATASET"},
-		{fmt.Sprintf("SHOW CORTEX SEARCH SERVICES IN SCHEMA %s", q), "CORTEX SEARCH SERVICE"},
-		{fmt.Sprintf("SHOW AGENTS IN SCHEMA %s", q), "AGENT"},
-		{fmt.Sprintf("SHOW EXTERNAL AGENTS IN SCHEMA %s", q), "EXTERNAL AGENT"},
-		{fmt.Sprintf("SHOW MCP SERVERS IN SCHEMA %s", q), "MCP SERVER"},
-		{fmt.Sprintf("SHOW SEMANTIC VIEWS IN SCHEMA %s", q), "SEMANTIC VIEW"},
+	commands := make([]showCmd, 0, len(extendedShowKinds))
+	for _, k := range extendedShowKinds {
+		commands = append(commands, showCmd{fmt.Sprintf("SHOW %s IN SCHEMA %s", k.plural, q), k.kind})
 	}
 
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
@@ -3826,7 +3813,8 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		wg.Add(1)
 		go func(i int, cmd showCmd) {
 			defer wg.Done()
-			results[i].objs, results[i].err = c.showInSchema(ctx, cmd.query, cmd.kind, schema)
+			objs, _, err := c.showInSchema(ctx, cmd.query, cmd.kind, schema)
+			results[i].objs, results[i].err = objs, err
 		}(i, cmd)
 	}
 	wg.Wait()

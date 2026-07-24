@@ -868,8 +868,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
-  // ── Git gutter: clear HEAD cache and re-run when active tab changes ───────
+  // ── Git gutter: clear HEAD cache and re-run when the shown tab OR file changes ──
   const activeFilePath = activeTab?.path ?? null;
+  // Depend on activeFilePath too, not just the tab id: a recycled preview tab (and a
+  // Save-As) keeps the same id while swapping the file underneath it, so keying on id
+  // alone would leave the previous file's gutter markers up until the 400ms-debounced
+  // onDidChangeModelContent refresh runs. Path changes only on switch/recycle/save-as,
+  // never on a keystroke, so this stays off the typing hot path.
   useEffect(() => {
     if (activeFilePath) {
       // Evict cached HEAD content so the next refresh re-fetches from go-git.
@@ -879,7 +884,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     gitGutterDecRef.current?.set([]);
     if (gitGutterTimerRef.current) clearTimeout(gitGutterTimerRef.current);
     gitGutterTimerRef.current = setTimeout(() => { refreshGitGutterRef.current?.(); }, 0);
-  }, [tabId ?? activeTabId]);
+  }, [tabId ?? activeTabId, activeFilePath]);
 
   // ── "Explain SQL" context menu handler ───────────────────────────────────
   useEffect(() => {
@@ -1208,6 +1213,34 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
     window.addEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler);
     editor.onDidDispose(() => window.removeEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler));
+
+    // Preview-tab recycle (queryStore.openFile) keeps this editor's single Monaco
+    // model but swaps the file shown in it (same tab id, new path/content). Because
+    // @monaco-editor/react applies the new `value` via executeEdits — which *preserves*
+    // the undo stack — an undo could otherwise restore the PREVIOUS file's text into
+    // the tab now labeled the new file, and a Save would write that stale text to the
+    // new file. model.setValue resets the model's undo/redo stack (executeEdits does
+    // not), so recycling starts the new file with a clean history; we also reset the
+    // view state (cursor/scroll). YAML is exempt: it uses a per-file model URI
+    // (yamlModelPath), so a recycle switches to a different model that already has its
+    // own fresh undo stack — resetting here would instead clobber the old file's model.
+    const onTabReused = (e: Event) => {
+      const reusedId = (e as CustomEvent<{ tabId?: string }>).detail?.tabId;
+      if (!reusedId) return;
+      // Only the pane actually showing the recycled tab. Recycle always targets the
+      // active tab and never the split target, so for the primary editor this hits.
+      if (reusedId !== (tabId ?? useQueryStore.getState().activeTabId)) return;
+      const reusedTab = useQueryStore.getState().tabs.find((t) => t.id === reusedId);
+      if (!reusedTab || reusedTab.kind === "yaml") return; // yaml is model-per-file
+      const model = editor.getModel();
+      if (!model) return;
+      model.setValue(reusedTab.sql); // replaces content AND clears the undo/redo stack
+      editor.setPosition({ lineNumber: 1, column: 1 });
+      editor.setScrollTop(0);
+      editor.setScrollLeft(0);
+    };
+    window.addEventListener("thaw:tab-reused", onTabReused);
+    editor.onDidDispose(() => window.removeEventListener("thaw:tab-reused", onTabReused));
 
     // Re-run diagnostics when the active session database/schema changes via the
     // toolbar dropdown (not just via editing SQL text), so a stale "No database

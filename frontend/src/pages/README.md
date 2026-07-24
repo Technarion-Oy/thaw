@@ -51,6 +51,14 @@ Result history (`HistoryEntry[]`) is local React state keyed by tab ID (a
 entries are retained per tab. History state is not persisted — it resets on
 page reload.
 
+Because it's keyed by tab ID rather than by file, a **reused preview tab**
+(VS Code–style — `queryStore.openFile` recycles one clean, idle preview tab in
+place, keeping its ID; see the store README) would otherwise surface the
+previous file's results. `QueryPage` listens for the `thaw:tab-reused` event the
+store fires on recycle and drops that tab ID's `tabHistories`/`tabHistoryIds`/
+`tabCompareIds` entries (and its `readSeqRef` file-read guard), mirroring the
+`Tab.result`/`error` reset the store does for the reused tab.
+
 **Typing stays off the re-render path (#762)**
 
 `QueryPage` renders the whole page — the results grid (`ResultGrid`, a heavy

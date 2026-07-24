@@ -97,6 +97,11 @@ export interface Tab {
   isRunning?: boolean;   // per-tab running state; never persisted
   orphaned?: boolean;    // true when the backing file was deleted from disk
   mcpOrigin?: boolean;   // true when the tab was created by an MCP tool
+  preview?: boolean;     // true for a reusable VS Code–style "preview" tab (italic
+                         // title). At most one exists at a time; opening another
+                         // file from the browser replaces its content. Promoted to a
+                         // permanent tab (flag cleared) on double-click or first edit.
+                         // Session-only — never persisted (restored tabs are permanent).
   isDefaultTitle?: boolean; // true while the title is the auto-generated "SQL (n)";
                             // cleared by renameTab. Drives the "untitled.sql" save default.
 }
@@ -167,7 +172,12 @@ interface QueryState {
 
   // Tab management
   activateTab: (id: string) => void;
-  openFile: (path: string, content: string) => void;
+  // Open a file tab. `preview` (default false) opens/reuses the single VS Code–style
+  // preview tab instead of appending a permanent one; see the `preview` flag on Tab.
+  openFile: (path: string, content: string, preview?: boolean) => void;
+  // Promote a preview tab to a permanent one (clears its `preview` flag). No-op for
+  // tabs that aren't previews. Called on double-click (browser or tab bar).
+  promoteTab: (id: string) => void;
   openScratch: () => void;
   openDiff: (leftLabel: string, leftText: string, rightLabel: string, rightText: string) => void;
   openNotebook: (path: string, content: string) => void;
@@ -241,13 +251,25 @@ export const useQueryStore = create<QueryState>()(
       };
     }),
 
-  openFile: (path, content) =>
+  openFile: (path, content, preview = false) => {
+    // Set when the open recycles an existing preview tab in place (keeps its id).
+    // Dispatched after the state update so QueryPage can drop the per-id state it
+    // holds outside the store (see the event dispatch below).
+    let reusedTabId: string | null = null;
     set((state) => {
-      // Re-activate an existing tab for this path
+      // Re-activate an existing tab for this path. A file that already has a tab is
+      // never demoted to preview; a permanent open (double-click) of a file that is
+      // currently previewed promotes that preview tab in place.
       const existing = state.tabs.find((t) => t.path === path);
       if (existing) {
-        if (existing.id === state.activeTabId) return {};
+        const tabs = !preview && existing.preview
+          ? patchTab(state.tabs, existing.id, { preview: false })
+          : state.tabs;
+        if (existing.id === state.activeTabId) {
+          return tabs === state.tabs ? {} : { tabs };
+        }
         return {
+          tabs,
           activeTabId: existing.id,
           sql: existing.sql,
           selectedSql: "",
@@ -257,16 +279,56 @@ export const useQueryStore = create<QueryState>()(
         };
       }
 
-      // Open a new tab
+      const kind  = kindFromPath(path);
+      const title = path.split("/").pop() ?? path;
+
+      // Preview open: reuse the one existing preview tab when it's clean AND idle, so
+      // browsing files doesn't accumulate tabs. A dirty preview is never silently
+      // discarded — it's promoted (below) and a fresh preview tab opened instead. A
+      // *running* preview is likewise not recycled: an in-flight query is bound to
+      // this tab id (runQuery/WaitForQueryResult/setTabRunning capture it) and must
+      // not land on a tab now showing a different file — promote it and open fresh.
+      // A preview that is the current split target is also not recycled: swapping its
+      // file in place would silently pull the split pane onto the new file (and, since
+      // we also reassign activeTabId, collapse both panes onto the same tab) — promote
+      // it (keeping the split on its file) and open the new file as a fresh preview.
+      if (preview) {
+        const previewTab = state.tabs.find((t) => t.preview);
+        if (
+          previewTab &&
+          previewTab.id !== state.splitTabId &&
+          previewTab.sql === previewTab.savedSql &&
+          !previewTab.isRunning
+        ) {
+          reusedTabId = previewTab.id;
+          const updatedTabs = patchTab(state.tabs, previewTab.id, {
+            path, kind, title, sql: content, savedSql: content,
+            result: null, error: null, orphaned: undefined, preview: true,
+          });
+          return {
+            tabs: updatedTabs,
+            activeTabId: previewTab.id,
+            sql: content,
+            selectedSql: "",
+            currentFile: path,
+            result: null,
+            error: null,
+          };
+        }
+      }
+
+      // Promote any dirty/running preview tab so the new preview cleanly replaces it
+      // as the single preview. (No-op when not opening as preview.)
+      const baseTabs = preview
+        ? state.tabs.map((t) => (t.preview ? { ...t, preview: false } : t))
+        : state.tabs;
+
       const newTab = makeTab({
-        path,
-        kind: kindFromPath(path),
-        title: path.split("/").pop() ?? path,
-        sql: content,
-        savedSql: content,
+        path, kind, title, sql: content, savedSql: content,
+        ...(preview ? { preview: true } : {}),
       });
       return {
-        tabs: [...state.tabs, newTab],
+        tabs: [...baseTabs, newTab],
         activeTabId: newTab.id,
         sql: content,
         selectedSql: "",
@@ -274,6 +336,22 @@ export const useQueryStore = create<QueryState>()(
         result: null,
         error: null,
       };
+    });
+    // A recycled preview keeps its tab id, so any per-id state QueryPage holds
+    // *outside* the store — result history, history/compare selection, in-flight
+    // file re-reads — would otherwise leak the previous file's results into the
+    // reused tab. Signal it to drop that state, mirroring the Tab.result/error reset
+    // above. (Dispatched after set(), same pattern as markSaved's thaw:file-saved.)
+    if (reusedTabId !== null && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("thaw:tab-reused", { detail: { tabId: reusedTabId } }));
+    }
+  },
+
+  promoteTab: (id) =>
+    set((state) => {
+      const tab = state.tabs.find((t) => t.id === id);
+      if (!tab?.preview) return {};
+      return { tabs: patchTab(state.tabs, id, { preview: false }) };
     }),
 
   openScratch: () =>
@@ -508,10 +586,15 @@ export const useQueryStore = create<QueryState>()(
   // ── active-tab mutations ──────────────────────────────────────────────────
 
   setSql: (sql) =>
-    set((state) => ({
-      sql,
-      tabs: patchTab(state.tabs, state.activeTabId, { sql }),
-    })),
+    set((state) => {
+      const active = state.tabs.find((t) => t.id === state.activeTabId);
+      // Editing a preview tab pins it (VS Code promotes a preview on first edit) —
+      // clear the flag as soon as the buffer diverges from its saved baseline.
+      const patch = active?.preview && sql !== active.savedSql
+        ? { sql, preview: false }
+        : { sql };
+      return { sql, tabs: patchTab(state.tabs, state.activeTabId, patch) };
+    }),
 
   setSelectedSql: (selectedSql) => set({ selectedSql }),
 
@@ -659,6 +742,7 @@ export const useQueryStore = create<QueryState>()(
         result: null,
         diff: null,
         mcpOrigin: undefined, // MCP origin is session-only; don't persist
+        preview: undefined,   // preview is session-only; restored tabs are permanent
         sql:      t.path ? "" : t.sql,
         savedSql: t.path ? "" : t.savedSql,
       })),

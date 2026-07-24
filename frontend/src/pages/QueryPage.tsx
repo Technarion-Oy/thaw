@@ -337,6 +337,35 @@ export default function QueryPage() {
     useQueryStore.getState().tabs.forEach(rereadTab);
   }, [rereadTab]);
 
+  // A preview tab was recycled in place to show a different file (VS Code–style
+  // reuse in queryStore.openFile — same tab id, new path/content). The store resets
+  // Tab.result/error, but the per-tab result history, history/compare selection, and
+  // the file-read sequence guard live here keyed by tab id, so they'd otherwise leak
+  // the previous file's results into the reused tab. Drop them for that id.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tabId = (e as CustomEvent<{ tabId?: string }>).detail?.tabId;
+      if (!tabId) return;
+      const drop = <V,>(prev: Map<string, V>) => {
+        if (!prev.has(tabId)) return prev;
+        const m = new Map(prev);
+        m.delete(tabId);
+        return m;
+      };
+      setTabHistories(drop);
+      setTabHistoryIds(drop);
+      setTabCompareIds(drop);
+      // Supersede any in-flight re-read of the *previous* file so its late completion
+      // can't clobber the reused tab with stale content. Bump (not delete) the
+      // sequence: deleting resets it to 0, so the next rereadTab would restart at
+      // seq=1 and could collide with a still-pending seq=1 read; bumping guarantees
+      // every future read gets a seq strictly greater than any captured before reuse.
+      readSeqRef.current.set(tabId, (readSeqRef.current.get(tabId) ?? 0) + 1);
+    };
+    window.addEventListener("thaw:tab-reused", handler);
+    return () => window.removeEventListener("thaw:tab-reused", handler);
+  }, []);
+
   // Reflect external edits: when the file watcher reports any change, re-read
   // every open file-backed tab. We deliberately don't match the event's
   // directory against tab paths — native open-dialogs return canonical

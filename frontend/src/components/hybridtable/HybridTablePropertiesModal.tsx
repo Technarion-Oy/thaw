@@ -15,6 +15,8 @@ import {
   CreateHybridTableIndex, DropHybridTableIndex, GetTableColumnsWithTypes,
   HybridIndexColumnOptions,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -212,6 +214,11 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
 
   useEffect(() => { reload(); loadIndexes(); loadColumns(); }, [reload, loadIndexes, loadColumns]);
 
+  const objTags = useObjectTags({
+    kind: "HYBRID TABLE", db, schema, name,
+    alter: (clause) => AlterHybridTable(db, schema, name, clause),
+  });
+
   const tableRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -389,6 +396,7 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

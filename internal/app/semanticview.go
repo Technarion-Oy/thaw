@@ -90,29 +90,3 @@ func (a *App) ListSemanticDimensionsForMetric(database, schema, name, metric str
 		snowflake.Qualify(database, schema, name), snowflake.QuoteIdent(metric))
 	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
-
-// GetSemanticViewTags returns the tags currently applied to the given semantic
-// view, via the INFORMATION_SCHEMA.TAG_REFERENCES table function (object domain
-// SEMANTIC VIEW). Unlike the ACCOUNT_USAGE.TAG_REFERENCES view this reflects
-// changes immediately (no propagation latency), which suits an interactive tag
-// editor. The raw QueryResult is returned (tag_database / tag_schema / tag_name /
-// tag_value columns) so the properties modal can render each tag as a removable
-// chip. The caller treats an error as "no tags available" and still allows
-// SET/UNSET TAG.
-func (a *App) GetSemanticViewTags(database, schema, name string) (*snowflake.QueryResult, error) {
-	client := a.currentClient()
-	if client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	fqn := fmt.Sprintf("%s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	sql := fmt.Sprintf(
-		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE "+
-			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', 'SEMANTIC VIEW')) "+
-			"ORDER BY TAG_DATABASE, TAG_SCHEMA, TAG_NAME",
-		// EscapeTextLit (not EscapeStringLit): QuoteIdent doubles " but not \, so a
-		// backslash in an identifier must be doubled to survive the single-quoted
-		// literal rather than being read as a Snowflake escape sequence.
-		snowflake.QuoteIdent(database), snowflake.EscapeTextLit(fqn))
-	return client.Execute(a.fctx(FeatureObjectEditor), sql)
-}

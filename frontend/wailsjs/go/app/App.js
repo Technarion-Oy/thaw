@@ -194,6 +194,10 @@ export function AlterStreamlit(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStreamlit'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterTable'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -212,6 +216,10 @@ export function AlterUserProperty(arg1, arg2, arg3) {
 
 export function AlterView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterView'](arg1, arg2, arg3, arg4);
+}
+
+export function AlterWarehouse(arg1, arg2) {
+  return window['go']['app']['App']['AlterWarehouse'](arg1, arg2);
 }
 
 export function AlterWarehouseAbortAllQueries(arg1) {
@@ -978,10 +986,6 @@ export function GetColumnTagReferences(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetColumnTagReferences'](arg1, arg2, arg3, arg4);
 }
 
-export function GetCortexSearchServiceTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetCortexSearchServiceTags'](arg1, arg2, arg3);
-}
-
 export function GetCurrentRegion() {
   return window['go']['app']['App']['GetCurrentRegion']();
 }
@@ -992,10 +996,6 @@ export function GetCurrentUser() {
 
 export function GetDataMetricFunctionReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetDataMetricFunctionReferences'](arg1, arg2, arg3);
-}
-
-export function GetDataMetricFunctionTags(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['GetDataMetricFunctionTags'](arg1, arg2, arg3, arg4);
 }
 
 export function GetDatabaseCrossDeps(arg1, arg2) {
@@ -1078,10 +1078,6 @@ export function GetJoinPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetJoinPolicyReferences'](arg1, arg2, arg3);
 }
 
-export function GetJoinPolicyTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetJoinPolicyTags'](arg1, arg2, arg3);
-}
-
 export function GetKernelPythonVersion(arg1) {
   return window['go']['app']['App']['GetKernelPythonVersion'](arg1);
 }
@@ -1108,10 +1104,6 @@ export function GetMCPSessionConfig(arg1) {
 
 export function GetMaskingPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetMaskingPolicyReferences'](arg1, arg2, arg3);
-}
-
-export function GetModelTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetModelTags'](arg1, arg2, arg3);
 }
 
 export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
@@ -1178,10 +1170,6 @@ export function GetPrivacyPolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetPrivacyPolicyReferences'](arg1, arg2, arg3);
 }
 
-export function GetPrivacyPolicyTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetPrivacyPolicyTags'](arg1, arg2, arg3);
-}
-
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetProcedureParams'](arg1, arg2, arg3, arg4);
 }
@@ -1238,10 +1226,6 @@ export function GetSecretStorageInfo() {
   return window['go']['app']['App']['GetSecretStorageInfo']();
 }
 
-export function GetSemanticViewTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetSemanticViewTags'](arg1, arg2, arg3);
-}
-
 export function GetServiceContainers(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetServiceContainers'](arg1, arg2, arg3);
 }
@@ -1292,10 +1276,6 @@ export function GetStageFilePreview(arg1, arg2) {
 
 export function GetStorageLifecyclePolicyReferences(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetStorageLifecyclePolicyReferences'](arg1, arg2, arg3);
-}
-
-export function GetStorageLifecyclePolicyTags(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetStorageLifecyclePolicyTags'](arg1, arg2, arg3);
 }
 
 export function GetSystemRAMGB() {
@@ -2096,6 +2076,10 @@ export function SaveSnowparkVenvPath(arg1) {
 
 export function ScanMigrationSource(arg1) {
   return window['go']['app']['App']['ScanMigrationSource'](arg1);
+}
+
+export function SearchAccountObjects(arg1, arg2) {
+  return window['go']['app']['App']['SearchAccountObjects'](arg1, arg2);
 }
 
 export function SearchFiles(arg1, arg2, arg3) {

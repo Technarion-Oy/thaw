@@ -90,7 +90,8 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
+import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -307,6 +308,16 @@ interface ContextMenu {
   colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string; comment: string }; // set for nodeType === "col"
 }
 
+// INFORMATION_SCHEMA is a Snowflake-owned, read-only system schema: it holds only
+// views and table functions, supports no DDL / Time Travel / tagging. Given a
+// "schema:DB:SCHEMA" node key, report whether it points at that schema so the
+// sidebar can hide the infeasible actions (Create Object, Import Data, Backup
+// Sets, …) and open Properties read-only. Mirrors the backend's ListUserSchemas
+// exclusion (internal/app/objects.go).
+function isInfoSchema(nodeKey: string): boolean {
+  return nodeKey.split(":")[2] === "INFORMATION_SCHEMA";
+}
+
 // DROPPED_KIND_ORDER fixes the section order in the "Show Dropped Objects"
 // modals so groups render in a stable, familiar sequence rather than result
 // order. Kinds not listed here sort last (alphabetically among themselves).
@@ -512,23 +523,70 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
 const DDL_CACHE_TTL = 60_000; // ms
 const ddlCache = new Map<string, { ddl: string; ts: number }>();
 
-// Keep only obj: nodes whose title matches the query; prune empty parents.
-// Parent task nodes (obj: keys with children) are included if any descendant
-// matches OR if the node's own title matches.
-function filterTree(nodes: DataNode[], query: string): DataNode[] {
-  const lower = query.toLowerCase();
-  return nodes.reduce<DataNode[]>((acc, node) => {
-    const key      = String(node.key);
-    const children = (node as any).children as DataNode[] | undefined;
-    if (children !== undefined) {
-      const filtered = filterTree(children, query);
-      const selfMatch = key.startsWith("obj:") && String(node.title).toLowerCase().includes(lower);
-      if (filtered.length > 0 || selfMatch) acc.push({ ...node, children: filtered });
-    } else if (key.startsWith("obj:")) {
-      if (String(node.title).toLowerCase().includes(lower)) acc.push(node);
+// Cap how many matched objects the search renders. A broad pattern (e.g. `.*`)
+// can match thousands of objects; the tree isn't virtualized, so rendering (and
+// auto-expanding) them all locks up the UI. We keep the first N and prompt the
+// user to refine. The backend LIMIT (accountSearchRowLimit) bounds the fetch;
+// this bounds the render.
+const SEARCH_RESULT_LIMIT = 500;
+
+// Options for the search type-filter, in canonical KIND_ORDER. The backend
+// account search runs one SHOW … IN ACCOUNT per selected kind, so any subset is
+// cheap — no fast/slow distinction to surface.
+const KIND_FILTER_OPTIONS = KIND_ORDER.map((k) => ({ label: KIND_LABEL[k] ?? k, value: k }));
+
+// buildSearchTree groups a flat list of account-wide search hits (from
+// SearchAccountObjects, each carrying its database) into the same
+// db → schema → type-group → object DataNode shape the lazily-loaded tree uses,
+// so the existing renderer, context menus, and on-expand column/file loading all
+// work unchanged. TASK hits are threaded through buildTaskTree per schema.
+function buildSearchTree(hits: snowflake.SnowflakeObject[], dbtEnabled: boolean): DataNode[] {
+  // db -> schema -> kind -> objects
+  const byDb = new Map<string, Map<string, Map<string, snowflake.SnowflakeObject[]>>>();
+  for (const o of hits) {
+    const kind = (o.kind || "OTHER").toUpperCase();
+    if (kind === "DBT PROJECT" && !dbtEnabled) continue;
+    const db = o.database || "";
+    const schema = o.schema || "";
+    let schemas = byDb.get(db);
+    if (!schemas) { schemas = new Map(); byDb.set(db, schemas); }
+    let kinds = schemas.get(schema);
+    if (!kinds) { kinds = new Map(); schemas.set(schema, kinds); }
+    let arr = kinds.get(kind);
+    if (!arr) { arr = []; kinds.set(kind, arr); }
+    arr.push(o);
+  }
+
+  const dbNodes: DataNode[] = [];
+  for (const db of Array.from(byDb.keys()).sort()) {
+    const schemas = byDb.get(db)!;
+    const schemaNodes: DataNode[] = [];
+    for (const schema of Array.from(schemas.keys()).sort()) {
+      const kinds = schemas.get(schema)!;
+      const sortedKinds = [
+        ...KIND_ORDER.filter((k) => kinds.has(k)),
+        ...Array.from(kinds.keys()).filter((k) => !KIND_ORDER.includes(k)).sort(),
+      ];
+      const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
+        title:    KIND_LABEL[kind] ?? kind,
+        key:      `type:${db}:${schema}:${kind}`,
+        icon:     typeGroupIcon(),
+        children: kind === "TASK"
+          ? buildTaskTree(kinds.get(kind)!, db, schema)
+          : kinds.get(kind)!.map((o) => ({
+              title:     o.name,
+              key:       `obj:${db}:${schema}:${kind}:${o.name}`,
+              icon:      kindIcon(kind),
+              isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY" && kind !== "STAGE" && kind !== "DBT PROJECT",
+              arguments: o.arguments ?? "",
+              rowCount:  o.rowCount,
+            })),
+      }));
+      schemaNodes.push({ title: schema, key: `schema:${db}:${schema}`, icon: schemaIcon(), children: typeNodes });
     }
-    return acc;
-  }, []);
+    dbNodes.push({ title: db, key: `db:${db}`, icon: databaseIcon(), children: schemaNodes });
+  }
+  return dbNodes;
 }
 
 // Collect keys of all non-leaf nodes (used to auto-expand filtered results).
@@ -813,7 +871,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [viewPropsModal, setViewPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createSequenceModal, setCreateSequenceModal] = useState<{ db: string; schema: string } | null>(null);
   const [sequencePropsModal, setSequencePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
-  const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [schemaPropsModal, setSchemaPropsModal] = useState<{ db: string; schema: string; name: string; readOnly?: boolean } | null>(null);
   const [dbPropsModal, setDbPropsModal] = useState<{ db: string; name: string } | null>(null);
   const [createStreamModal, setCreateStreamModal] = useState<{ db: string; schema: string } | null>(null);
   const [streamPropsModal, setStreamPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -904,22 +962,72 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);
   const [depsModal, setDepsModal] = useState<{ db: string; schema: string; kind: string; name: string; args: string } | null>(null);
+  // Advanced object search: free-text (or regex) query, a match-case toggle, and
+  // a multi-select object-kind filter. The predicate is compiled once per query
+  // (memoized below) and threaded through filterTree.
   const [searchQuery, setSearchQuery]               = useState("");
+  const [regexMode, setRegexMode]                   = useState(false);
+  const [caseSensitive, setCaseSensitive]           = useState(false);
+  const [kindFilter, setKindFilter]                 = useState<string[]>([]);
+  // Debounced copy of the query — the account-wide backend search only fires once
+  // the query settles (~250 ms) so a fast typist doesn't issue a SearchAccountObjects
+  // request per keystroke.
+  const [debouncedQuery, setDebouncedQuery]         = useState("");
+  // Object kinds whose SHOW … IN ACCOUNT hit the backend row cap, so their results
+  // may be incomplete — surfaced as a distinct warning (separate from the render cap).
+  const [searchCappedKinds, setSearchCappedKinds]   = useState<string[]>([]);
   const searchInputRef = useRef<InputRef>(null);
+  // Bumped whenever the search is torn down or superseded; the in-flight
+  // SearchAccountObjects fetch compares its captured generation before committing,
+  // so a cleared or stale response never overwrites the current results.
+  const searchGenRef = useRef(0);
 
-  // ⌘⇧F / Ctrl+Shift+F — focus the object browser search input.
+  const searchPredicate = useMemo(
+    () => buildSearchPredicate(searchQuery, regexMode, caseSensitive, kindFilter),
+    [searchQuery, regexMode, caseSensitive, kindFilter],
+  );
+  // A search only runs once at least one object type is selected. Searching every
+  // kind means ~45 broad SHOW … IN ACCOUNT metadata queries (one per kind, each
+  // scanning all databases) with no cheaper account-wide alternative, so we make
+  // the type filter the required scope: one query per selected kind, always fast.
+  // `searchActive` = a real search is running; `needsKindSelection` = the user has
+  // typed a query but not yet chosen a type, so we prompt instead of scanning.
+  const searchActive = kindFilter.length > 0;
+  const needsKindSelection = !searchActive && !!searchQuery.trim();
+  const searchEngaged = searchActive || needsKindSelection;
+
+  // ⌘⇧F / Ctrl+Shift+F — focus the object browser search input. The keydown
+  // dispatcher lives here too: nothing else in the app fired the event, so the
+  // shortcut was dead (finding 1). Keeping the custom event lets other callers
+  // (menus, MCP) focus the search box without reaching into this component.
   useEffect(() => {
-    const handler = () => searchInputRef.current?.focus();
-    window.addEventListener("thaw:focus-object-search", handler);
-    return () => window.removeEventListener("thaw:focus-object-search", handler);
+    const focus = () => searchInputRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:focus-object-search"));
+      }
+    };
+    window.addEventListener("thaw:focus-object-search", focus);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("thaw:focus-object-search", focus);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, []);
   // Two separate expansion states so the cascade never touches the user's own
   // tree navigation state. On clear we just wipe searchExpandedKeys.
   const [expandedKeys, setExpandedKeys]             = useState<Key[]>([]);
   const [searchExpandedKeys, setSearchExpandedKeys] = useState<Key[]>([]);
-  // searchResults holds a full copy of the tree built exclusively for the
-  // active search cascade. treeData is NEVER written to by cascade loads.
+  // searchResults holds the tree built from the backend account search
+  // (buildSearchTree). treeData is NEVER written to by search, so clearing the
+  // search leaves the user's own expansion intact.
   const [searchResults, setSearchResults]           = useState<DataNode[]>([]);
+  const [searchLoading, setSearchLoading]           = useState(false);
+  // Bumped after a catalog mutation (drop / create / rename) to re-run the active
+  // account search so its results reflect the change instead of showing stale or
+  // missing objects.
+  const [searchRefreshToken, setSearchRefreshToken] = useState(0);
   const loadingNodes    = useRef<Set<string>>(new Set());
   const [loadingGitNodes, setLoadingGitNodes] = useState<Set<string>>(new Set());
   const [loadingTreeNodes, setLoadingTreeNodes] = useState<Set<string>>(new Set());
@@ -1012,64 +1120,98 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     };
   }, [resizingTree]);
 
-  // Cascade-load the full object tree into searchResults (never treeData).
-  // treeData stays pristine, so clearing the search just resets searchResults.
+  // Debounce the query into `debouncedQuery` so the backend search fires once
+  // typing pauses, not per keystroke. The immediate `searchQuery` still drives
+  // client-side filtering of already-loaded results for instant feedback.
   useEffect(() => {
-    if (!searchQuery) return;
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 250);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
-    // Step 1: ensure databases are loaded.
-    if (!loaded) {
-      loadDatabases();
-      return; // re-runs when `loaded` flips true
-    }
+  // Keep the latest search results reachable from effects without adding them as
+  // a dependency (so re-filtering on a predicate change doesn't re-run the fetch).
+  const searchResultsRef = useRef<DataNode[]>([]);
+  searchResultsRef.current = searchResults;
 
-    // Step 2: on first activation seed searchResults from the current tree.
-    if (!searchWasActive.current) {
-      setSearchResults([...treeData]); // shallow copy — cascade writes new refs
-      searchWasActive.current = true;
-      return; // re-runs when searchResults initialises
-    }
+  // What the backend query depends on. The fetch runs only once ≥1 type is
+  // selected (one SHOW … IN ACCOUNT per selected kind). In regex mode the query
+  // text is NOT pushed to the server (we fetch all of the selected kinds and
+  // filter names client-side), so refining a regex doesn't refetch — only the
+  // kind set does. Substring mode pushes the debounced text as a LIKE, so a
+  // non-empty query only refetches once typing settles.
+  const namePattern = regexMode ? "" : debouncedQuery.trim();
+  const fetchActive = searchActive; // requires at least one object type
+  const searchServerKey = fetchActive ? JSON.stringify([namePattern, [...kindFilter].sort()]) : "";
 
-    if (searchResults.length === 0) return; // not yet seeded
-
-    // Step 3: trigger schema loads for db nodes without children.
-    let waiting = false;
-    for (const dbNode of searchResults) {
-      const key = String(dbNode.key);
-      if (!(dbNode as any).children && !loadingNodes.current.has(key)) {
-        loadingNodes.current.add(key);
-        onLoadData(dbNode as any, setSearchResults).finally(() => loadingNodes.current.delete(key));
-        waiting = true;
-      }
-    }
-    if (waiting) return; // re-runs when searchResults gains schema children
-
-    // Step 4: trigger object loads for schema nodes without children.
-    // NOTE: basicOnly=true means only TABLEs, VIEWs, and SEQUENCEs are
-    // searched. Extended types (PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
-    // etc.) won't appear in search results. This is a deliberate trade-off:
-    // 1 query per schema instead of 11.
-    for (const dbNode of searchResults) {
-      for (const schemaNode of ((dbNode as any).children ?? []) as DataNode[]) {
-        const key = String(schemaNode.key);
-        if (!(schemaNode as any).children && !loadingNodes.current.has(key)) {
-          loadingNodes.current.add(key);
-          onLoadData(schemaNode as any, setSearchResults, true).finally(() => loadingNodes.current.delete(key));
-          waiting = true;
-        }
-      }
-    }
-    if (waiting) return; // re-runs when searchResults gains object children
-
-    // Step 5: all data loaded — expand every parent that contains a match.
-    setSearchExpandedKeys(getAllParentKeys(filterTree(searchResults, searchQuery)));
+  // Run the account-wide backend search. One SHOW … IN ACCOUNT per selected kind
+  // (via App.SearchAccountObjects) replaces the old O(databases × schemas)
+  // per-schema cascade. Results are grouped back into the normal tree shape; the
+  // generation guard drops a response from a superseded/cleared search.
+  useEffect(() => {
+    if (!fetchActive || !isConnected) return;
+    const gen = ++searchGenRef.current;
+    searchWasActive.current = true;
+    setSearchLoading(true);
+    SearchAccountObjects(namePattern, kindFilter)
+      .then((res) => {
+        if (searchGenRef.current !== gen) return;
+        const tree = buildSearchTree(res?.objects ?? [], featureFlags.dbtProjectBrowser);
+        setSearchResults(tree);
+        setSearchCappedKinds(res?.cappedKinds ?? []);
+        setSearchExpandedKeys(getAllParentKeys(filterTreeLimited(tree, searchPredicate.matches, SEARCH_RESULT_LIMIT).nodes));
+      })
+      .catch((e) => {
+        if (searchGenRef.current !== gen) return;
+        console.error(e);
+        setSearchResults([]);
+        setSearchCappedKinds([]);
+      })
+      .finally(() => {
+        if (searchGenRef.current === gen) setSearchLoading(false);
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, searchResults, loaded]);
+  }, [fetchActive, searchServerKey, isConnected, searchRefreshToken]);
 
-  const displayData = useMemo(
-    () => (searchQuery ? filterTree(searchResults, searchQuery) : treeData),
-    [searchResults, treeData, searchQuery],
+  // Recompute the auto-expanded set when the predicate changes without a refetch
+  // (regex text refinement, case toggle) — reads the current results via ref so
+  // it doesn't fire on lazy column/file loads, which would clobber manual
+  // collapses.
+  useEffect(() => {
+    if (!searchActive) return;
+    setSearchExpandedKeys(getAllParentKeys(filterTreeLimited(searchResultsRef.current, searchPredicate.matches, SEARCH_RESULT_LIMIT).nodes));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchPredicate, searchActive]);
+
+  // Tear down search state when the search fully clears (no query and no kind
+  // filter). treeData is intentionally left untouched — search only ever writes
+  // searchResults, so the user's own tree expansion survives.
+  useEffect(() => {
+    if (!searchActive && searchWasActive.current) {
+      searchGenRef.current += 1; // drop any in-flight response
+      searchWasActive.current = false;
+      setSearchResults([]);
+      setSearchExpandedKeys([]);
+      setSearchCappedKinds([]);
+      setSearchLoading(false);
+    }
+  }, [searchActive]);
+
+  const searchDisplay = useMemo(
+    () =>
+      searchActive
+        ? filterTreeLimited(searchResults, searchPredicate.matches, SEARCH_RESULT_LIMIT)
+        : { nodes: treeData, matched: 0, truncated: false },
+    [searchResults, treeData, searchActive, searchPredicate],
   );
+  const displayData = searchDisplay.nodes;
+  // True when the search matched more than we render — the UI prompts to refine.
+  const searchTruncated = searchActive && searchDisplay.truncated;
+
+  // True while an active search is still resolving — either the query debounce
+  // hasn't caught up or the backend fetch is in flight. Used to show a
+  // "searching" spinner instead of flashing "no match" before results arrive.
+  const searchSettling =
+    searchActive && (searchLoading || (!!searchQuery && searchQuery !== debouncedQuery));
 
   // Visible nodes in top-to-bottom order, honoring the controlled expanded set —
   // used to resolve Shift+click range selection in the object store.
@@ -1132,20 +1274,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setLoaded(false);
     setTreeData([]);
     setSearchQuery("");
+    setDebouncedQuery("");
+    setKindFilter([]);
     setSearchResults([]);
+    setSearchCappedKinds([]);
     setExpandedKeys([]);
     setSearchExpandedKeys([]);
     searchWasActive.current = false;
+    searchGenRef.current += 1;
+    setSearchLoading(false);
     loadingNodes.current.clear();
     setLoadingTreeNodes(new Set());
     useObjectStore.getState().setDatabases([]);
     doLoadDatabases();
   };
 
-  // commit is setSearchResults when called from the cascade; omitted (→ setTreeData)
-  // for user-triggered tree expansion. Cascade results never touch treeData.
-  // basicOnly skips extended object types (PROCEDURE, FUNCTION, TASK, etc.)
-  // for faster loading during the search cascade.
+  // commit is setSearchResults when called for search (results never touch
+  // treeData); omitted (→ setTreeData) for user-triggered tree expansion.
+  // basicOnly skips extended object types (PROCEDURE, FUNCTION, TASK, etc.) for
+  // faster loading — retained for callers that still pass it.
   const onLoadData = async (
     node: DataNode & { children?: DataNode[] },
     commit?: React.Dispatch<React.SetStateAction<DataNode[]>>,
@@ -1604,10 +1751,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   //
   // `reveal` (used after a create) force-expands the new object's
   // schema → type path so a brand-new type group opens automatically.
+  // Re-run the active account search after a catalog mutation so its results
+  // don't show a dropped object (or miss a newly created / renamed one). No-op
+  // when no search is active; the backend SHOW … IN ACCOUNT re-query reflects the
+  // committed DDL, so callers just fire this after the mutation succeeds.
+  const refreshActiveSearch = () => {
+    if (searchWasActive.current) setSearchRefreshToken((t) => t + 1);
+  };
+
   const refreshDatabaseByName = async (
     db: string,
     reveal?: { schema: string; kind?: string },
   ) => {
+    refreshActiveSearch();
     await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
 
@@ -3628,6 +3784,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           await DropDatabase(db, dropMode);
           useObjectStore.getState().removeDatabase(db);
           setTreeData((prev) => prev.filter((n) => n.key !== `db:${db}`));
+          refreshActiveSearch();
         } catch (e) {
           contextMsg.error(String(e));
         }
@@ -3682,6 +3839,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           await DropSchema(db, schema, dropMode);
           useObjectStore.getState().removeSchema(db, schema);
           setTreeData((prev) => removeNode(prev, `schema:${db}:${schema}`));
+          refreshActiveSearch();
         } catch (e) {
           contextMsg.error(String(e));
         }
@@ -3996,8 +4154,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
 
     // Schemas get a dedicated editable properties modal (ALTER SCHEMA options).
+    // INFORMATION_SCHEMA is read-only, so it opens the same modal in a read-only
+    // mode (no ALTER controls, no Danger zone) rather than offering edits that
+    // Snowflake always rejects.
     if (kind === "SCHEMA") {
-      setSchemaPropsModal({ db, schema, name });
+      setSchemaPropsModal({ db, schema, name, readOnly: isInfoSchema(nodeKey) });
       return;
     }
 
@@ -4364,42 +4525,68 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
       {!treeCollapsed && isConnected && (
         <div ref={treeScrollRef} style={{ height: treeHeight, overflow: "auto" }}>
-          <div style={{ padding: "0 8px 8px" }}>
+          <div style={{ padding: "0 8px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
             <Input
               ref={searchInputRef}
               size="small"
-              placeholder="Filter objects…"
+              placeholder={regexMode ? "Search objects (regex)…" : "Filter objects…"}
               prefix={<SearchOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />}
+              status={searchPredicate.regexError ? "error" : undefined}
               allowClear
               value={searchQuery}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (!val && searchWasActive.current) {
-                  setSearchResults([]);
-                  setSearchExpandedKeys([]);
-                  setExpandedKeys([]);
-                  // Strip all cached schema/object children so the tree returns
-                  // to a clean db-list-only view regardless of what was loaded
-                  // during the cascade.
-                  setTreeData((prev) =>
-                    prev.map((dbNode) => {
-                      const { children: _, ...rest } = dbNode as any;
-                      return rest as DataNode;
-                    })
-                  );
-                  loadingNodes.current.clear();
-                  setLoadingTreeNodes(new Set());
-                  searchWasActive.current = false;
-                }
-                setSearchQuery(val);
-              }}
+              // Teardown on clear is handled by the searchActive effect, which
+              // leaves treeData (the user's own expansion) intact — finding 5.
+              onChange={(e) => setSearchQuery(e.target.value)}
+              suffix={
+                <Space size={2}>
+                  <Tooltip title="Match case">
+                    <Button
+                      size="small"
+                      type={caseSensitive ? "primary" : "text"}
+                      onClick={() => setCaseSensitive((v) => !v)}
+                      style={{ height: 18, minWidth: 0, padding: "0 4px", fontSize: 11, lineHeight: "16px" }}
+                    >
+                      Aa
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title="Use regular expression">
+                    <Button
+                      size="small"
+                      type={regexMode ? "primary" : "text"}
+                      onClick={() => setRegexMode((v) => !v)}
+                      style={{ height: 18, minWidth: 0, padding: "0 4px", fontSize: 11, lineHeight: "16px" }}
+                    >
+                      .*
+                    </Button>
+                  </Tooltip>
+                </Space>
+              }
               style={{ fontSize: 12 }}
+            />
+            {searchPredicate.regexError && (
+              <Text type="danger" style={{ fontSize: 10 }}>
+                Invalid regex — matching literally
+              </Text>
+            )}
+            <Select
+              size="small"
+              mode="multiple"
+              allowClear
+              placeholder="Select object type(s) to search"
+              value={kindFilter}
+              onChange={(v) => setKindFilter(v)}
+              options={KIND_FILTER_OPTIONS}
+              maxTagCount="responsive"
+              style={{ width: "100%", fontSize: 12 }}
+              popupMatchSelectWidth={260}
             />
           </div>
 
           {loading && <Spin size="small" style={{ display: "block", margin: "16px auto" }} />}
 
-          {!loaded && !loading && (
+          {/* The account-wide search is independent of the loaded tree, so its
+              results/spinner render even before databases have been listed. */}
+          {!loaded && !loading && !searchEngaged && (
             <div style={{ padding: "16px 12px" }}>
               <Text type="secondary" style={{ cursor: "pointer", fontSize: 12 }} onClick={loadDatabases}>
                 Click to load databases
@@ -4407,15 +4594,46 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             </div>
           )}
 
-          {loaded && treeData.length === 0 && <Empty description="No databases" imageStyle={{ height: 40 }} />}
+          {loaded && treeData.length === 0 && !searchEngaged && <Empty description="No databases" imageStyle={{ height: 40 }} />}
 
-          {treeData.length > 0 && searchQuery && displayData.length === 0 && (
+          {/* A search runs only once ≥1 object type is chosen — prompt when the
+              user has typed but not yet picked a type. */}
+          {needsKindSelection && (
             <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
-              No objects match "{searchQuery}"
+              Select at least one object type to search
             </div>
           )}
 
-          {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
+          {searchActive && displayData.length === 0 && searchSettling && (
+            <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 8 }}>
+              <Spin size="small" /> Searching…
+            </div>
+          )}
+
+          {searchActive && displayData.length === 0 && !searchSettling && (
+            <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
+              {searchQuery ? <>No objects match &quot;{searchQuery}&quot;</> : "No objects of the selected type(s)"}
+            </div>
+          )}
+
+          {/* A kind whose SHOW … IN ACCOUNT hit the backend row cap may be missing
+              matches entirely (its name filter runs client-side, after the cap),
+              so this is a stronger signal than the render-cap notice below. */}
+          {searchActive && !searchSettling && searchCappedKinds.length > 0 && (
+            <div style={{ padding: "6px 12px", fontSize: 11 }}>
+              <Text type="warning" style={{ fontSize: 11 }}>
+                Results may be incomplete for {searchCappedKinds.map((k) => KIND_LABEL[k] ?? k).join(", ")} — this object type has more objects than the search scans. Add a name filter or narrow the type(s).
+              </Text>
+            </div>
+          )}
+
+          {searchTruncated && (
+            <div style={{ padding: "6px 12px", fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+              Showing first {SEARCH_RESULT_LIMIT} matches — refine your search or narrow the object type(s).
+            </div>
+          )}
+
+          {(searchActive ? displayData.length > 0 : (!searchEngaged && treeData.length > 0)) && (
             <div
               // userSelect:none stops the browser from painting a text highlight
               // across node labels during Shift/Cmd+click multi-selection.
@@ -4461,7 +4679,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 // across the visible object nodes.
                 if (nativeEvent.shiftKey) {
                   nativeEvent.stopPropagation();
-                  const expandedSet = new Set((searchQuery ? searchExpandedKeys : expandedKeys).map(String));
+                  const expandedSet = new Set((searchActive ? searchExpandedKeys : expandedKeys).map(String));
                   const flat = flattenVisibleNodes(displayData, expandedSet, []);
                   const keys = flat.map((n) => String(n.key));
                   const anchor = objAnchorKey && keys.includes(objAnchorKey) ? objAnchorKey : key;
@@ -4501,11 +4719,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   });
                 }
               }}
-              expandedKeys={searchQuery ? searchExpandedKeys : expandedKeys}
+              expandedKeys={searchActive ? searchExpandedKeys : expandedKeys}
               expandAction={"click" as any}
               motion={false as any}
               onExpand={(keys, { expanded, node }) => {
-                if (searchQuery) {
+                if (searchActive) {
                   setSearchExpandedKeys(keys as Key[]);
                   // Trigger lazy load when a node without children is expanded during search.
                   if (expanded && !(node as any).children) {
@@ -4694,7 +4912,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
               {menuItemSub("Tables & Views", <TableOutlined style={{ fontSize: 12 }} />, "create-tables", (
                 <>
@@ -4780,14 +4998,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               ), 1)}
             </>
           ))}
-          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
-          {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "schema" && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openSchemaTagReferences)}
+          {/* INFORMATION_SCHEMA is read-only: no Time Travel (Show Dropped),
+              no tables to export, no writes (Import), nothing backupable, and
+              tags can't be set on it — hide them all, leaving Insert Name +
+              read-only Properties. See isInfoSchema. */}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openSchemaTagReferences)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
-          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
-          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
@@ -5595,6 +5817,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={schemaPropsModal.db}
           schema={schemaPropsModal.schema}
           name={schemaPropsModal.name}
+          readOnly={schemaPropsModal.readOnly}
           onClose={() => setSchemaPropsModal(null)}
         />
       )}

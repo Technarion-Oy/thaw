@@ -15,7 +15,8 @@ and the three-tier object-listing cache cascade.
 | File | Purpose |
 |------|---------|
 | `AppLayout.tsx` | Root shell. Renders left `Sidebar`, centre `QueryPage`, and the draggable panels (`FileBrowser`, object `Sidebar`, `AccountPanel`) — there is no standalone Git panel (folded into `FileBrowser`) and no Export panel (DDL export lives in the Tools → Export Database DDL… dialog). Implements `useResize` hook for drag-to-resize sidebar widths (clamped 160–600 px), `ResizeHandle` component, and panel drag-and-drop reordering. Reads `panelLayoutStore` for panel order/sizes. Listens for `menu:*` Wails events (incl. `menu:git-operations`, which opens `GitOperationsDialog`; `menu:open-folder` → `gitStore.pickExportDir`; `menu:open-folder-new-window` → `gitStore.openInNewWindow`). Adjusts for macOS title bar (40 px offset). |
-| `Sidebar.tsx` | Object browser. Builds and maintains the `DataNode` tree for databases → schemas → object type groups → objects → columns/sub-nodes. Implements `loadData` (lazy expansion), `buildTaskTree` (hierarchical TASK graph), `buildEntryNodes` (stages and DBT projects), `filterTree` (search), `removeNode`/`clearNodeChildren` (surgical tree mutations), and `menuItem` (context menu factory with `disabled`/`disabledReason` for feature gating). Owns all inline modals (40+). |
+| `Sidebar.tsx` | Object browser. Builds and maintains the `DataNode` tree for databases → schemas → object type groups → objects → columns/sub-nodes. Implements `loadData` (lazy expansion), `buildTaskTree` (hierarchical TASK graph), `buildEntryNodes` (stages and DBT projects), `buildSearchTree` (groups backend account-search hits into tree nodes) + the search UI (see below), `removeNode`/`clearNodeChildren` (surgical tree mutations), and `menuItem` (context menu factory with `disabled`/`disabledReason` for feature gating). Owns all inline modals (40+). |
+| `objectSearch.ts` | Pure matching logic for the advanced object search — `buildSearchPredicate` (compiles a `{ query, regexMode, caseSensitive, kinds }` config into a memoizable `{ matches, active, regexError }` predicate) and `filterTreeLimited` / `filterTree` (prune the tree to matches, capping the number of matches kept). No React/antd runtime, so it is unit-tested directly (`objectSearch.test.ts`) in the node vitest env. |
 
 ## Key patterns in `Sidebar.tsx`
 
@@ -43,6 +44,16 @@ a flat list, so the shared `obj` entries (Tag References…, Insert Full Name, V
 Properties, Select for Comparison, Compare with…, Rename…) carry an explicit `objKind !== "TABLE"`
 guard to avoid double-rendering once they also appear inside a table submenu.
 
+### `isInfoSchema` — read-only system-schema guard
+`INFORMATION_SCHEMA` is Snowflake-owned and read-only (views + table functions only; no DDL,
+Time Travel, or tagging). The module-level `isInfoSchema(nodeKey)` helper reports whether a
+`schema:DB:SCHEMA` key points at it, and the schema context menu uses it to hide the infeasible
+items (**Create Object**, **Show Dropped Objects…**, **Export Data…**, **Import Data…**,
+**Backup Sets…**, **Tag References…**, and **Drop Schema…**), leaving only **Insert Name** and
+**Properties**. Properties opens `SchemaPropertiesModal` with `readOnly` set, so it renders as a
+value dump with no ALTER controls (issue #854). Mirrors the backend's `ListUserSchemas` exclusion
+(`internal/app/objects.go`).
+
 ### Three-tier object-listing cache
 1. `objectStore` — previously expanded schemas (instant, all types).
 2. Go TTL cache (`ListObjects` / `ListBasicObjects`) — 30 s backend cache.
@@ -67,6 +78,77 @@ called from `refreshAllDatabases` / `refreshDatabaseByName`.
 | `dbtversion:DB:SCHEMA:NAME:ver` | DBT project version |
 | `dbtdir:DB:SCHEMA:NAME:path` | DBT directory |
 | `dbtfile:DB:SCHEMA:NAME:path` | DBT file |
+
+### Advanced object search
+The sidebar's search box is an advanced, **account-wide** search backed by the server, not a walk of
+the loaded tree (issues #855 + follow-up):
+- **Backend search, not a cascade.** Typing (debounced ~250 ms) calls `App.SearchAccountObjects(namePattern, kinds)`,
+  which runs **one `SHOW <kind> IN ACCOUNT` per kind** (see `internal/snowflake/search.go`). This
+  replaced the old per-schema cascade that issued `SHOW SCHEMAS` for every database + `SHOW …` for
+  every schema — `O(databases × schemas)` round-trips, pathological on large accounts (a single
+  Streamlit meant thousands of queries). Now a Streamlit-only search is **one** query. `buildSearchTree`
+  regroups the flat hits (each carries its `database`) back into the normal
+  `db → schema → type-group → object` `DataNode` shape, so the renderer, context menus, and on-expand
+  column/file loading all work unchanged.
+- **Query** — case-insensitive substring by default; **`.*`** toggles regex mode and **`Aa`** toggles
+  case sensitivity (both in the input suffix). Invalid regex never throws — the input shows an error
+  state and the matcher degrades to a literal substring match. Substring queries are pushed to the
+  server as a `LIKE '%…%'` prefilter; **regex** queries fetch all of the selected kinds (no server
+  filter) and match client-side.
+- **Type filter is the required scope.** A search runs only once **≥1 object type** is selected
+  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER`) — each selected kind is one
+  `SHOW … IN ACCOUNT`. Searching *every* kind would mean ~45 broad account-wide metadata queries (one
+  per kind, each scanning all databases) with no cheaper account-wide alternative, so instead of a slow
+  "all types" scan the type filter is mandatory: pick the kinds you want and each is a fast, targeted
+  query. A query typed with **no type selected** shows a "Select at least one object type to search"
+  prompt rather than scanning. `searchActive` = `kindFilter.length > 0` (a search is running);
+  `needsKindSelection` = a query is typed but no type chosen; `searchEngaged` = either (used to hide the
+  normal browse tree).
+- **The predicate** is built once per query by `buildSearchPredicate` (memoized on
+  `{ query, regexMode, caseSensitive, kinds }`) and threaded into `filterTreeLimited(nodes, matches, limit)`;
+  the `RegExp` compiles a single time, not per node. It is the **precise client-side pass** (exact case,
+  regex — things SQL `LIKE` can't express) over results the backend already scoped by kind.
+  `filterTreeLimited` matches obj: nodes by **name + kind parsed from the key**, prunes empty structural
+  parents, and **preserves the full loaded subtree of a matched object** (columns / stage / git / dbt
+  files / task subtree) so expanding a hit shows real content instead of an empty node. A matched node
+  with empty loaded children is emitted as a leaf so it never renders a dead expander. (`filterTree` is
+  the unbounded wrapper — `filterTreeLimited(…, Infinity)`.)
+- **Render cap.** The Ant `Tree` isn't virtualized, so a broad pattern (e.g. `.*`) matching thousands
+  of objects would lock up the render (build + auto-expand + DOM for every node). `filterTreeLimited`
+  walks the whole tree (cheap) but **keeps only the first `SEARCH_RESULT_LIMIT` (500) matches** in tree
+  order and reports `truncated`; `displayData` and the auto-expand set both use it, and `searchTruncated`
+  drives a *"Showing first 500 matches — refine…"* notice. The backend `LIMIT` (2000/kind) bounds the
+  fetch upstream; this bounds the render.
+- **Incomplete-results warning.** The backend `LIMIT` truncates **before** a regex/wildcard-widened name
+  filter runs client-side, so a kind with more objects than the cap can silently miss matches. The
+  backend flags any such kind in `SearchAccountResult.cappedKinds`; the sidebar stores it in
+  `searchCappedKinds` and shows a distinct **warning** (*"Results may be incomplete for Tables, … — add a
+  name filter or narrow the type(s)"*), separate from — and stronger than — the render-cap notice (which
+  only reports matches *within what was fetched*).
+- **Fetch lifecycle.** `fetchActive` = `searchActive` (≥1 type). The refetch trigger is
+  `searchServerKey` — `[namePattern, kinds]`, where `namePattern` is the **debounced** text (empty in
+  regex mode). Keying off the debounced query means a non-empty query only refetches once typing settles,
+  and refining a **regex** doesn't refetch (server key unchanged) — only the client filter + auto-expand
+  recompute. A `searchGenRef` generation counter drops a response from a superseded/cleared search.
+  `searchResults` is separate from `treeData` (the user's own expansion), so clearing the search
+  leaves the browsed tree intact; teardown lives in a `searchActive` effect. `searchSettling` (debounce
+  pending or fetch in flight) shows a "Searching…" spinner instead of flashing "no match". A catalog
+  mutation re-runs the active search via `refreshActiveSearch()` → `searchRefreshToken` (see below).
+- **Focus shortcut** — **⌘⇧F / Ctrl+Shift+F** focuses the search box. A `keydown` listener in
+  `Sidebar.tsx` dispatches the `thaw:focus-object-search` window event; the event is kept so menus/MCP
+  can focus it too.
+
+Pure matching logic (`buildSearchPredicate`, `filterTree`) lives in `objectSearch.ts` and is
+unit-tested in `objectSearch.test.ts`; the backend command planner (`planAccountSearchCommands`) is
+tested in `internal/snowflake/search_test.go`.
+
+- **Live updates on mutation.** A catalog mutation (drop / create / rename) calls `refreshActiveSearch()`,
+  which bumps `searchRefreshToken` (a dependency of the fetch effect) to re-run the account search when
+  one is active, so results reflect the change instead of showing a dropped object or missing a new one.
+  It's wired into `refreshDatabaseByName` (the common object create/drop/rename path, incl. bulk delete)
+  and the DROP DATABASE / DROP SCHEMA handlers; it's a no-op when no search is active. The re-query
+  reflects the committed DDL (SHOW … IN ACCOUNT is uncached), and old results stay visible until the new
+  ones arrive (no flash).
 
 ### Task tree
 `buildTaskTree` builds a nested `DataNode` hierarchy from a flat `SnowflakeObject[]` list using
@@ -113,7 +195,7 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
 
 ## IPC calls in `Sidebar.tsx` (representative)
 
-`ListDatabases`, `ListSchemas`, `ListObjects`, `ListBasicObjects`, `ClearObjectCache`,
+`ListDatabases`, `ListSchemas`, `ListObjects`, `ListBasicObjects`, `SearchAccountObjects`, `ClearObjectCache`,
 `ClearObjectCacheForDatabase`, `GetObjectDDL`, `GetObjectProperties`, `ExportDatabaseDDL`,
 `ListDroppedTables`, `ListDroppedSchemas`, `ListDroppedDatabases`, `GetTableRetentionDays`,
 `GetERDiagramData`, `FetchNotebookContent`, `DropTaskTree`, `GetTableColumnsWithTypes`,

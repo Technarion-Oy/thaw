@@ -10,6 +10,8 @@ import {
   EyeInvisibleOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterMaskingPolicy, GetMaskingPolicyReferences } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
@@ -166,6 +168,11 @@ export default function MaskingPolicyPropertiesModal({ db, schema, name, onClose
 
   useEffect(() => { reload(); }, [reload]);
 
+  const objTags = useObjectTags({
+    kind: "MASKING POLICY", db, schema, name,
+    alter: (clause) => AlterMaskingPolicy(db, schema, name, clause),
+  });
+
   const policyRef = `"${db}"."${schema}"."${name}"`;
 
   const find = (key: string) =>
@@ -318,6 +325,7 @@ export default function MaskingPolicyPropertiesModal({ db, schema, name, onClose
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

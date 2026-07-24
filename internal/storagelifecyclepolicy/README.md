@@ -50,8 +50,8 @@ without a dedicated builder.
   (enforced by the create modal before submission).
 - `App.BuildCreateStorageLifecyclePolicySql` (in `internal/app/builders.go`) is
   the thin IPC delegator; `App.AlterStorageLifecyclePolicy` (in
-  `internal/app/storagelifecyclepolicy.go`) runs the edit clauses,
-  `App.GetStorageLifecyclePolicyTags` lists the current tags, and
+  `internal/app/storagelifecyclepolicy.go`) runs the edit clauses, the shared
+  `App.GetObjectTagReferences` lists the current tags, and
   `App.GetStorageLifecyclePolicyReferences` lists the tables a policy is applied
   to.
 - Discovery: `Client.ListExtendedObjects` runs `SHOW STORAGE LIFECYCLE POLICIES

@@ -18,6 +18,16 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]table.TableSummary, erro
 	return table.GetDatabaseTableSummary(a.fctx(FeatureObjectEditor), client, dbName)
 }
 
+// AlterTable runs an `ALTER TABLE <db>.<schema>.<name> <clause>` statement.
+// clause is everything after the table name, e.g. "SET TAG "DB"."S"."PII" = 'x'"
+// or "UNSET TAG "DB"."S"."PII"". The caller is responsible for correct SQL
+// quoting inside the clause; this method only double-quotes the table identifier.
+// It backs the Tags section of the base-table Properties modal (the object-level
+// tag editor for tables), alongside the field-specific AlterTableProperty writes.
+func (a *App) AlterTable(database, schema, name, clause string) error {
+	return a.alterObject("TABLE", database, schema, name, clause)
+}
+
 // GetTableSettings reads the current values of all modifiable table properties
 // by running SHOW TABLES and (for collation) SHOW PARAMETERS.
 func (a *App) GetTableSettings(database, schema, tbl string) (table.TableSettings, error) {

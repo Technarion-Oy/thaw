@@ -171,16 +171,43 @@ func (a *App) GetObjectTagReferences(domain, database, schema, name, args string
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
+	ctx := a.fctx(FeatureTags)
 	d, callable := tagReferenceDomain(domain)
+	// The TAG_REFERENCES table function lives in *some* database's
+	// INFORMATION_SCHEMA. Schema-level objects use their own database; account-
+	// level objects (WAREHOUSE, ROLE, INTEGRATION, ACCOUNT — like USER) don't live
+	// in a database, so any accessible database's INFORMATION_SCHEMA is used to host
+	// the call — the account-scoped result is identical regardless. A lookup failure
+	// (no accessible database) is surfaced; the caller treats it as "no tags shown".
+	infoDB := database
+	if accountLevelTagDomain(d) {
+		db, err := accountLevelFuncDatabase(ctx, client)
+		if err != nil {
+			return nil, err
+		}
+		infoDB = db
+	}
 	objName := tagReferenceObjectName(d, callable, database, schema, name, args)
 	query := fmt.Sprintf(
 		"SELECT TAG_DATABASE, TAG_SCHEMA, TAG_NAME, TAG_VALUE, LEVEL "+
 			"FROM TABLE(%s.INFORMATION_SCHEMA.TAG_REFERENCES('%s', '%s')) "+
 			"ORDER BY TAG_NAME",
-		snowflake.QuoteIdent(database),
+		snowflake.QuoteIdent(infoDB),
 		snowflake.EscapeStringLit(objName),
 		snowflake.EscapeStringLit(d))
-	return client.QuerySingle(a.fctx(FeatureTags), query)
+	return client.QuerySingle(ctx, query)
+}
+
+// accountLevelTagDomain reports whether a TAG_REFERENCES domain names an account-
+// level object — one with no database / schema qualification, whose name is a bare
+// identifier and whose INFORMATION_SCHEMA host database must be resolved separately.
+func accountLevelTagDomain(domain string) bool {
+	switch strings.ToUpper(strings.TrimSpace(domain)) {
+	case "WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT", "COMPUTE POOL", "NETWORK POLICY":
+		return true
+	default:
+		return false
+	}
 }
 
 // tagReferenceObjectName builds the object-name string literal passed to the
@@ -196,6 +223,9 @@ func tagReferenceObjectName(domain string, callable bool, database, schema, name
 		return snowflake.QuoteIdent(database)
 	case "SCHEMA":
 		return snowflake.Qualify(database, schema)
+	case "WAREHOUSE", "ROLE", "USER", "INTEGRATION", "ACCOUNT", "COMPUTE POOL", "NETWORK POLICY":
+		// Account-level objects carry only a bare name — no db / schema parts.
+		return snowflake.QuoteIdent(name)
 	default:
 		fqn := snowflake.Qualify(database, schema, name)
 		if callable {

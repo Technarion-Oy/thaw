@@ -16,9 +16,9 @@
   type node and the object node's "Properties…" entry. `RENAME TO` is reached via
   the context-menu "Rename…" item (default rename path).
 - IPC: `BuildCreatePrivacyPolicySql` + `ExecDDL` (create), `GetObjectProperties`
-  (load), `AlterPrivacyPolicy` (edit body / comment / tags / rename),
-  `GetPrivacyPolicyTags` (tag chips), and `GetPrivacyPolicyReferences`
-  (references).
+  (load), `AlterPrivacyPolicy` (edit body / comment / tags / rename), and
+  `GetPrivacyPolicyReferences` (references). The **Tags** section is the shared
+  `TagsRow` + `useObjectTags` hook (tags read via `GetObjectTagReferences`).
 - `PrivacyPolicyConfig` has no nested arrays, but the plain form-state object is
   still cast to `any` at the IPC boundary for consistency with the other create
   modals.

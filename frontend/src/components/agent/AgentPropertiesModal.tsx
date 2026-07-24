@@ -11,6 +11,8 @@ import {
   FolderOpenOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterAgent, DescribeAgent } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import Editor from "@monaco-editor/react";
 import StageFilePicker from "../shared/StageFilePicker";
 import { useThemeStore } from "../../store/themeStore";
@@ -140,6 +142,11 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
 
   useEffect(() => { reload(); loadSpec(); }, [reload, loadSpec]);
 
+  const objTags = useObjectTags({
+    kind: "AGENT", db, schema, name,
+    alter: (clause) => AlterAgent(db, schema, name, clause),
+  });
+
   const agentRef = `"${db}"."${schema}"."${name}"`;
   const find = (key: string) =>
     rows ? (rows.find((r) => r.key.toLowerCase() === key.toLowerCase())?.value ?? "") : "";
@@ -240,6 +247,7 @@ export default function AgentPropertiesModal({ db, schema, name, onClose }: Prop
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               <EditRow label="Comment" value={comment} onSave={saveComment} />
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
             </tbody>
           </table>
 

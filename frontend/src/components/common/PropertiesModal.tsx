@@ -6,7 +6,9 @@ import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutline
 import { ConfirmSwitch } from "./ConfirmSwitch";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake, table } from "../../../wailsjs/go/models";
-import { GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/app/App";
+import { GetTableSettings, AlterTableProperty, AlterTable } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 
 interface TableContext {
   db: string;
@@ -64,6 +66,11 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
       .then(setSettings)
       .catch((e) => setLoadError(String(e)));
   }, [db, schema, table]);
+
+  const objTags = useObjectTags({
+    kind: "TABLE", db, schema, name: table,
+    alter: (clause) => AlterTable(db, schema, table, clause),
+  });
 
   const startEdit = (key: PropKey, current: string) => {
     setEditKey(key);
@@ -177,6 +184,7 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
                 </tr>
               );
             })}
+            <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
           </tbody>
         </table>
       )}

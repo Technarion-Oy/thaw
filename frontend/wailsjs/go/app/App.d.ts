@@ -171,6 +171,8 @@ export function AlterStream(arg1:string,arg2:string,arg3:string,arg4:string):Pro
 
 export function AlterStreamlit(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterTable(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function AlterTag(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -180,6 +182,8 @@ export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promi
 export function AlterUserProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AlterView(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterWarehouse(arg1:string,arg2:string):Promise<void>;
 
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
 
@@ -563,15 +567,11 @@ export function GetColumnDetails(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function GetColumnTagReferences(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
-export function GetCortexSearchServiceTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
 export function GetCurrentRegion():Promise<string>;
 
 export function GetCurrentUser():Promise<string>;
 
 export function GetDataMetricFunctionReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
-export function GetDataMetricFunctionTags(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
 
@@ -613,8 +613,6 @@ export function GetIntegrationProperties(arg1:string):Promise<Array<snowflake.Pr
 
 export function GetJoinPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
-export function GetJoinPolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
 export function GetKernelPythonVersion(arg1:string):Promise<string>;
 
 export function GetLicenseText():Promise<string>;
@@ -628,8 +626,6 @@ export function GetLogPrefsLocked():Promise<config.LogPrefsLocked>;
 export function GetMCPSessionConfig(arg1:string):Promise<string>;
 
 export function GetMaskingPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
-export function GetModelTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<snowpark.NotebookCompletion>>;
 
@@ -663,8 +659,6 @@ export function GetPlatformOS():Promise<string>;
 
 export function GetPrivacyPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
-export function GetPrivacyPolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 
 export function GetProjectionPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
@@ -693,8 +687,6 @@ export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
 
 export function GetSecretStorageInfo():Promise<secrets.Info>;
 
-export function GetSemanticViewTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
 export function GetServiceContainers(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetServiceLogs(arg1:string,arg2:string,arg3:string,arg4:string,arg5:number,arg6:number):Promise<string>;
@@ -720,8 +712,6 @@ export function GetSnowsightURL():Promise<string>;
 export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetStorageLifecyclePolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
-
-export function GetStorageLifecyclePolicyTags(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function GetSystemRAMGB():Promise<number>;
 
@@ -1122,6 +1112,8 @@ export function SaveSnowparkPythonPath(arg1:string):Promise<void>;
 export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
 
 export function ScanMigrationSource(arg1:string):Promise<Array<migration.MigrationObject>>;
+
+export function SearchAccountObjects(arg1:string,arg2:Array<string>):Promise<snowflake.SearchAccountResult>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 

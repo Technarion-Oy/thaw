@@ -19,7 +19,10 @@ import {
   AlterWarehouseResume,
   AlterWarehouseAbortAllQueries,
   AlterWarehouseRename,
+  AlterWarehouse,
 } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 // ─── Size mappings ──────────────────────────────────────────────────────────
@@ -104,6 +107,12 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
   }, []);
 
   useEffect(() => { load(name); }, [name, load]);
+
+  // Tags — a warehouse is account-level, so it carries no database / schema parts.
+  const objTags = useObjectTags({
+    kind: "WAREHOUSE", db: "", schema: "", name,
+    alter: (clause) => AlterWarehouse(name, clause),
+  });
 
   // Build a lookup from the SHOW WAREHOUSES row pairs.
   const get = (key: string) => rows?.find((r) => r.key === key)?.value ?? "";
@@ -426,6 +435,9 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
                 type="text"
                 onSave={async (v) => setProp("comment", v, "Comment")}
               />
+              {(!search || "tags".includes(search.toLowerCase())) && (
+                <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+              )}
             </tbody>
           </table>
 

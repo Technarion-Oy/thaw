@@ -51,6 +51,7 @@ import { openFileInTab } from "../../utils/openFileInTab";
 import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -196,6 +197,22 @@ function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string):
   }));
 }
 
+/** Insert a node into a sibling list, maintaining dirs-first alphabetical order. */
+function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] {
+  const kids = [...siblings];
+  const isDir = !child.isLeaf;
+  const name = String(child.title ?? "");
+  let i = 0;
+  if (isDir) {
+    while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+  } else {
+    while (i < kids.length && !kids[i].isLeaf) i++;
+    while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+  }
+  kids.splice(i, 0, child);
+  return kids;
+}
+
 /** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
  *  If the parent hasn't been expanded yet (no children array), the node is not inserted
  *  — it will appear naturally when the user expands the directory. */
@@ -203,18 +220,7 @@ function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNo
   return nodes.map((n) => {
     if (n.key === parentKey) {
       if (!n.children) return n;
-      const kids = [...n.children];
-      const isDir = !child.isLeaf;
-      const name = String(child.title ?? "");
-      let i = 0;
-      if (isDir) {
-        while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-      } else {
-        while (i < kids.length && !kids[i].isLeaf) i++;
-        while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-      }
-      kids.splice(i, 0, child);
-      return { ...n, children: kids };
+      return { ...n, children: insertSorted(n.children, child) };
     }
     return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
   });
@@ -349,7 +355,7 @@ export default function FileBrowser() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Context menu ─────────────────────────────────────────────────────────
-  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean } | null>(null);
+  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean; isRoot?: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
   // ── Inline rename state (VS Code–style editing in the tree) ────────────
@@ -376,6 +382,9 @@ export default function FileBrowser() {
 
   const fileWatcherEnabled = useFeatureFlagsStore((s) => s.flags.fileWatcher);
   const gitEnabled         = useFeatureFlagsStore((s) => s.flags.gitIntegration);
+  // VS Code–style preview tabs: single-click / search-result opens go to the
+  // reusable preview tab; double-click promotes to permanent. Toggle in Editor Prefs.
+  const previewTabsEnabled = useEditorTabPrefsStore((s) => s.previewTabsEnabled);
 
   // The standalone Git panel was folded into this panel, so the Files panel now
   // owns loading the git/export config on first mount (idempotent).
@@ -427,6 +436,17 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
+
+  // Coalesce the redundant file opens a click/double-click gesture would otherwise
+  // fire. rc-tree runs onSelect on *every* click (including both clicks of a
+  // double-click), and a double-click adds a native dblclick on top — so one
+  // "open and pin" gesture could fire up to three concurrent ReadFile round-trips for
+  // one file. `openingPathsRef` skips a same-path open already in flight;
+  // `pendingPromoteRef` lets a double-click that lands before the open resolves
+  // request promotion (via onSelect, once the tab exists) instead of firing its own
+  // extra read.
+  const openingPathsRef   = useRef<Set<string>>(new Set());
+  const pendingPromoteRef = useRef<Set<string>>(new Set());
 
   // Debounced git-status refresh so the tree's status colors update live (on
   // save, external edits, file ops) without a manual refresh, while coalescing
@@ -724,11 +744,54 @@ export default function FileBrowser() {
     setAnchorKey(path);
     setSelKeys([path]);
     if (isDir) return;
-    const err = await openFileInTab(path);
+    // A same-path open already in flight (e.g. the two clicks of a double-click)
+    // shouldn't fire a second read — the first open already covers this file.
+    if (openingPathsRef.current.has(path)) return;
+    openingPathsRef.current.add(path);
+    // Single click opens in the reusable preview tab (when enabled); a double-click
+    // promotes it to permanent (see onTreeDoubleClick).
+    let err: string | null = null;
+    try {
+      err = await openFileInTab(path, previewTabsEnabled);
+    } finally {
+      openingPathsRef.current.delete(path);
+    }
     if (err) {
       message.error(`Could not open file: ${err}`);
       setSelKeys([]);
+      pendingPromoteRef.current.delete(path); // open failed — drop any pending promote
+      return;
     }
+    // If a double-click landed while this open was in flight, honor its promote intent
+    // now that the tab exists (instead of it having fired a third redundant read).
+    if (pendingPromoteRef.current.delete(path)) {
+      const tab = useQueryStore.getState().tabs.find((t) => t.path === path);
+      if (tab) useQueryStore.getState().promoteTab(tab.id);
+    }
+  };
+
+  // Double-click a file in the tree → promote it to a permanent tab (VS Code
+  // behavior). rc-tree has no double-click prop, so we bind a native handler on the
+  // tree wrapper and recover the node key from the `data-fbkey` attribute set in
+  // titleRender. The preceding click already opened (or is opening) the file as a
+  // preview, so: promote the tab if it already exists, else record the intent and let
+  // onSelect promote it once its in-flight open resolves — avoiding a redundant
+  // ReadFile of a file the click is already fetching.
+  const onTreeDoubleClick = (e: React.MouseEvent) => {
+    // A modifier+click is a selection gesture (Cmd/Ctrl toggle, Shift range), not an
+    // open — onSelect returns early for it without opening, so recording a pending
+    // promote here would never be consumed and would later silently pin an unrelated
+    // plain open of the same file. Only plain double-clicks are open-and-pin.
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const el = (e.target as HTMLElement).closest?.("[data-fbkey]") as HTMLElement | null;
+    const key = el?.dataset.fbkey;
+    if (!key || isDirKey(key)) return;
+    const existing = useQueryStore.getState().tabs.find((t) => t.path === key);
+    if (existing) {
+      useQueryStore.getState().promoteTab(existing.id);
+      return;
+    }
+    pendingPromoteRef.current.add(key);
   };
 
   const toggleExpanded = () => {
@@ -751,7 +814,7 @@ export default function FileBrowser() {
   };
 
   const handleResultClick = async (match: SearchMatch) => {
-    const err = await openFileInTab(match.path);
+    const err = await openFileInTab(match.path, previewTabsEnabled);
     if (err) {
       message.error(`Could not open file: ${err}`);
       return;
@@ -781,6 +844,34 @@ export default function FileBrowser() {
       setAnchorKey(path); // keep the Shift+range pivot aligned with the new selection
     }
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
+  };
+
+  // Right-click on the empty area of the panel (not a tree node) opens a minimal
+  // root context menu so a folder/file can be created at the workspace root — the
+  // one place a node context menu can't reach. Node right-clicks are handled by
+  // the tree's onRightClick and are skipped here (they carry a data-fbkey title).
+  const onRootContextMenu = (event: React.MouseEvent) => {
+    if (!exportDir) return;
+    // In search mode the content wrapper hosts the search input and result rows —
+    // leave those to the native context menu (right-click paste into the field,
+    // etc.) rather than popping a folder-creation menu that makes no sense there.
+    if (searchOpen) return;
+    // A right-click anywhere on a tree node (title, icon, or indent) is handled by
+    // the tree's onRightClick — .ant-tree-treenode covers the whole row, so guard
+    // on it rather than the narrower data-fbkey title span. An input/textarea guard
+    // preserves the native menu for any editable field inside the wrapper.
+    if ((event.target as HTMLElement).closest?.("input, textarea, .ant-tree-treenode")) return;
+    event.preventDefault();
+    setSelKeys([]);
+    setAnchorKey(null);
+    setFileCtxMenu({
+      x: event.clientX,
+      y: event.clientY,
+      path: exportDir,
+      name: pathBase(exportDir),
+      isDir: true,
+      isRoot: true,
+    });
   };
 
   // Paths the context-menu bulk actions operate on: the whole selection when the
@@ -1289,15 +1380,12 @@ export default function FileBrowser() {
     setEditingKey(null);
   };
 
-  const handleNewFolderStart = () => {
-    if (!fileCtxMenu) return;
-    setInlineInput({ kind: "newFolder", path: fileCtxMenu.path, value: "" });
-    setFileCtxMenu(null);
-  };
-
-  const handleNewFileStart = () => {
-    if (!fileCtxMenu) return;
-    setInlineInput({ kind: "newFile", path: fileCtxMenu.path, value: "" });
+  // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
+  // both the context menu (a node or the root) and the header toolbar buttons
+  // can share this — the root is just exportDir.
+  const startNewItem = (kind: "newFolder" | "newFile", dir: string) => {
+    if (!dir) return;
+    setInlineInput({ kind, path: dir, value: "" });
     setFileCtxMenu(null);
   };
 
@@ -1307,7 +1395,10 @@ export default function FileBrowser() {
       setInlineInput(null);
       return;
     }
-    const { kind, path, value } = inlineInput;
+    const { kind, value } = inlineInput;
+    // The target may be exportDir, which can be stored with a trailing separator —
+    // strip it so we don't build a `root//child` path.
+    const path = inlineInput.path.replace(/[/\\]+$/, "");
     const sanitized = value.trim().replace(/[/\\]/g, "");
     if (!sanitized) {
       message.error("Name cannot be empty or contain path separators");
@@ -1318,6 +1409,12 @@ export default function FileBrowser() {
       message.error("Name contains invalid characters (: \" * ? < > |)");
       return;
     }
+    // The workspace root isn't itself a tree node (treeData holds its children
+    // directly), so a root-level create inserts into the top-level list rather
+    // than via addChild, which only matches an existing parent node.
+    const isRoot = path === exportDir.replace(/[/\\]+$/, "");
+    const insert = (node: DataNode) =>
+      setTreeData(prev => (isRoot ? insertSorted(prev, node) : addChild(prev, path, node)));
     setIsSubmitting(true);
     try {
       if (kind === "newFolder") {
@@ -1325,7 +1422,7 @@ export default function FileBrowser() {
         const folderPath = `${path}${sep}${sanitized}`;
         await CreateDirectory(folderPath);
         markSelfChanged(path);
-        setTreeData(prev => addChild(prev, path, makeNode(folderPath, sanitized, true)));
+        insert(makeNode(folderPath, sanitized, true));
         message.success(`Created folder ${sanitized}`);
       } else {
         const sep = pathSep(path);
@@ -1333,7 +1430,7 @@ export default function FileBrowser() {
         const filePath = `${path}${sep}${name}`;
         await CreateFile(filePath);
         markSelfChanged(path);
-        setTreeData(prev => addChild(prev, path, makeNode(filePath, name, false)));
+        insert(makeNode(filePath, name, false));
         message.success(`Created ${name}`);
       }
       setInlineInput(null);
@@ -1494,110 +1591,122 @@ export default function FileBrowser() {
 
   return (
     <div style={{ padding: "4px 4px" }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
-        <div
-          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
-          onClick={toggleExpanded}
-          title={exportDir || "No folder open"}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          {expanded
-            ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
-            : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
-          }
-          <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
-          <Text
-            ellipsis
-            style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
-          >
-            {pathBase(exportDir) || "Files"}
-          </Text>
-        </div>
-        {/* Branch chip — folded in from the former Git panel; opens Git Operations */}
-        {gitRepo && (
+      {/* Header — two rows: (1) title + actions always fit; (2) a dedicated git
+          status row (repo only) so the branch name has room instead of being
+          crushed into the action strip. */}
+      <div style={{ padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0 }}>
+        {/* Row 1: folder title + primary actions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div
-            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-            title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
-            style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: 96, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+            style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
+            onClick={toggleExpanded}
+            // Right-click the header title area to create at the workspace root
+            // (New Folder… / New SQL File…) — no toolbar buttons needed.
+            onContextMenu={onRootContextMenu}
+            title={exportDir || "No folder open"}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />
-            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
-            </span>
+            {expanded
+              ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+              : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            }
+            <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
+            <Text
+              ellipsis
+              style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
+            >
+              {pathBase(exportDir) || "Files"}
+            </Text>
           </div>
-        )}
-        {/* Changed-file count — at a glance, and opens Git Operations */}
-        {gitRepo && gitChanged > 0 && (
-          <div
-            onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-            title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
-            style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", padding: "1px 5px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
+          {clipboard && exportDir && (
+            <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
+              <Button
+                size="small"
+                type="text"
+                icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
+                onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          )}
+          <Dropdown
+            menu={{ items: folderMenu, onClick: onFolderMenuClick }}
+            trigger={["click"]}
           >
-            <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
-              {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""}
-            </span>
-          </div>
-        )}
-        {clipboard && exportDir && (
-          <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
-            <Button
-              size="small"
-              type="text"
-              icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
-              onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        )}
-        <Dropdown
-          menu={{ items: folderMenu, onClick: onFolderMenuClick }}
-          trigger={["click"]}
-        >
-          <Tooltip title="Open / change working folder">
-            <Button
-              size="small"
-              type="text"
-              icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
-              onClick={(e) => e.stopPropagation()}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        </Dropdown>
-        <Button
-          size="small"
-          type="text"
-          icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
-          onClick={toggleSearch}
-          style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-        />
-        {gitEnabled && exportDir && (
-          <Tooltip title="Git Operations…">
-            <Button
-              size="small"
-              type="text"
-              icon={<BranchesOutlined style={{ fontSize: 11 }} />}
-              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          </Tooltip>
-        )}
-        {loaded && (
+            <Tooltip title="Open / change working folder">
+              <Button
+                size="small"
+                type="text"
+                icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
+                onClick={(e) => e.stopPropagation()}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          </Dropdown>
           <Button
             size="small"
             type="text"
-            icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-            loading={loading}
-            onClick={(e) => { e.stopPropagation(); refresh(); }}
+            icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
+            onClick={toggleSearch}
             style={{ height: 20, padding: "0 4px", minWidth: 0 }}
           />
+          {/* Git Operations button only when the folder isn't a repo — a repo's
+              entry point is the branch/changes pills on row 2 below. */}
+          {gitEnabled && exportDir && !gitRepo && (
+            <Tooltip title="Git Operations…">
+              <Button
+                size="small"
+                type="text"
+                icon={<BranchesOutlined style={{ fontSize: 11 }} />}
+                onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+              />
+            </Tooltip>
+          )}
+          {loaded && (
+            <Button
+              size="small"
+              type="text"
+              icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+              loading={loading}
+              onClick={(e) => { e.stopPropagation(); refresh(); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          )}
+        </div>
+
+        {/* Row 2: git status — branch + changed-file count, each opens Git Operations */}
+        {gitRepo && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px 1px", minWidth: 0 }}>
+            <div
+              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+              title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
+              style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, flexShrink: 1, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+            >
+              <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }} />
+              <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
+              </span>
+            </div>
+            {gitChanged > 0 && (
+              <div
+                onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+                title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
+                style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
+              >
+                <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
+                  {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""} changed
+                </span>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
       {/* Content */}
       {expanded && (
-        <div style={{ padding: "0 4px" }}>
+        <div style={{ padding: "0 4px", minHeight: 40 }} onContextMenu={onRootContextMenu}>
           {!exportDir && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0 6px" }}>
               <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No working directory selected.</Text>
@@ -1743,6 +1852,7 @@ export default function FileBrowser() {
               // still paints despite user-select:none). preventDefault on the
               // shift mousedown suppresses that without blocking the click.
               onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+              onDoubleClick={onTreeDoubleClick}
             >
               <Tree
                 treeData={treeForRender}
@@ -1835,6 +1945,22 @@ export default function FileBrowser() {
             }
           }}
         >
+          {/* ── Root menu (right-click on empty space): create at the workspace
+                root only — no destructive actions on the root directory itself. ── */}
+          {fileCtxMenu.isRoot ? (
+            <>
+              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              {clipboard && (
+                <CtxItem
+                  icon={<BlockOutlined />}
+                  label={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""}`}
+                  onClick={() => handlePaste(fileCtxMenu.path)}
+                />
+              )}
+            </>
+          ) : (
+          <>
           {/* ── File management actions ── */}
           {!ctxMulti && <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />}
           {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />}
@@ -1897,8 +2023,8 @@ export default function FileBrowser() {
           {!ctxMulti && fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={handleNewFileStart} />
+              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
             </>
           )}
 
@@ -1915,6 +2041,8 @@ export default function FileBrowser() {
                 />
               )}
             </>
+          )}
+          </>
           )}
         </div>
       )}

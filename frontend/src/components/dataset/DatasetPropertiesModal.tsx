@@ -10,6 +10,8 @@ import {
   DotChartOutlined, ReloadOutlined, PlusOutlined, MoreOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterDataset, ListDatasetVersions } from "../../../wailsjs/go/app/App";
+import TagsRow from "../shared/TagsRow";
+import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -64,6 +66,11 @@ export default function DatasetPropertiesModal({ db, schema, name, onClose }: Pr
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const objTags = useObjectTags({
+    kind: "DATASET", db, schema, name,
+    alter: (clause) => AlterDataset(db, schema, name, clause),
+  });
 
   const datasetRef = `"${db}"."${schema}"."${name}"`;
 
@@ -230,6 +237,13 @@ export default function DatasetPropertiesModal({ db, schema, name, onClose }: Pr
               </Button>
             </Space>
           )}
+
+          <div style={SECTION_HEAD}>Tags</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            </tbody>
+          </table>
 
           <div style={SECTION_HEAD}>Properties</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

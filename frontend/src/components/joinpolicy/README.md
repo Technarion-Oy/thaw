@@ -16,8 +16,9 @@
   type node and the object node's "Properties…" entry. `RENAME TO` is reached via
   the context-menu "Rename…" item (default rename path).
 - IPC: `BuildCreateJoinPolicySql` + `ExecDDL` (create), `GetObjectProperties`
-  (load), `AlterJoinPolicy` (edit body / comment / tags / rename),
-  `GetJoinPolicyTags` (tag chips), and `GetJoinPolicyReferences` (references).
+  (load), `AlterJoinPolicy` (edit body / comment / tags / rename), and
+  `GetJoinPolicyReferences` (references). The **Tags** section is the shared
+  `TagsRow` + `useObjectTags` hook (tags read via `GetObjectTagReferences`).
 - `JoinPolicyConfig` has no nested arrays, but the plain form-state object is
   still cast to `any` at the IPC boundary for consistency with the other create
   modals.

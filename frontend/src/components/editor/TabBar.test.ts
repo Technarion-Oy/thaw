@@ -47,6 +47,7 @@ describe("tabStripSignature", () => {
     ["diff", { diff: { leftLabel: "L", rightLabel: "R", leftText: "", rightText: "" } }],
     ["mcpOrigin", { mcpOrigin: true }],
     ["orphaned", { orphaned: true }],
+    ["preview", { preview: true }],
   ])("changes when the rendered field %s changes", (_field, patch) => {
     expect(sig(patch)).not.toBe(sig({}));
   });
