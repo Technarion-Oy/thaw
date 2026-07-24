@@ -68,6 +68,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/StatusBar.tsx",
         "frontend/src/components/results/cellDetailUtils.ts",
         "frontend/src/components/results/columnOrderUtils.ts",
+        "frontend/src/store/editorTabPrefsStore.ts",
         "frontend/src/store/gridStore.ts",
         "frontend/src/store/queryStore.ts",
         "frontend/src/utils/excelSheetName.ts",
@@ -138,6 +139,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/account/userPropertyUtils.ts",
         "frontend/src/components/agent/AgentPropertiesModal.tsx",
         "frontend/src/components/agent/CreateAgentModal.tsx",
         "frontend/src/components/agent/profile.ts",
