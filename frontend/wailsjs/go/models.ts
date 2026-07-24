@@ -5052,6 +5052,7 @@ export namespace snowflake {
 	    name: string;
 	    kind: string;
 	    schema: string;
+	    database?: string;
 	    arguments: string;
 	    rowCount?: number;
 	    predecessors?: string;
@@ -5066,6 +5067,7 @@ export namespace snowflake {
 	        this.name = source["name"];
 	        this.kind = source["kind"];
 	        this.schema = source["schema"];
+	        this.database = source["database"];
 	        this.arguments = source["arguments"];
 	        this.rowCount = source["rowCount"];
 	        this.predecessors = source["predecessors"];

@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package snowflake
+
+import (
+	"context"
+	"fmt"
+	"sync"
+)
+
+// kindShow pairs an object KIND with the plural noun used in its SHOW command.
+type kindShow struct {
+	kind   string
+	plural string
+}
+
+// extendedShowKinds lists every object kind NOT covered by SHOW OBJECTS, paired
+// with the plural noun in its dedicated SHOW command. It is the single source of
+// truth for both the per-schema listing (ListExtendedObjects) and the
+// account-wide search (SearchObjects), so a newly supported kind is added in one
+// place. Order matches the historical ListExtendedObjects command list.
+//
+// Basic kinds (TABLE, VIEW, SEQUENCE) are intentionally absent — they come from
+// SHOW OBJECTS, exactly as ListBasicObjects sources them per-schema.
+var extendedShowKinds = []kindShow{
+	{"DYNAMIC TABLE", "DYNAMIC TABLES"},
+	{"EXTERNAL TABLE", "EXTERNAL TABLES"},
+	{"ICEBERG TABLE", "ICEBERG TABLES"},
+	{"HYBRID TABLE", "HYBRID TABLES"},
+	{"EVENT TABLE", "EVENT TABLES"},
+	{"MATERIALIZED VIEW", "MATERIALIZED VIEWS"},
+	{"ALERT", "ALERTS"},
+	{"TAG", "TAGS"},
+	{"MASKING POLICY", "MASKING POLICIES"},
+	{"ROW ACCESS POLICY", "ROW ACCESS POLICIES"},
+	{"JOIN POLICY", "JOIN POLICIES"},
+	{"PRIVACY POLICY", "PRIVACY POLICIES"},
+	{"STORAGE LIFECYCLE POLICY", "STORAGE LIFECYCLE POLICIES"},
+	{"PASSWORD POLICY", "PASSWORD POLICIES"},
+	{"SESSION POLICY", "SESSION POLICIES"},
+	{"AGGREGATION POLICY", "AGGREGATION POLICIES"},
+	{"PROJECTION POLICY", "PROJECTION POLICIES"},
+	{"AUTHENTICATION POLICY", "AUTHENTICATION POLICIES"},
+	{"PACKAGES POLICY", "PACKAGES POLICIES"},
+	{"NETWORK RULE", "NETWORK RULES"},
+	{"IMAGE REPOSITORY", "IMAGE REPOSITORIES"},
+	{"SERVICE", "SERVICES"},
+	{"GATEWAY", "GATEWAYS"},
+	{"CONTACT", "CONTACTS"},
+	{"STREAMLIT", "STREAMLITS"},
+	{"PROCEDURE", "PROCEDURES"},
+	{"FUNCTION", "FUNCTIONS"},
+	{"EXTERNAL FUNCTION", "EXTERNAL FUNCTIONS"},
+	{"DATA METRIC FUNCTION", "DATA METRIC FUNCTIONS"},
+	{"TASK", "TASKS"},
+	{"STREAM", "STREAMS"},
+	{"STAGE", "STAGES"},
+	{"FILE FORMAT", "FILE FORMATS"},
+	{"PIPE", "PIPES"},
+	{"NOTEBOOK", "NOTEBOOKS"},
+	{"SECRET", "SECRETS"},
+	{"GIT REPOSITORY", "GIT REPOSITORIES"},
+	{"DBT PROJECT", "DBT PROJECTS"},
+	{"MODEL", "MODELS"},
+	{"MODEL MONITOR", "MODEL MONITORS"},
+	{"DATASET", "DATASETS"},
+	{"CORTEX SEARCH SERVICE", "CORTEX SEARCH SERVICES"},
+	{"AGENT", "AGENTS"},
+	{"EXTERNAL AGENT", "EXTERNAL AGENTS"},
+	{"MCP SERVER", "MCP SERVERS"},
+	{"SEMANTIC VIEW", "SEMANTIC VIEWS"},
+}
+
+// extendedKindSet is the set of kinds sourced from a dedicated SHOW command.
+// Anything not in it (TABLE, VIEW, SEQUENCE, …) is sourced from SHOW OBJECTS.
+var extendedKindSet = func() map[string]bool {
+	m := make(map[string]bool, len(extendedShowKinds))
+	for _, k := range extendedShowKinds {
+		m[k.kind] = true
+	}
+	return m
+}()
+
+// showLikeClause builds a case-insensitive substring LIKE clause for a SHOW
+// command, or "" when no pattern is given. The pattern is wrapped in %…% so it
+// matches anywhere in the name; any % / _ the user typed act as wildcards, which
+// only ever widens the match — the frontend re-filters for exact semantics, so a
+// superset is safe. Free text is escaped to stay injection-safe.
+func showLikeClause(pattern string) string {
+	if pattern == "" {
+		return ""
+	}
+	return " LIKE '%" + EscapeTextLit(pattern) + "%'"
+}
+
+// SearchAccountObjects finds objects across the whole account with one SHOW … IN
+// ACCOUNT query per object kind, instead of walking every schema of every
+// database (which is O(databases × schemas) round-trips). This makes a search
+// for, say, a single Streamlit one query rather than thousands. It powers the
+// sidebar object-browser search and — unlike the INFORMATION_SCHEMA-based
+// SearchObjects (MCP search_objects tool, tables/columns in one database) — it
+// covers every object kind account-wide via SHOW.
+//
+//   - namePattern: optional case-insensitive substring pushed to the server as a
+//     LIKE filter to bound large kinds (TABLE/VIEW). Pass "" to fetch all of the
+//     requested kinds (e.g. for regex search, where the caller filters names
+//     client-side).
+//   - kinds: object KINDs to search (e.g. "STREAMLIT", "PROCEDURE"). Empty means
+//     all kinds. SHOW OBJECTS is issued when any requested kind is not sourced
+//     from a dedicated SHOW command (TABLE/VIEW/SEQUENCE), and each requested
+//     extended kind gets its own SHOW … IN ACCOUNT.
+//
+// Per-kind failures (missing privileges, kinds an edition doesn't support IN
+// ACCOUNT) are skipped, mirroring ListExtendedObjects. Results carry their
+// Database/Schema from the SHOW row and are deduped by (db, schema, kind, name,
+// args).
+// accountShowCmd is a single planned SHOW … IN ACCOUNT command.
+type accountShowCmd struct {
+	query     string
+	fixedKind string // "" → read the kind column (SHOW OBJECTS)
+}
+
+// planAccountSearchCommands decides which SHOW … IN ACCOUNT commands to run for a
+// SearchAccountObjects call. Pure (no client), so it is unit-tested directly.
+// `all` (no kind filter) runs SHOW OBJECTS plus every non-excluded extended
+// command; otherwise SHOW OBJECTS is included only when a requested kind isn't
+// sourced from a dedicated command (TABLE/VIEW/SEQUENCE), and each requested,
+// non-excluded extended kind gets its own command.
+func planAccountSearchCommands(namePattern string, kinds []string, excl map[string]bool) []accountShowCmd {
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	all := len(want) == 0
+	like := showLikeClause(namePattern)
+
+	var commands []accountShowCmd
+
+	needBasic := all
+	if !needBasic {
+		for k := range want {
+			if !extendedKindSet[k] {
+				needBasic = true
+				break
+			}
+		}
+	}
+	if needBasic {
+		commands = append(commands, accountShowCmd{"SHOW OBJECTS" + like + " IN ACCOUNT", ""})
+	}
+
+	for _, k := range extendedShowKinds {
+		if excl[k.kind] {
+			continue
+		}
+		if all || want[k.kind] {
+			commands = append(commands, accountShowCmd{fmt.Sprintf("SHOW %s%s IN ACCOUNT", k.plural, like), k.kind})
+		}
+	}
+	return commands
+}
+
+func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, kinds []string) ([]SnowflakeObject, error) {
+	want := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		want[k] = true
+	}
+	all := len(want) == 0
+	commands := planAccountSearchCommands(namePattern, kinds, c.getExcludedExtendedKinds())
+
+	type result struct {
+		objs []SnowflakeObject
+		err  error
+	}
+	results := make([]result, len(commands))
+	var wg sync.WaitGroup
+	for i, cmd := range commands {
+		wg.Add(1)
+		go func(i int, cmd accountShowCmd) {
+			defer wg.Done()
+			// schema="" → showInSchema reads database_name/schema_name per row.
+			results[i].objs, results[i].err = c.showInSchema(ctx, cmd.query, cmd.fixedKind, "")
+		}(i, cmd)
+	}
+	wg.Wait()
+
+	seen := make(map[string]bool)
+	var out []SnowflakeObject
+	for _, r := range results {
+		if r.err != nil {
+			continue // skip kinds we can't access / that don't support IN ACCOUNT
+		}
+		for _, o := range r.objs {
+			// SHOW OBJECTS returns every basic kind; keep only requested ones.
+			if !all && !want[o.Kind] {
+				continue
+			}
+			key := o.Database + "\x00" + o.Schema + "\x00" + o.Kind + "\x00" + o.Name + "\x00" + o.Arguments
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}

@@ -99,6 +99,21 @@ func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeOb
 	return client.ListBasicObjects(a.fctx(FeatureObjectBrowser), database, schema)
 }
 
+// SearchAccountObjects finds objects across the whole account for the sidebar
+// object-browser search. It runs one SHOW … IN ACCOUNT query per object kind
+// (instead of walking every schema of every database), optionally pushing a
+// case-insensitive substring LIKE filter to the server. Pass an empty namePattern
+// to fetch all objects of the requested kinds (the frontend then filters names
+// client-side, e.g. for regex mode); pass an empty kinds slice to search every
+// kind. Each result carries its Database/Schema.
+func (a *App) SearchAccountObjects(namePattern string, kinds []string) ([]snowflake.SnowflakeObject, error) {
+	client := a.currentClient()
+	if client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return client.SearchAccountObjects(a.fctx(FeatureObjectBrowser), namePattern, kinds)
+}
+
 // ClearObjectCache removes all cached object listings from the Snowflake client,
 // forcing the next ListObjects/ListBasicObjects call to re-query Snowflake.
 func (a *App) ClearObjectCache() {

@@ -2062,6 +2062,10 @@ export function ScanMigrationSource(arg1) {
   return window['go']['app']['App']['ScanMigrationSource'](arg1);
 }
 
+export function SearchAccountObjects(arg1, arg2) {
+  return window['go']['app']['App']['SearchAccountObjects'](arg1, arg2);
+}
+
 export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['app']['App']['SearchFiles'](arg1, arg2, arg3);
 }

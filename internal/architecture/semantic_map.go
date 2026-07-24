@@ -196,6 +196,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/joinpolicy/CreateJoinPolicyModal.tsx",
         "frontend/src/components/joinpolicy/JoinPolicyPropertiesModal.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/layout/objectSearch.ts",
         "frontend/src/components/maskingpolicy/CreateMaskingPolicyModal.tsx",
         "frontend/src/components/maskingpolicy/MaskingPolicyPropertiesModal.tsx",
         "frontend/src/components/materializedview/CreateMaterializedViewModal.tsx",
