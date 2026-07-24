@@ -120,19 +120,36 @@ type accountShowCmd struct {
 	fixedKind string // "" → read the kind column (SHOW OBJECTS)
 }
 
+// accountSearchRowLimit caps the rows each SHOW … IN ACCOUNT returns. Without it
+// a broad search (e.g. no name filter, or a regex like `.*` where nothing is
+// pushed to the server) would ship every object of a kind — thousands of tables
+// — to the frontend to build and render, which locks up the UI. The frontend
+// caps what it *displays* even tighter and prompts the user to refine.
+const accountSearchRowLimit = 2000
+
+// showLimitClause returns " LIMIT n" (or "" when limit <= 0). SHOW's LIMIT comes
+// last, after the IN ACCOUNT scope.
+func showLimitClause(limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" LIMIT %d", limit)
+}
+
 // planAccountSearchCommands decides which SHOW … IN ACCOUNT commands to run for a
 // SearchAccountObjects call. Pure (no client), so it is unit-tested directly.
 // `all` (no kind filter) runs SHOW OBJECTS plus every non-excluded extended
 // command; otherwise SHOW OBJECTS is included only when a requested kind isn't
 // sourced from a dedicated command (TABLE/VIEW/SEQUENCE), and each requested,
-// non-excluded extended kind gets its own command.
-func planAccountSearchCommands(namePattern string, kinds []string, excl map[string]bool) []accountShowCmd {
+// non-excluded extended kind gets its own command. Each command is capped at
+// `limit` rows (0 = uncapped).
+func planAccountSearchCommands(namePattern string, kinds []string, excl map[string]bool, limit int) []accountShowCmd {
 	want := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
 		want[k] = true
 	}
 	all := len(want) == 0
-	like := showLikeClause(namePattern)
+	suffix := showLikeClause(namePattern) + " IN ACCOUNT" + showLimitClause(limit)
 
 	var commands []accountShowCmd
 
@@ -146,7 +163,7 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 		}
 	}
 	if needBasic {
-		commands = append(commands, accountShowCmd{"SHOW OBJECTS" + like + " IN ACCOUNT", ""})
+		commands = append(commands, accountShowCmd{"SHOW OBJECTS" + suffix, ""})
 	}
 
 	for _, k := range extendedShowKinds {
@@ -154,7 +171,7 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 			continue
 		}
 		if all || want[k.kind] {
-			commands = append(commands, accountShowCmd{fmt.Sprintf("SHOW %s%s IN ACCOUNT", k.plural, like), k.kind})
+			commands = append(commands, accountShowCmd{"SHOW " + k.plural + suffix, k.kind})
 		}
 	}
 	return commands
@@ -166,7 +183,7 @@ func (c *Client) SearchAccountObjects(ctx context.Context, namePattern string, k
 		want[k] = true
 	}
 	all := len(want) == 0
-	commands := planAccountSearchCommands(namePattern, kinds, c.getExcludedExtendedKinds())
+	commands := planAccountSearchCommands(namePattern, kinds, c.getExcludedExtendedKinds(), accountSearchRowLimit)
 
 	type result struct {
 		objs []SnowflakeObject

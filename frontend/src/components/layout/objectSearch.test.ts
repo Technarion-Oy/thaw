@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { DataNode } from "antd/es/tree";
-import { buildSearchPredicate, filterTree } from "./objectSearch";
+import { buildSearchPredicate, filterTree, filterTreeLimited } from "./objectSearch";
 
 describe("buildSearchPredicate", () => {
   it("does a case-insensitive substring match by default", () => {
@@ -165,5 +165,51 @@ describe("filterTree", () => {
     const out = filterTree(emptyKids, matches);
     expect(out).toHaveLength(1);
     expect("children" in out[0]).toBe(false); // children stripped → renders as leaf
+  });
+});
+
+describe("filterTreeLimited", () => {
+  // A schema with 5 matching tables.
+  const bigTree: DataNode[] = [
+    group("db:DB", "DB", [
+      group("schema:DB:S", "S", [
+        group("type:DB:S:TABLE", "Tables", [
+          obj("DB", "S", "TABLE", "T1"),
+          obj("DB", "S", "TABLE", "T2"),
+          obj("DB", "S", "TABLE", "T3"),
+          obj("DB", "S", "TABLE", "T4"),
+          obj("DB", "S", "TABLE", "T5"),
+        ]),
+      ]),
+    ]),
+  ];
+  const matchAll = buildSearchPredicate(".*", true, false, []).matches; // regex `.*`
+
+  it("caps kept matches at the limit and reports truncation", () => {
+    const { nodes, matched, truncated } = filterTreeLimited(bigTree, matchAll, 3);
+    expect(matched).toBe(5);      // walked all, counted all
+    expect(truncated).toBe(true); // more than the limit
+    const kept = ((nodes[0].children as DataNode[])[0].children as DataNode[])[0].children as DataNode[];
+    expect(kept.map((n) => String(n.key))).toEqual([
+      "obj:DB:S:TABLE:T1",
+      "obj:DB:S:TABLE:T2",
+      "obj:DB:S:TABLE:T3",
+    ]); // first 3 in tree order
+  });
+
+  it("keeps everything and reports no truncation when under the limit", () => {
+    const { nodes, matched, truncated } = filterTreeLimited(bigTree, matchAll, 100);
+    expect(matched).toBe(5);
+    expect(truncated).toBe(false);
+    const kept = ((nodes[0].children as DataNode[])[0].children as DataNode[])[0].children as DataNode[];
+    expect(kept).toHaveLength(5);
+  });
+
+  it("prunes a parent whose only matches are beyond the limit", () => {
+    // limit 0 → nothing kept, but everything counted.
+    const { nodes, matched, truncated } = filterTreeLimited(bigTree, matchAll, 0);
+    expect(nodes).toEqual([]);
+    expect(matched).toBe(5);
+    expect(truncated).toBe(true);
   });
 });

@@ -90,7 +90,7 @@ import {
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { buildSearchPredicate, filterTree } from "./objectSearch";
+import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
 import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -519,6 +519,13 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
 // are visible without a full app restart.
 const DDL_CACHE_TTL = 60_000; // ms
 const ddlCache = new Map<string, { ddl: string; ts: number }>();
+
+// Cap how many matched objects the search renders. A broad pattern (e.g. `.*`)
+// can match thousands of objects; the tree isn't virtualized, so rendering (and
+// auto-expanding) them all locks up the UI. We keep the first N and prompt the
+// user to refine. The backend LIMIT (accountSearchRowLimit) bounds the fetch;
+// this bounds the render.
+const SEARCH_RESULT_LIMIT = 500;
 
 // Options for the search type-filter, in canonical KIND_ORDER. The backend
 // account search runs one SHOW … IN ACCOUNT per selected kind, so any subset is
@@ -1131,7 +1138,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         if (searchGenRef.current !== gen) return;
         const tree = buildSearchTree(hits ?? [], featureFlags.dbtProjectBrowser);
         setSearchResults(tree);
-        setSearchExpandedKeys(getAllParentKeys(filterTree(tree, searchPredicate.matches)));
+        setSearchExpandedKeys(getAllParentKeys(filterTreeLimited(tree, searchPredicate.matches, SEARCH_RESULT_LIMIT).nodes));
       })
       .catch((e) => {
         if (searchGenRef.current !== gen) return;
@@ -1150,7 +1157,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // collapses.
   useEffect(() => {
     if (!searchActive) return;
-    setSearchExpandedKeys(getAllParentKeys(filterTree(searchResultsRef.current, searchPredicate.matches)));
+    setSearchExpandedKeys(getAllParentKeys(filterTreeLimited(searchResultsRef.current, searchPredicate.matches, SEARCH_RESULT_LIMIT).nodes));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchPredicate, searchActive]);
 
@@ -1167,10 +1174,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   }, [searchActive]);
 
-  const displayData = useMemo(
-    () => (searchActive ? filterTree(searchResults, searchPredicate.matches) : treeData),
+  const searchDisplay = useMemo(
+    () =>
+      searchActive
+        ? filterTreeLimited(searchResults, searchPredicate.matches, SEARCH_RESULT_LIMIT)
+        : { nodes: treeData, matched: 0, truncated: false },
     [searchResults, treeData, searchActive, searchPredicate],
   );
+  const displayData = searchDisplay.nodes;
+  // True when the search matched more than we render — the UI prompts to refine.
+  const searchTruncated = searchActive && searchDisplay.truncated;
 
   // True while an active search is still resolving — either the query debounce
   // hasn't caught up or the backend fetch is in flight. Used to show a
@@ -4556,6 +4569,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {searchActive && displayData.length === 0 && !searchSettling && (
             <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
               {searchQuery ? <>No objects match &quot;{searchQuery}&quot;</> : "No objects of the selected type(s)"}
+            </div>
+          )}
+
+          {searchTruncated && (
+            <div style={{ padding: "6px 12px", fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+              Showing first {SEARCH_RESULT_LIMIT} matches — refine your search or narrow the object type(s).
             </div>
           )}
 

@@ -38,7 +38,7 @@ func TestShowLikeClause(t *testing.T) {
 }
 
 func TestPlanAccountSearchCommands_AllKinds(t *testing.T) {
-	cmds := planAccountSearchCommands("", nil, nil)
+	cmds := planAccountSearchCommands("", nil, nil, 0)
 	// One SHOW OBJECTS + one per extended kind.
 	if len(cmds) != 1+len(extendedShowKinds) {
 		t.Fatalf("want %d commands, got %d", 1+len(extendedShowKinds), len(cmds))
@@ -59,7 +59,7 @@ func TestPlanAccountSearchCommands_AllKinds(t *testing.T) {
 
 func TestPlanAccountSearchCommands_SingleExtendedKind(t *testing.T) {
 	// The Streamlit-only case the user reported: exactly one query, no per-schema walk.
-	cmds := planAccountSearchCommands("", []string{"STREAMLIT"}, nil)
+	cmds := planAccountSearchCommands("", []string{"STREAMLIT"}, nil, 0)
 	if len(cmds) != 1 {
 		t.Fatalf("want 1 command for STREAMLIT-only, got %d: %v", len(cmds), queries(cmds))
 	}
@@ -73,14 +73,14 @@ func TestPlanAccountSearchCommands_SingleExtendedKind(t *testing.T) {
 
 func TestPlanAccountSearchCommands_BasicKindUsesShowObjects(t *testing.T) {
 	// TABLE/VIEW/SEQUENCE are sourced from SHOW OBJECTS, not a dedicated command.
-	cmds := planAccountSearchCommands("", []string{"TABLE"}, nil)
+	cmds := planAccountSearchCommands("", []string{"TABLE"}, nil, 0)
 	if len(cmds) != 1 || cmds[0].query != "SHOW OBJECTS IN ACCOUNT" || cmds[0].fixedKind != "" {
 		t.Fatalf("TABLE should map to SHOW OBJECTS only, got %v", queries(cmds))
 	}
 }
 
 func TestPlanAccountSearchCommands_MixedKinds(t *testing.T) {
-	cmds := planAccountSearchCommands("", []string{"TABLE", "PROCEDURE"}, nil)
+	cmds := planAccountSearchCommands("", []string{"TABLE", "PROCEDURE"}, nil, 0)
 	if !hasQuery(cmds, "SHOW OBJECTS IN ACCOUNT") {
 		t.Errorf("expected SHOW OBJECTS for TABLE")
 	}
@@ -93,15 +93,32 @@ func TestPlanAccountSearchCommands_MixedKinds(t *testing.T) {
 }
 
 func TestPlanAccountSearchCommands_NamePatternPushdown(t *testing.T) {
-	cmds := planAccountSearchCommands("cust", []string{"STREAMLIT"}, nil)
+	cmds := planAccountSearchCommands("cust", []string{"STREAMLIT"}, nil, 0)
 	if cmds[0].query != "SHOW STREAMLITS LIKE '%cust%' IN ACCOUNT" {
 		t.Errorf("LIKE not pushed down: %q", cmds[0].query)
 	}
 }
 
+func TestPlanAccountSearchCommands_RowLimit(t *testing.T) {
+	// LIMIT bounds each command so a broad search doesn't ship every row.
+	cmds := planAccountSearchCommands("", []string{"TABLE"}, nil, 2000)
+	if cmds[0].query != "SHOW OBJECTS IN ACCOUNT LIMIT 2000" {
+		t.Errorf("LIMIT not appended: %q", cmds[0].query)
+	}
+	// LIMIT comes after the LIKE + IN ACCOUNT scope.
+	withLike := planAccountSearchCommands("cust", []string{"STREAMLIT"}, nil, 500)
+	if withLike[0].query != "SHOW STREAMLITS LIKE '%cust%' IN ACCOUNT LIMIT 500" {
+		t.Errorf("unexpected query: %q", withLike[0].query)
+	}
+	// limit <= 0 leaves the query uncapped.
+	if planAccountSearchCommands("", []string{"TABLE"}, nil, 0)[0].query != "SHOW OBJECTS IN ACCOUNT" {
+		t.Errorf("limit 0 should not append LIMIT")
+	}
+}
+
 func TestPlanAccountSearchCommands_ExcludedKindsSkipped(t *testing.T) {
 	excl := map[string]bool{"STREAMLIT": true}
-	cmds := planAccountSearchCommands("", nil, excl)
+	cmds := planAccountSearchCommands("", nil, excl, 0)
 	if hasQuery(cmds, "SHOW STREAMLITS IN ACCOUNT") {
 		t.Errorf("excluded STREAMLIT should be skipped")
 	}

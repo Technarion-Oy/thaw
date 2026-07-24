@@ -105,13 +105,20 @@ the loaded tree (issues #855 + follow-up):
   `needsKindSelection` = a query is typed but no type chosen; `searchEngaged` = either (used to hide the
   normal browse tree).
 - **The predicate** is built once per query by `buildSearchPredicate` (memoized on
-  `{ query, regexMode, caseSensitive, kinds }`) and threaded into `filterTree(nodes, matches)`; the
-  `RegExp` compiles a single time, not per node. It is the **precise client-side pass** (exact case,
+  `{ query, regexMode, caseSensitive, kinds }`) and threaded into `filterTreeLimited(nodes, matches, limit)`;
+  the `RegExp` compiles a single time, not per node. It is the **precise client-side pass** (exact case,
   regex — things SQL `LIKE` can't express) over results the backend already scoped by kind.
-  `filterTree` matches obj: nodes by **name + kind parsed from the key**, prunes empty structural
+  `filterTreeLimited` matches obj: nodes by **name + kind parsed from the key**, prunes empty structural
   parents, and **preserves the full loaded subtree of a matched object** (columns / stage / git / dbt
   files / task subtree) so expanding a hit shows real content instead of an empty node. A matched node
-  with empty loaded children is emitted as a leaf so it never renders a dead expander.
+  with empty loaded children is emitted as a leaf so it never renders a dead expander. (`filterTree` is
+  the unbounded wrapper — `filterTreeLimited(…, Infinity)`.)
+- **Render cap.** The Ant `Tree` isn't virtualized, so a broad pattern (e.g. `.*`) matching thousands
+  of objects would lock up the render (build + auto-expand + DOM for every node). `filterTreeLimited`
+  walks the whole tree (cheap) but **keeps only the first `SEARCH_RESULT_LIMIT` (500) matches** in tree
+  order and reports `truncated`; `displayData` and the auto-expand set both use it, and `searchTruncated`
+  drives a *"Showing first 500 matches — refine…"* notice. The backend `LIMIT` (2000/kind) bounds the
+  fetch upstream; this bounds the render.
 - **Fetch lifecycle.** `fetchActive` = `searchActive` (≥1 type). The refetch trigger is
   `searchServerKey` — `[namePattern, kinds]`, where `namePattern` is the **debounced** text (empty in
   regex mode). Keying off the debounced query means a non-empty query only refetches once typing settles,
