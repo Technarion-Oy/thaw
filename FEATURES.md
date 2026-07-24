@@ -613,6 +613,7 @@ Existing plaintext secrets from older versions are **migrated automatically** on
   - **Stage / Unstage / Discard** — git staging actions, available for a single changed file or in bulk across the selection
   - **New Folder…** (directories only) — creates a new subfolder
   - **New SQL File…** (directories only) — creates an empty `.sql` file
+  - **Create at the root** — **right-click the header title area** (top-left) or the **empty area** of the panel to open a root context menu (New Folder…, New SQL File…, Paste) that targets the **workspace root** — so folders and files can be created at the top level, not only nested inside an existing folder
   - **Select for Comparison** / **Compare with** (files only) — DDL diff comparison workflow
 
 ---

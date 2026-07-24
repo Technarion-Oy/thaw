@@ -14,6 +14,12 @@ discard across the selection. When the `fileWatcher` feature flag is enabled it 
 backend FS watcher and incrementally refreshes only the changed directory node on
 `fs:changed` events.
 
+**Root-level creation** is reachable without an existing folder: right-clicking the
+**header title area** (top-left) or the **empty area** of the panel opens a minimal root
+context menu (New Folder…, New SQL File…, Paste) targeting the **workspace root**. It
+deliberately omits destructive actions on the root directory itself. (No toolbar buttons —
+the header row is icon-dense already.)
+
 The header also carries a **folder-switch button** (open-folder icon) whose dropdown offers
 **Open Folder…** (native directory picker → `gitStore.pickExportDir`), **Open Folder in New
 Window…** (`gitStore.openInNewWindow` → `OpenFolderInNewInstance` IPC — spawns a second Thaw

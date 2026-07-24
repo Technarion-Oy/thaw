@@ -196,6 +196,22 @@ function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string):
   }));
 }
 
+/** Insert a node into a sibling list, maintaining dirs-first alphabetical order. */
+function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] {
+  const kids = [...siblings];
+  const isDir = !child.isLeaf;
+  const name = String(child.title ?? "");
+  let i = 0;
+  if (isDir) {
+    while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+  } else {
+    while (i < kids.length && !kids[i].isLeaf) i++;
+    while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+  }
+  kids.splice(i, 0, child);
+  return kids;
+}
+
 /** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
  *  If the parent hasn't been expanded yet (no children array), the node is not inserted
  *  — it will appear naturally when the user expands the directory. */
@@ -203,18 +219,7 @@ function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNo
   return nodes.map((n) => {
     if (n.key === parentKey) {
       if (!n.children) return n;
-      const kids = [...n.children];
-      const isDir = !child.isLeaf;
-      const name = String(child.title ?? "");
-      let i = 0;
-      if (isDir) {
-        while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-      } else {
-        while (i < kids.length && !kids[i].isLeaf) i++;
-        while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-      }
-      kids.splice(i, 0, child);
-      return { ...n, children: kids };
+      return { ...n, children: insertSorted(n.children, child) };
     }
     return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
   });
@@ -349,7 +354,7 @@ export default function FileBrowser() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Context menu ─────────────────────────────────────────────────────────
-  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean } | null>(null);
+  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean; isRoot?: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
   // ── Inline rename state (VS Code–style editing in the tree) ────────────
@@ -781,6 +786,29 @@ export default function FileBrowser() {
       setAnchorKey(path); // keep the Shift+range pivot aligned with the new selection
     }
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
+  };
+
+  // Right-click on the empty area of the panel (not a tree node) opens a minimal
+  // root context menu so a folder/file can be created at the workspace root — the
+  // one place a node context menu can't reach. Node right-clicks are handled by
+  // the tree's onRightClick and are skipped here (they carry a data-fbkey title).
+  const onRootContextMenu = (event: React.MouseEvent) => {
+    if (!exportDir) return;
+    // A right-click anywhere on a tree node (title, icon, or indent) is handled by
+    // the tree's onRightClick — .ant-tree-treenode covers the whole row, so guard
+    // on it rather than the narrower data-fbkey title span.
+    if ((event.target as HTMLElement).closest?.(".ant-tree-treenode")) return;
+    event.preventDefault();
+    setSelKeys([]);
+    setAnchorKey(null);
+    setFileCtxMenu({
+      x: event.clientX,
+      y: event.clientY,
+      path: exportDir,
+      name: pathBase(exportDir),
+      isDir: true,
+      isRoot: true,
+    });
   };
 
   // Paths the context-menu bulk actions operate on: the whole selection when the
@@ -1289,15 +1317,12 @@ export default function FileBrowser() {
     setEditingKey(null);
   };
 
-  const handleNewFolderStart = () => {
-    if (!fileCtxMenu) return;
-    setInlineInput({ kind: "newFolder", path: fileCtxMenu.path, value: "" });
-    setFileCtxMenu(null);
-  };
-
-  const handleNewFileStart = () => {
-    if (!fileCtxMenu) return;
-    setInlineInput({ kind: "newFile", path: fileCtxMenu.path, value: "" });
+  // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
+  // both the context menu (a node or the root) and the header toolbar buttons
+  // can share this — the root is just exportDir.
+  const startNewItem = (kind: "newFolder" | "newFile", dir: string) => {
+    if (!dir) return;
+    setInlineInput({ kind, path: dir, value: "" });
     setFileCtxMenu(null);
   };
 
@@ -1307,7 +1332,10 @@ export default function FileBrowser() {
       setInlineInput(null);
       return;
     }
-    const { kind, path, value } = inlineInput;
+    const { kind, value } = inlineInput;
+    // The target may be exportDir, which can be stored with a trailing separator —
+    // strip it so we don't build a `root//child` path.
+    const path = inlineInput.path.replace(/[/\\]+$/, "");
     const sanitized = value.trim().replace(/[/\\]/g, "");
     if (!sanitized) {
       message.error("Name cannot be empty or contain path separators");
@@ -1318,6 +1346,12 @@ export default function FileBrowser() {
       message.error("Name contains invalid characters (: \" * ? < > |)");
       return;
     }
+    // The workspace root isn't itself a tree node (treeData holds its children
+    // directly), so a root-level create inserts into the top-level list rather
+    // than via addChild, which only matches an existing parent node.
+    const isRoot = path === exportDir.replace(/[/\\]+$/, "");
+    const insert = (node: DataNode) =>
+      setTreeData(prev => (isRoot ? insertSorted(prev, node) : addChild(prev, path, node)));
     setIsSubmitting(true);
     try {
       if (kind === "newFolder") {
@@ -1325,7 +1359,7 @@ export default function FileBrowser() {
         const folderPath = `${path}${sep}${sanitized}`;
         await CreateDirectory(folderPath);
         markSelfChanged(path);
-        setTreeData(prev => addChild(prev, path, makeNode(folderPath, sanitized, true)));
+        insert(makeNode(folderPath, sanitized, true));
         message.success(`Created folder ${sanitized}`);
       } else {
         const sep = pathSep(path);
@@ -1333,7 +1367,7 @@ export default function FileBrowser() {
         const filePath = `${path}${sep}${name}`;
         await CreateFile(filePath);
         markSelfChanged(path);
-        setTreeData(prev => addChild(prev, path, makeNode(filePath, name, false)));
+        insert(makeNode(filePath, name, false));
         message.success(`Created ${name}`);
       }
       setInlineInput(null);
@@ -1499,6 +1533,9 @@ export default function FileBrowser() {
         <div
           style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
           onClick={toggleExpanded}
+          // Right-click the header title area to create at the workspace root
+          // (New Folder… / New SQL File…) — no toolbar buttons needed.
+          onContextMenu={onRootContextMenu}
           title={exportDir || "No folder open"}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -1597,7 +1634,7 @@ export default function FileBrowser() {
 
       {/* Content */}
       {expanded && (
-        <div style={{ padding: "0 4px" }}>
+        <div style={{ padding: "0 4px", minHeight: 40 }} onContextMenu={onRootContextMenu}>
           {!exportDir && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0 6px" }}>
               <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No working directory selected.</Text>
@@ -1835,6 +1872,22 @@ export default function FileBrowser() {
             }
           }}
         >
+          {/* ── Root menu (right-click on empty space): create at the workspace
+                root only — no destructive actions on the root directory itself. ── */}
+          {fileCtxMenu.isRoot ? (
+            <>
+              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              {clipboard && (
+                <CtxItem
+                  icon={<BlockOutlined />}
+                  label={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""}`}
+                  onClick={() => handlePaste(fileCtxMenu.path)}
+                />
+              )}
+            </>
+          ) : (
+          <>
           {/* ── File management actions ── */}
           {!ctxMulti && <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />}
           {!ctxMulti && <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />}
@@ -1897,8 +1950,8 @@ export default function FileBrowser() {
           {!ctxMulti && fileCtxMenu.isDir && (
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={handleNewFileStart} />
+              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
             </>
           )}
 
@@ -1915,6 +1968,8 @@ export default function FileBrowser() {
                 />
               )}
             </>
+          )}
+          </>
           )}
         </div>
       )}
