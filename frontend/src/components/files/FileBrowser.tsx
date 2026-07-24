@@ -778,6 +778,11 @@ export default function FileBrowser() {
   // onSelect promote it once its in-flight open resolves — avoiding a redundant
   // ReadFile of a file the click is already fetching.
   const onTreeDoubleClick = (e: React.MouseEvent) => {
+    // A modifier+click is a selection gesture (Cmd/Ctrl toggle, Shift range), not an
+    // open — onSelect returns early for it without opening, so recording a pending
+    // promote here would never be consumed and would later silently pin an unrelated
+    // plain open of the same file. Only plain double-clicks are open-and-pin.
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
     const el = (e.target as HTMLElement).closest?.("[data-fbkey]") as HTMLElement | null;
     const key = el?.dataset.fbkey;
     if (!key || isDirKey(key)) return;
