@@ -5,6 +5,7 @@ package snowflake
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -50,17 +51,55 @@ func NeedsQuotes(dataType string) bool {
 // `AS <tag>\n<body>\n<tag>` can never be terminated early by a literal delimiter
 // in the body itself. It prefers the bare "$$" when the body doesn't contain it,
 // then a small set of named tags, and finally falls back to a numbered tag.
+//
+// Cost is linear in len(body) regardless of what the body contains.
 func DollarQuoteTag(body string) string {
 	for _, tag := range []string{"$$", "$thaw$", "$thaw_body$"} {
 		if !strings.Contains(body, tag) {
 			return tag
 		}
 	}
+	// Probing the numbered tags one at a time ("is $thaw_0$ in the body?
+	// $thaw_1$? …") costs a full scan per probe, so a body carrying N decoy
+	// tags — trivial to author inside a procedure owned by another account, and
+	// then handed to whoever exports that database — would cost
+	// O(N · len(body)). Collect the numbered tags the body actually uses in one
+	// pass instead, then take the first free index.
+	used := numberedTags(body)
 	for i := 0; ; i++ {
-		tag := fmt.Sprintf("$thaw_%d$", i)
-		if !strings.Contains(body, tag) {
-			return tag
+		if _, taken := used[i]; !taken {
+			return fmt.Sprintf("$thaw_%d$", i)
 		}
+	}
+}
+
+// numberedTags returns the set of indexes i for which body contains the exact
+// tag "$thaw_<i>$". A non-canonical digit run ("$thaw_007$") names no tag this
+// package can ever emit, so it is ignored rather than reserving index 7.
+func numberedTags(body string) map[int]struct{} {
+	const prefix = "$thaw_"
+	used := make(map[int]struct{})
+	for i := 0; ; {
+		j := strings.Index(body[i:], prefix)
+		if j < 0 {
+			return used
+		}
+		start := i + j + len(prefix)
+		end := start
+		for end < len(body) && body[end] >= '0' && body[end] <= '9' {
+			end++
+		}
+		if end > start && end < len(body) && body[end] == '$' {
+			digits := body[start:end]
+			// Atoi rejects a run too long to be an int; such a tag is far above
+			// any index the search below can reach, so skipping it is safe.
+			if n, err := strconv.Atoi(digits); err == nil && strconv.Itoa(n) == digits {
+				used[n] = struct{}{}
+			}
+		}
+		// The prefix contains no "$" of its own, so no occurrence can start
+		// inside the one just consumed.
+		i = start
 	}
 }
 
@@ -87,6 +126,12 @@ func DollarQuoteTag(body string) string {
 // silently change the value), or when the input is not valid UTF-8. The decoded
 // string is still returned in those cases, but callers that rewrite SQL must
 // leave the original literal alone.
+//
+// The numeric escapes are decoded as written, not range-checked: `\ooo` accepts
+// three octal digits, so `\777` decodes to U+01FF rather than being rejected as
+// past the byte Snowflake means there. Everything above U+007F already sets the
+// second result to false, so a rewriter is unaffected — but a future caller that
+// consumes the decoded value itself should not assume the range was validated.
 func UnescapeStringLiteral(inner string) (string, bool) {
 	if !strings.ContainsAny(inner, `'\`) {
 		return inner, isVerbatimSafe(inner)
@@ -287,7 +332,10 @@ func DollarQuoteBody(stmt string) string {
 		return stmt
 	}
 
-	tag := closingSafeTag(value)
+	tag, tagged := closingSafeTag(value)
+	if !tagged {
+		return stmt
+	}
 	return stmt[:lit.Start] + tag + value + tag + stmt[lit.End:]
 }
 
@@ -310,27 +358,41 @@ func DollarQuoteBody(stmt string) string {
 // A leading "$" in the body needs no such care — the scan for the closing tag
 // starts strictly after the opening one, so the body's head can never be part
 // of a match.
-func closingSafeTag(value string) string {
+//
+// The second result is false when no safe tag was found within
+// maxTagEscalations rounds. A body has a single tail, so real input settles in
+// one or two rounds; the cap only exists so that no input at all can turn the
+// search into a long loop over a growing string, and the caller then falls back
+// to leaving the literal exactly as Snowflake wrote it.
+func closingSafeTag(value string) (string, bool) {
 	rejected := value
-	for {
+	for range maxTagEscalations {
 		tag := DollarQuoteTag(rejected)
 		if strings.Index(value+tag, tag) == len(value) {
-			return tag
+			return tag, true
 		}
 		rejected += tag
 	}
+	return "", false
 }
 
+// maxTagEscalations bounds the delimiter search in closingSafeTag.
+const maxTagEscalations = 64
+
 // isFunctionOrProcedureCreate reports whether the significant-token stream is a
-// CREATE FUNCTION or CREATE PROCEDURE statement, looking past OR REPLACE and
-// the modifier keywords Snowflake allows in between.
+// CREATE FUNCTION or CREATE PROCEDURE statement, looking past the OR REPLACE /
+// OR ALTER prelude and the modifier keywords Snowflake allows in between.
+//
+// GET_DDL only ever emits CREATE OR REPLACE, but hand-written SQL — which any
+// other consumer of [DollarQuoteBody] would be reading — also uses OR ALTER.
 func isFunctionOrProcedureCreate(sig []sqltok.Token, src string) bool {
 	if len(sig) == 0 || !strings.EqualFold(sig[0].Text(src), "CREATE") {
 		return false
 	}
 	i := 1
 	if i+1 < len(sig) && strings.EqualFold(sig[i].Text(src), "OR") &&
-		strings.EqualFold(sig[i+1].Text(src), "REPLACE") {
+		(strings.EqualFold(sig[i+1].Text(src), "REPLACE") ||
+			strings.EqualFold(sig[i+1].Text(src), "ALTER")) {
 		i += 2
 	}
 	for ; i < len(sig); i++ {

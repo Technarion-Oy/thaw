@@ -3,8 +3,10 @@
 package snowflake
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"thaw/internal/sqltok"
 )
@@ -100,6 +102,38 @@ func TestDollarQuoteTag(t *testing.T) {
 		if strings.Contains(tt.body, DollarQuoteTag(tt.body)) {
 			t.Errorf("DollarQuoteTag(%q) returned a tag present in the body", tt.body)
 		}
+	}
+}
+
+// A body carrying many decoy tags — cheap to author inside a procedure another
+// account owns, and only seen by whoever exports that database — must not turn
+// the search into a scan per candidate index.
+func TestDollarQuoteTagManyDecoys(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("$$ $thaw$ $thaw_body$")
+	for i := range 20_000 {
+		fmt.Fprintf(&b, " $thaw_%d$", i)
+	}
+	// Non-canonical runs name no tag this package emits, so they must not
+	// reserve an index: $thaw_00020000$ leaves 20000 free.
+	b.WriteString(" $thaw_00020000$")
+	body := b.String()
+
+	start := time.Now()
+	tag := DollarQuoteTag(body)
+	elapsed := time.Since(start)
+
+	if tag != "$thaw_20000$" {
+		t.Errorf("DollarQuoteTag = %q, want $thaw_20000$", tag)
+	}
+	if strings.Contains(body, tag) {
+		t.Errorf("DollarQuoteTag returned %q, which the body contains", tag)
+	}
+	// A single pass over ~250 KB is sub-millisecond; the pre-fix sequential
+	// probe took O(N · len(body)). The bound is loose enough not to flake on a
+	// loaded machine while still failing on a return to quadratic behavior.
+	if elapsed > time.Second {
+		t.Errorf("DollarQuoteTag over %d bytes took %v", len(body), elapsed)
 	}
 }
 
@@ -204,6 +238,11 @@ func TestDollarQuoteBody(t *testing.T) {
 			name: "body ending in a tag prefix escalates past that tag",
 			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'x$$y$thaw'",
 			want: "CREATE FUNCTION F() RETURNS STRING AS $thaw_body$x$$y$thaw$thaw_body$",
+		},
+		{
+			name: "create or alter procedure",
+			stmt: "CREATE OR ALTER PROCEDURE P() RETURNS INT LANGUAGE SQL AS 'begin\n  return 1;\nend'",
+			want: "CREATE OR ALTER PROCEDURE P() RETURNS INT LANGUAGE SQL AS $$begin\n  return 1;\nend$$",
 		},
 		{
 			name: "already dollar-quoted is untouched",
