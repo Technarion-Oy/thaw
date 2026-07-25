@@ -135,6 +135,10 @@ type DDLExportOptions struct {
 	// ("argtypes", "signature", "grouped"). Empty = configured strategy, and an
 	// unknown value falls back to the ddl package default.
 	OverloadNaming string `json:"overloadNaming"`
+	// DollarQuoteBodies writes FUNCTION / PROCEDURE bodies in dollar-quoted
+	// ($$…$$) form instead of the single-quoted string literal GET_DDL returns.
+	// Per-export only; false = GET_DDL's own form.
+	DollarQuoteBodies bool `json:"dollarQuoteBodies"`
 }
 
 // ExportAllDatabasesDDL exports DDL for the given databases in parallel.
@@ -208,12 +212,13 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 		kinds[i] = ddl.Kind(t)
 	}
 	opts := ddl.ExportOptions{
-		OutputDir:      outputDir,
-		PathTemplate:   pathTemplate,
-		OverloadNaming: ddl.OverloadNaming(overloadNaming),
-		ObjectTypes:    kinds,
-		Schemas:        options.Schemas,
-		SkipExisting:   options.SkipExisting,
+		OutputDir:         outputDir,
+		PathTemplate:      pathTemplate,
+		OverloadNaming:    ddl.OverloadNaming(overloadNaming),
+		ObjectTypes:       kinds,
+		Schemas:           options.Schemas,
+		SkipExisting:      options.SkipExisting,
+		DollarQuoteBodies: options.DollarQuoteBodies,
 	}
 
 	results := ddl.ExportDatabases(

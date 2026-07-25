@@ -60,8 +60,8 @@ func TestExportObjectTypeFilter(t *testing.T) {
 	if res.Files != 5 { // _database + 2 schemas + 2 tables
 		t.Errorf("Files = %d, want 5", res.Files)
 	}
-	mustExist(t, dir, "MYDB/_database.sql", true)             // anchor always kept
-	mustExist(t, dir, "MYDB/schemas/PUBLIC.sql", true)        // anchor always kept
+	mustExist(t, dir, "MYDB/_database.sql", true)      // anchor always kept
+	mustExist(t, dir, "MYDB/schemas/PUBLIC.sql", true) // anchor always kept
 	mustExist(t, dir, "MYDB/PUBLIC/tables/T1.sql", true)
 	mustExist(t, dir, "MYDB/PUBLIC/views/V1.sql", false)
 }
@@ -192,5 +192,55 @@ func TestExportSkipExisting(t *testing.T) {
 	got, _ = os.ReadFile(pre)
 	if string(got) == "-- keep me\n" {
 		t.Error("file was not overwritten with SkipExisting=false")
+	}
+}
+
+// bodyDDL has a procedure whose body arrives in the single-quoted form GET_DDL
+// returns, a view whose definition contains a string literal, and a function
+// that is already dollar-quoted.
+const bodyDDL = `
+create or replace database MYDB;
+create or replace schema MYDB.PUBLIC;
+create or replace procedure MYDB.PUBLIC.P1() returns varchar language sql as 'begin
+  let x := ''hello'';
+  return x;
+end';
+create or replace function MYDB.PUBLIC.F1() returns float as $$ 1 $$;
+create or replace view MYDB.PUBLIC.V1 as select ''a'' as C;
+`
+
+func readExported(t *testing.T, dir, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return string(b)
+}
+
+func TestExportDollarQuoteBodies(t *testing.T) {
+	dir := t.TempDir()
+	runExportDDL(t, dir, bodyDDL, ExportOptions{DollarQuoteBodies: true})
+
+	proc := readExported(t, dir, "MYDB/PUBLIC/procedures/P1__noargs.sql")
+	if !strings.Contains(proc, "as $$begin\n  let x := 'hello';\n  return x;\nend$$;") {
+		t.Errorf("procedure body not dollar-quoted:\n%s", proc)
+	}
+	// Already dollar-quoted and non-overloadable objects pass through untouched.
+	if fn := readExported(t, dir, "MYDB/PUBLIC/functions/F1__noargs.sql"); !strings.Contains(fn, "as $$ 1 $$") {
+		t.Errorf("function body altered:\n%s", fn)
+	}
+	if v := readExported(t, dir, "MYDB/PUBLIC/views/V1.sql"); !strings.Contains(v, "select ''a'' as C") {
+		t.Errorf("view definition altered:\n%s", v)
+	}
+}
+
+func TestExportDollarQuoteBodiesOff(t *testing.T) {
+	dir := t.TempDir()
+	runExportDDL(t, dir, bodyDDL, ExportOptions{})
+
+	proc := readExported(t, dir, "MYDB/PUBLIC/procedures/P1__noargs.sql")
+	if !strings.Contains(proc, "as 'begin\n  let x := ''hello'';") {
+		t.Errorf("procedure body rewritten with the option off:\n%s", proc)
 	}
 }

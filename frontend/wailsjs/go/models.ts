@@ -136,6 +136,7 @@ export namespace app {
 	    warehouse: string;
 	    pathTemplate: string;
 	    overloadNaming: string;
+	    dollarQuoteBodies: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DDLExportOptions(source);
@@ -149,6 +150,7 @@ export namespace app {
 	        this.warehouse = source["warehouse"];
 	        this.pathTemplate = source["pathTemplate"];
 	        this.overloadNaming = source["overloadNaming"];
+	        this.dollarQuoteBodies = source["dollarQuoteBodies"];
 	    }
 	}
 

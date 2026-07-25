@@ -18,7 +18,7 @@ A separate `account.go` sub-pipeline handles account-level objects (roles, wareh
 | `parser.go` | Helper functions (`isIdentRune`, `runesEqual`) used by tests |
 | `object.go` | `Object`, `Kind` constants, `Parse(sql) Object`, `FilePath()`, `FilePathFor(template, db, naming)`, `parseArgSig`/`parseArgSigFull`, `nameTracker` (collision resolver) |
 | `naming.go` | `OverloadNaming` strategies (`argtypes` / `signature` / `grouped`), `overloadSuffix`, and `planFiles` — the deterministic object→path planner (collision numbering + overload grouping) |
-| `exporter.go` | `ExportDatabases(ctx, dbs, fetch, opts, progress)` — parallel export pipeline; `ExportOptions` (path template, overload naming, object-type/schema filters, skip-existing, concurrency), `ExportResult`, `ProgressFunc`, `FetchDDL` |
+| `exporter.go` | `ExportDatabases(ctx, dbs, fetch, opts, progress)` — parallel export pipeline; `ExportOptions` (path template, overload naming, object-type/schema filters, skip-existing, dollar-quoted bodies, concurrency), `ExportResult`, `ProgressFunc`, `FetchDDL` |
 | `account.go` | `ExportAccountObjects(ctx, client, outputDir)` — exports roles and warehouses to `_account/roles/` and `_account/warehouses/` |
 | `doc.go` | Package doc + `thaw:domain` annotation |
 
@@ -92,6 +92,7 @@ func ExportDatabases(
 - `opts.ObjectTypes []Kind` / `opts.Schemas []string` (both empty = all) filter parsed statements before writing — **post-fetch filters**; `GET_DDL('DATABASE', …)` always returns the whole database. `KindDatabase`/`KindSchema` anchors are always written. Schema entries are matched case-insensitively and may be bare (`"PUBLIC"` — matches in every exported database) or qualified (`"DB1.PUBLIC"` — matches only in that database).
 - `opts.SkipExisting` leaves already-existing files untouched (counted in `Skipped` alongside unparsable statements). Paths are planned *before* this check, so name assignment never depends on what happens to be on disk.
 - `opts.OverloadNaming` selects the overload layout above (empty = `argtypes`).
+- `opts.DollarQuoteBodies` rewrites FUNCTION / PROCEDURE bodies from the single-quoted string literal `GET_DDL` returns into the dollar-quoted (`$$…$$`) form via `snowflake.DollarQuoteBody`. It runs per object right after `Parse`, *before* `planFiles`, so the rewritten text is what the overload sort key (`overloadKey`, which includes `SQL`) and every path decision see. The helper is a no-op for anything it cannot convert faithfully, so the flag never produces a half-rewritten statement.
 
 ### Account-level export
 `ExportAccountObjects(ctx, client, outputDir)` calls `client.ListRoles`/`client.GetRoleDDL` and `client.ListWarehouses`/`client.GetWarehouseDDL`, writing results under `outputDir/_account/{roles,warehouses}/`.
