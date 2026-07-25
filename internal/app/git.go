@@ -18,7 +18,7 @@ import (
 // config's project: ExportDir is this window's folder, and RemoteURL/Branch are
 // blanked so git operations fall back to the live status of the actual repo at that
 // folder — otherwise a pull/push here would target (and CommitAndPush would even
-// repoint) the main window's origin. Author/ExportPathTemplate/RecentDirs are
+// repoint) the main window's origin. Author/export prefs/RecentDirs are
 // genuinely shared (global identity/prefs) and pass through unchanged.
 func (a *App) GetGitConfig() (config.GitConfig, error) {
 	cfg, err := config.Load()
@@ -35,8 +35,9 @@ func (a *App) GetGitConfig() (config.GitConfig, error) {
 
 // SaveGitConfig persists only the per-repo/instance git fields — ExportDir,
 // RemoteURL, Branch. The genuinely-shared fields (AuthorName, AuthorEmail,
-// ExportPathTemplate, RecentDirs) are each owned by a dedicated atomic method
-// (SaveGitAuthor / SaveGitExportPathTemplate / AddRecentDir-ClearRecentDirs) and
+// ExportPathTemplate, ExportOverloadNaming, RecentDirs) are each owned by a
+// dedicated atomic method (SaveGitAuthor / SaveGitExportPathTemplate /
+// SaveGitExportOverloadNaming / AddRecentDir-ClearRecentDirs) and
 // preserved from disk here, so this whole-struct call can never write a stale
 // snapshot of them back — the lost-update trap when a second window (its own
 // process) saves a shared field concurrently. The token field is never written.
@@ -73,6 +74,17 @@ func (a *App) SaveGitAuthor(name, email string) error {
 func (a *App) SaveGitExportPathTemplate(tmpl string) error {
 	return config.Update(func(cfg *config.AppConfig) error {
 		cfg.Git.ExportPathTemplate = tmpl
+		return nil
+	})
+}
+
+// SaveGitExportOverloadNaming persists the shared overloaded-function file
+// naming strategy — a ddl.OverloadNaming value; an unknown or empty string
+// falls back to the default at export time (atomic, field-scoped — see
+// SaveGitAuthor).
+func (a *App) SaveGitExportOverloadNaming(naming string) error {
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Git.ExportOverloadNaming = naming
 		return nil
 	})
 }

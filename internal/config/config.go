@@ -41,6 +41,10 @@ type GitConfig struct {
 	AuthorName         string `json:"authorName"`
 	AuthorEmail        string `json:"authorEmail"`
 	ExportPathTemplate string `json:"exportPathTemplate"`
+	// ExportOverloadNaming is a ddl.OverloadNaming value ("argtypes",
+	// "signature", "grouped") controlling how overloaded functions/procedures
+	// are named on disk. Empty = the package default (argtypes).
+	ExportOverloadNaming string `json:"exportOverloadNaming"`
 	// RecentDirs is the most-recently-opened working directories, newest first,
 	// for quick project switching. Capped in the frontend when updated.
 	RecentDirs []string `json:"recentDirs,omitempty"`

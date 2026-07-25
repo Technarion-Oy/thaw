@@ -24,6 +24,11 @@ import { useGitStore } from "../../store/gitStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useConnectionStore } from "../../store/connectionStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "../files/platformUtil";
+import {
+  OVERLOAD_NAMING_OPTIONS,
+  normalizeOverloadNaming,
+  type OverloadNaming,
+} from "./overloadNaming";
 import type { ddl } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -71,7 +76,7 @@ interface Props {
 }
 
 export default function ExportOptionsModal({ onClose, initialDatabases }: Props) {
-  const { exportDir, pickExportDir, exportPathTemplate } = useGitStore();
+  const { exportDir, pickExportDir, exportPathTemplate, exportOverloadNaming } = useGitStore();
   const { warehouse: sessionWarehouse, warehouses, loadWarehouses } = useSessionStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
 
@@ -88,6 +93,11 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
   const [skipExisting, setSkipExisting] = useState(false);
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined);
   const [template, setTemplate] = useState(exportPathTemplate || "");
+  // Prefilled from the persisted preference (Export Path Format dialog); changing
+  // it here applies to this export only, like the path template.
+  const [overloadNaming, setOverloadNaming] = useState<OverloadNaming>(
+    normalizeOverloadNaming(exportOverloadNaming),
+  );
 
   useEffect(() => {
     loadWarehouses();
@@ -154,6 +164,7 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
       skipExisting,
       warehouse: warehouse ?? "",
       pathTemplate: template.trim(),
+      overloadNaming,
     };
 
     try {
@@ -171,6 +182,7 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
     }
   };
 
+  const namingOption = OVERLOAD_NAMING_OPTIONS.find((o) => o.value === overloadNaming)!;
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
   const totalFiles = results.reduce((s, r) => s + r.files, 0);
   const totalSkipped = results.reduce((s, r) => s + r.skipped, 0);
@@ -310,8 +322,27 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
             style={{ fontFamily: "monospace" }}
           />
           <Text type="secondary" style={{ fontSize: 11 }}>
-            Applies to this export only. Overloaded functions/procedures are written as{" "}
-            <span style={{ fontFamily: "monospace" }}>name__ARGTYPES.sql</span>.
+            Applies to this export only.
+          </Text>
+        </div>
+
+        <div>
+          <Text strong style={{ display: "block", marginBottom: 6 }}>
+            Overloaded functions &amp; procedures
+          </Text>
+          <Radio.Group
+            value={overloadNaming}
+            disabled={running}
+            onChange={(e) => setOverloadNaming(e.target.value as OverloadNaming)}
+            optionType="button"
+            buttonStyle="solid"
+            size="small"
+            options={OVERLOAD_NAMING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          />
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+            {namingOption.hint} FOO(X VARCHAR(16)) + FOO(X VARCHAR(256)) →{" "}
+            <span style={{ fontFamily: "monospace" }}>{namingOption.example}</span>. Applies to
+            this export only; the saved default lives in Tools → Export Path Format.
           </Text>
         </div>
 

@@ -3,7 +3,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate } from "../../wailsjs/go/app/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate, SaveGitExportOverloadNaming } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -21,6 +21,7 @@ interface GitState {
   authorName: string;
   authorEmail: string;
   exportPathTemplate: string;
+  exportOverloadNaming: string;
   recentDirs: string[];
   configLoaded: boolean;
 
@@ -45,7 +46,8 @@ interface GitState {
   loadConfig: () => Promise<void>;
   // saveConfig persists only the per-repo/instance git fields. The shared identity/
   // pref fields are owned by dedicated atomic actions (saveAuthor,
-  // saveExportPathTemplate) so a whole-struct write can't revert another window's edit.
+  // saveExportPathTemplate, saveExportOverloadNaming) so a whole-struct write can't
+  // revert another window's edit.
   saveConfig: (patch: Partial<{
     exportDir: string;
     remoteURL: string;
@@ -53,6 +55,7 @@ interface GitState {
   }>) => Promise<void>;
   saveAuthor: (name: string, email: string) => Promise<void>;
   saveExportPathTemplate: (tmpl: string) => Promise<void>;
+  saveExportOverloadNaming: (naming: string) => Promise<void>;
   pickExportDir: () => Promise<void>;
   // openFolder switches the working directory to `dir` (VS Code "Open Folder"),
   // recording it in the recent-folders list. Used by the File menu, the File
@@ -109,6 +112,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   authorName: "",
   authorEmail: "",
   exportPathTemplate: "",
+  exportOverloadNaming: "",
   recentDirs: [],
   configLoaded: false,
 
@@ -130,13 +134,14 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const cfg = await GetGitConfig();
       set({
-        exportDir:          cfg.exportDir          || "",
-        remoteURL:          cfg.remoteURL          || "",
-        branch:             cfg.branch             || "main",
-        authorName:         cfg.authorName         || "",
-        authorEmail:        cfg.authorEmail        || "",
-        exportPathTemplate: cfg.exportPathTemplate || "",
-        recentDirs:         cfg.recentDirs         || [],
+        exportDir:            cfg.exportDir            || "",
+        remoteURL:            cfg.remoteURL            || "",
+        branch:               cfg.branch               || "main",
+        authorName:           cfg.authorName           || "",
+        authorEmail:          cfg.authorEmail          || "",
+        exportPathTemplate:   cfg.exportPathTemplate   || "",
+        exportOverloadNaming: cfg.exportOverloadNaming || "",
+        recentDirs:           cfg.recentDirs           || [],
         configLoaded: true,
       });
       // Auto-refresh git status if we have a saved directory
@@ -151,7 +156,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   saveConfig: async (patch) => {
     const { exportDir, remoteURL, branch } = get();
     // Only the per-repo/instance fields ride SaveGitConfig. Shared fields (author,
-    // export-path template, recentDirs) are owned by dedicated atomic backend methods
+    // export naming prefs, recentDirs) are owned by dedicated atomic backend methods
     // and preserved on disk, so they can't be clobbered by this whole-struct write.
     const merged = { exportDir, remoteURL, branch, ...patch };
     set(merged);
@@ -175,6 +180,15 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ exportPathTemplate: tmpl });
     try {
       await SaveGitExportPathTemplate(tmpl);
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
+  saveExportOverloadNaming: async (naming) => {
+    set({ exportOverloadNaming: naming });
+    try {
+      await SaveGitExportOverloadNaming(naming);
     } catch {
       // non-fatal — in-memory state is still updated
     }
