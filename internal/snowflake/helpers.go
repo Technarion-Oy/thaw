@@ -5,7 +5,6 @@ package snowflake
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -171,35 +170,51 @@ func UnescapeStringLiteral(inner string) (string, bool) {
 	return out, unambiguous && isVerbatimSafe(out)
 }
 
-// readRadix reads up to maxDigits digits of the given radix from the front of s
-// and returns their value together with the number of bytes consumed. A zero
-// count means s does not start with a digit of that radix.
+// readRadix reads up to maxDigits digits of the given radix (8 or 16) from the
+// front of s and returns their value together with the number of bytes
+// consumed. A zero count means s does not start with a digit of that radix.
 func readRadix(s string, radix, maxDigits int) (int, int) {
-	n := 0
+	v, n := 0, 0
 	for n < maxDigits && n < len(s) {
-		if _, err := strconv.ParseUint(s[n:n+1], radix, 8); err != nil {
+		d := digitValue(s[n])
+		if d < 0 || d >= radix {
 			break
 		}
+		v = v*radix + d
 		n++
 	}
-	if n == 0 {
-		return 0, 0
+	return v, n
+}
+
+// digitValue returns the value of an ASCII digit in base 16, or -1 when c is
+// not one. Callers bound the result to the radix they want.
+func digitValue(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	default:
+		return -1
 	}
-	v, err := strconv.ParseInt(s[:n], radix, 32)
-	if err != nil {
-		return 0, 0
-	}
-	return int(v), n
 }
 
 // isVerbatimSafe reports whether s can be written into a SQL file as-is: valid
-// UTF-8 with no control characters other than newline, carriage return, and tab.
+// UTF-8 with no control character — C0, DEL, or C1 — other than newline,
+// carriage return, and tab.
 func isVerbatimSafe(s string) bool {
 	if !utf8.ValidString(s) {
 		return false
 	}
 	for _, r := range s {
-		if (r < 0x20 && r != '\n' && r != '\r' && r != '\t') || r == 0x7f {
+		switch {
+		case r == '\n', r == '\r', r == '\t':
+			// The only control characters a SQL file carries verbatim.
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			// C0, DEL, and C1 — invisible in an editor and lost or mangled by
+			// anything that normalizes the file.
 			return false
 		}
 	}
@@ -227,8 +242,9 @@ var createBodyModifiers = map[string]struct{}{
 //	                                              let x := 'hello';
 //	                                            end$$
 //
-// The delimiter comes from [DollarQuoteTag], so it can never be terminated
-// early by the body's own content.
+// The delimiter comes from [DollarQuoteTag], narrowed by closingSafeTag so that
+// neither the body's own content nor the seam where the body meets the closing
+// delimiter can terminate it early.
 //
 // stmt is returned unchanged — never partially rewritten — when it is not a
 // function or procedure definition, when the body is already dollar-quoted or
@@ -271,14 +287,38 @@ func DollarQuoteBody(stmt string) string {
 		return stmt
 	}
 
-	tag := DollarQuoteTag(value)
-	if strings.HasPrefix(value, "$") || strings.HasSuffix(value, "$") {
-		// The bare "$$" would close early on the "$$" formed at the seam
-		// between the delimiter and the body ("$$" + "x$" + "$$" = "$$x$$$").
-		// Passing a value that contains "$$" forces a named tag instead.
-		tag = DollarQuoteTag(value + "$$")
-	}
+	tag := closingSafeTag(value)
 	return stmt[:lit.Start] + tag + value + tag + stmt[lit.End:]
+}
+
+// closingSafeTag returns a dollar-quote delimiter that survives being appended
+// to value with no separator between the two.
+//
+// [DollarQuoteTag] alone is not enough: it guarantees only that the tag does not
+// occur *inside* the body, while the seam between the body's last characters and
+// the closing delimiter can form one. Every tag both starts and ends with "$",
+// so a body whose tail is a proper prefix of the tag ("x$" for "$$",
+// "…$thaw" for "$thaw$") lets the parser — which takes the *first* occurrence of
+// the tag after the opening one, as [sqltok] and Snowflake both do — close the
+// body early and truncate it.
+//
+// Rather than enumerating the shapes that can overlap, the seam is checked
+// directly: the tag's first occurrence in value+tag must be the appended one.
+// Each rejected tag is folded into the string handed to DollarQuoteTag, so the
+// next round is guaranteed to propose a different delimiter.
+//
+// A leading "$" in the body needs no such care — the scan for the closing tag
+// starts strictly after the opening one, so the body's head can never be part
+// of a match.
+func closingSafeTag(value string) string {
+	rejected := value
+	for {
+		tag := DollarQuoteTag(rejected)
+		if strings.Index(value+tag, tag) == len(value) {
+			return tag
+		}
+		rejected += tag
+	}
 }
 
 // isFunctionOrProcedureCreate reports whether the significant-token stream is a

@@ -5,6 +5,8 @@ package snowflake
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/sqltok"
 )
 
 func TestIsBoolean(t *testing.T) {
@@ -190,6 +192,20 @@ func TestDollarQuoteBody(t *testing.T) {
 			want: "CREATE FUNCTION F() RETURNS STRING AS $thaw$select 'x'$$thaw$",
 		},
 		{
+			// The scan for the closing delimiter starts after the opening one,
+			// so a leading "$" cannot collide and needs no escalation.
+			name: "body starting with a dollar keeps the bare tag",
+			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'select $ x'",
+			want: "CREATE FUNCTION F() RETURNS STRING AS $$select $ x$$",
+		},
+		{
+			// "$thaw$" would close inside the body's own "$thaw" tail, even
+			// though the body neither contains "$thaw$" nor ends with "$".
+			name: "body ending in a tag prefix escalates past that tag",
+			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'x$$y$thaw'",
+			want: "CREATE FUNCTION F() RETURNS STRING AS $thaw_body$x$$y$thaw$thaw_body$",
+		},
+		{
 			name: "already dollar-quoted is untouched",
 			stmt: "CREATE FUNCTION F() RETURNS INT AS $$select 1$$",
 			want: "CREATE FUNCTION F() RETURNS INT AS $$select 1$$",
@@ -234,8 +250,11 @@ func TestDollarQuoteBody(t *testing.T) {
 	}
 }
 
-// The rewritten statement must re-tokenize to the same body value, so the
-// dollar-quoted form can never be terminated early by the body's own content.
+// The rewritten statement must tokenize back to the exact body value: neither
+// the body's own content nor the seam where it meets the closing delimiter may
+// terminate the dollar-quoted span early. The check runs through the same
+// first-occurrence-wins scanner Snowflake's parser implements (sqltok), rather
+// than trusting the tag this package picked.
 func TestDollarQuoteBodyRoundTrip(t *testing.T) {
 	bodies := []string{
 		"select 1",
@@ -244,18 +263,38 @@ func TestDollarQuoteBodyRoundTrip(t *testing.T) {
 		"$x",
 		"$thaw$ $$ $thaw_body$",
 		"begin\n  let x := 'q';\nend",
+		// Bodies whose tail is a proper prefix of the tag that would otherwise
+		// be chosen: the closing delimiter starts inside the body unless the
+		// seam itself is checked.
+		"x$$y$thaw",
+		"x$$y$thaw_",
+		"$$ $thaw$ ends with $thaw_body",
+		"$$ $thaw$ $thaw_body$ $thaw_0",
+		"$",
 	}
 	for _, body := range bodies {
 		stmt := "CREATE FUNCTION F() RETURNS STRING AS " + quoteLiteral(body)
 		got := DollarQuoteBody(stmt)
-		tag := got[strings.Index(got, " AS ")+4:]
-		tag = tag[:strings.Index(tag[1:], "$")+2]
-		inner := strings.TrimSuffix(strings.TrimPrefix(got[strings.Index(got, " AS ")+4:], tag), tag)
-		if inner != body {
-			t.Errorf("round trip of %q: tag %q, body %q", body, tag, inner)
+
+		var spans []string
+		for _, tok := range sqltok.SignificantTokens(got) {
+			if tok.Kind == sqltok.DollarQuoted {
+				spans = append(spans, tok.Text(got))
+			}
 		}
-		if strings.Contains(inner, tag) {
-			t.Errorf("body %q contains its own delimiter %q", inner, tag)
+		if len(spans) != 1 {
+			t.Errorf("body %q: rewritten as %q, tokenized into %d dollar-quoted spans, want 1",
+				body, got, len(spans))
+			continue
+		}
+
+		// The span carries the delimiter on both ends; what is left must be the
+		// original body, byte for byte.
+		span := spans[0]
+		tag := span[:strings.Index(span[1:], "$")+2]
+		inner := strings.TrimSuffix(strings.TrimPrefix(span, tag), tag)
+		if inner != body {
+			t.Errorf("round trip of %q: rewritten as %q, tag %q, recovered %q", body, got, tag, inner)
 		}
 	}
 }
