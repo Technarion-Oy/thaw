@@ -188,12 +188,28 @@ Two node kinds take part, listed in `MULTI_SELECT_PREFIXES` and matched by `mult
 object nodes (`obj:`) and database nodes (`db:`); schemas and the synthetic type/git/stage nodes
 stay single-select. **A selection is never mixed** — range walks filter to the clicked node's own
 prefix, and a Cmd/Ctrl toggle drops keys of the other kind, so picking a database clears an object
-selection and vice versa. `selectionKind` (`"obj" | "db" | null`, read off the first key) is what the
-context menu gates its bulk entries on: **Delete N selected objects** / **Add N as insert sources**
-for `obj`, and **Export DDL for N selected databases** / **Drop N selected databases…** for `db`.
+selection and vice versa. `selectionKind` (`"obj" | "db" | null`, read off the first key) says which
+kind is held.
+
+`bulkTarget` is what the context menu actually gates its bulk entries on: `selectionKind`, but only
+when the right-clicked row is **in** the selection (`selectedNodeKeys.has(ctxMenu.nodeKey)`) —
+otherwise `null`. Right-clicking outside the selection therefore shows only the single-node entries,
+which act on the row under the cursor; without the membership check the menu would carry
+**Drop Database…** (this row) and **Drop 2 selected databases…** (other rows) side by side with no
+cue which is which. Membership also pins the node kind — an `obj:` key can only be in an object
+selection — so `bulkTarget === "obj"` alone keeps **Delete N selected objects…** off database,
+schema, column, git and stage rows, which the `selectionKind` check alone did not. Right-clicking
+never modifies the selection. The entries are **Delete N selected objects…** / **Add N selected as
+Insert Sources** for `obj`, and **Export DDL for N selected databases** / **Drop N selected
+databases…** for `db`.
+
 The bulk drop confirmation lists every database with its own Time Travel retention window (zero
 retention is called out in red) and offers the same CASCADE/RESTRICT mode select as the single-node
-**Drop Database…**.
+**Drop Database…**. Those retention lookups are one IPC round trip per database and block the
+confirmation, so both the bulk and single-database drops hold a `message.loading` toast while they
+run. Every batch closes with exactly one summary toast — `success` when nothing failed, `warning`
+when some did, `error` when all did (per-item error toasts can otherwise stack off-screen with
+nothing stating the overall outcome).
 
 Because `expandAction="click"`, rc-tree also treats a modified click as an expand; `onExpand` returns
 early when the event carries Cmd/Ctrl/Shift and the node is multi-selectable, so building a selection
