@@ -43,6 +43,7 @@ Everything else under `internal/` is a focused domain package. Each has its own 
 | Package | Role |
 |---------|------|
 | `snowflake` | gosnowflake driver wrapper, session-state-aware pool, object-listing TTL cache, result-parsing helpers |
+| `objectkind` | the canonical object-kind registry (KIND, SHOW plural, label, order, `GET_DDL` type) every backend consumer derives from, and the source of the generated frontend artifact — a leaf package with no Thaw imports |
 | `sqleditor` | SQL diagnostics & JOIN-suggestion engine (its own Wails-bound `Service`) |
 | `ddl` | statement splitter + DDL metadata extraction + parallel export pipeline |
 | `config` | TOML/JSON app config, feature flags, IT-admin enforced policies (secrets scrubbed out — see `secrets`) |

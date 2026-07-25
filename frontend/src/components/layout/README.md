@@ -54,6 +54,19 @@ items (**Create Object**, **Show Dropped Objects…**, **Export Data…**, **Imp
 value dump with no ALTER controls (issue #854). Mirrors the backend's `ListUserSchemas` exclusion
 (`internal/app/objects.go`).
 
+### Object-kind labels & ordering (generated)
+`KIND_LABEL` and `KIND_ORDER` are **not** declared in `Sidebar.tsx` — they are `OBJECT_KIND_LABEL` /
+`OBJECT_KIND_ORDER` from `src/generated/objectKinds.ts`, generated from the canonical Go registry
+[`internal/objectkind`](../../../../internal/objectkind/README.md), the same source the backend
+derives its `SHOW` commands, Properties queries and `GET_DDL` types from. They drive the tree
+type-group titles and ordering, the search-result grouping, and `KIND_FILTER_OPTIONS`. A kind the
+registry doesn't know (e.g. one a newer Snowflake edition starts returning) still renders — it falls
+back to the raw kind string and sorts last, alphabetically. To add a kind, edit the Go registry and
+run `go generate ./internal/objectkind/`; don't hand-edit the generated file.
+
+`DROPPED_KIND_ORDER` is separate and stays local: it orders the four kinds the Time Travel undrop
+modals can show, which is not the object-tree ordering.
+
 ### Three-tier object-listing cache
 1. `objectStore` — previously expanded schemas (instant, all types).
 2. Go TTL cache (`ListObjects` / `ListBasicObjects`) — 30 s backend cache.
@@ -96,7 +109,8 @@ the loaded tree (issues #855 + follow-up):
   server as a `LIKE '%…%'` prefilter; **regex** queries fetch all of the selected kinds (no server
   filter) and match client-side.
 - **Type filter is the required scope.** A search runs only once **≥1 object type** is selected
-  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER`) — each selected kind is one
+  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER` — see the generated registry note
+  below) — each selected kind is one
   `SHOW … IN ACCOUNT`. Searching *every* kind would mean ~45 broad account-wide metadata queries (one
   per kind, each scanning all databases) with no cheaper account-wide alternative, so instead of a slow
   "all types" scan the type filter is mandatory: pick the kinds you want and each is a fast, targeted
