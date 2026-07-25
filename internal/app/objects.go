@@ -355,9 +355,10 @@ func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowfla
 }
 
 // GetObjectDDL returns the definition of a single schema object using
-// Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW,
-// DYNAMIC TABLE, EXTERNAL TABLE, MATERIALIZED VIEW, ALERT, TAG, FUNCTION,
-// PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE.
+// Snowflake's GET_DDL function. kind is any object kind carrying a GET_DDL type
+// in the canonical registry (internal/objectkind) — the kinds GET_DDL has no
+// type for (image repositories, services, models, MCP servers, …) are rejected
+// by Client.GetObjectDDL rather than turned into a doomed query.
 // For procedures and functions, arguments must be the parameter type list
 // (e.g. "NUMBER, VARCHAR") so Snowflake can resolve the correct overload.
 // Pass an empty string for all other object kinds.

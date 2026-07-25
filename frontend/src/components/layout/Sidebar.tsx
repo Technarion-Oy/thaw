@@ -233,62 +233,20 @@ import ModifyDbtProjectModal from "../dbtproject/ModifyDbtProjectModal";
 import AddDbtProjectVersionModal from "../dbtproject/AddDbtProjectVersionModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import { kindSupportsDdl } from "../../utils/objectDdl";
+import { OBJECT_KIND_LABEL, OBJECT_KIND_ORDER } from "../../generated/objectKinds";
 
 const { Text } = Typography;
 
-const KIND_LABEL: Record<string, string> = {
-  TABLE:         "Tables",
-  VIEW:          "Views",
-  "DYNAMIC TABLE": "Dynamic Tables",
-  "EXTERNAL TABLE": "External Tables",
-  "ICEBERG TABLE": "Iceberg Tables",
-  "HYBRID TABLE": "Hybrid Tables",
-  "EVENT TABLE": "Event Tables",
-  "MATERIALIZED VIEW": "Materialized Views",
-  ALERT:         "Alerts",
-  TAG:           "Tags",
-  "MASKING POLICY": "Masking Policies",
-  "ROW ACCESS POLICY": "Row Access Policies",
-  "JOIN POLICY": "Join Policies",
-  "PRIVACY POLICY": "Privacy Policies",
-  "STORAGE LIFECYCLE POLICY": "Storage Lifecycle Policies",
-  "PASSWORD POLICY": "Password Policies",
-  "SESSION POLICY": "Session Policies",
-  "AGGREGATION POLICY": "Aggregation Policies",
-  "PROJECTION POLICY": "Projection Policies",
-  "AUTHENTICATION POLICY": "Authentication Policies",
-  "PACKAGES POLICY": "Packages Policies",
-  "NETWORK RULE": "Network Rules",
-  "IMAGE REPOSITORY": "Image Repositories",
-  SERVICE:       "Services",
-  GATEWAY:       "Gateways",
-  CONTACT:       "Contacts",
-  STREAMLIT:     "Streamlits",
-  FUNCTION:      "Functions",
-  "EXTERNAL FUNCTION": "External Functions",
-  "DATA METRIC FUNCTION": "Data Metric Functions",
-  PROCEDURE:     "Procedures",
-  SEQUENCE:      "Sequences",
-  STAGE:         "Stages",
-  STREAM:        "Streams",
-  TASK:          "Tasks",
-  "FILE FORMAT": "File Formats",
-  PIPE:          "Pipes",
-  NOTEBOOK:      "Notebooks",
-  SECRET:        "Secrets",
-  "GIT REPOSITORY": "Git Repositories",
-  "DBT PROJECT": "DBT Projects",
-  MODEL:         "Models",
-  "MODEL MONITOR": "Model Monitors",
-  DATASET:       "Datasets",
-  "CORTEX SEARCH SERVICE": "Cortex Search Services",
-  AGENT:         "Agents",
-  "EXTERNAL AGENT": "External Agents",
-  "MCP SERVER":  "MCP Servers",
-  "SEMANTIC VIEW": "Semantic Views",
-};
-
-const KIND_ORDER = ["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE", "FUNCTION", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "ALERT", "TAG", "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY", "PACKAGES POLICY", "NETWORK RULE", "IMAGE REPOSITORY", "SERVICE", "GATEWAY", "CONTACT", "STREAMLIT", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT", "MODEL", "MODEL MONITOR", "DATASET", "CORTEX SEARCH SERVICE", "AGENT", "EXTERNAL AGENT", "MCP SERVER", "SEMANTIC VIEW"];
+// Kind → tree-group label, and the canonical kind order that drives the tree
+// grouping, the search result grouping and the search type-filter options. Both
+// are generated from the Go object-kind registry (internal/objectkind) — the
+// same source the backend derives its SHOW commands, Properties queries and
+// GET_DDL types from — so a kind can't be listed here without being wired
+// end-to-end. Kinds outside the registry (an object kind a newer Snowflake
+// edition returns before Thaw knows about it) fall back to the raw kind string
+// and sort last.
+const KIND_LABEL = OBJECT_KIND_LABEL;
+const KIND_ORDER = OBJECT_KIND_ORDER;
 
 const kindIcon = (kind: string) => objectIcon(kind);
 

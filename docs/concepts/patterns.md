@@ -91,6 +91,18 @@ Key prefixes identify node types:
 
 Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buildEntryNodes(...)` is the shared stage/DBT helper; `emptyChildNode` is the empty-state placeholder.
 
+## Adding a Snowflake object kind
+
+Object-kind metadata lives in **one** place: the registry in `internal/objectkind/kinds.go`. Each `Kind` carries the canonical KIND string, the SHOW plural, the display label, whether `SHOW OBJECTS` already returns it (`Basic`), and its `GET_DDL` object type (`""` = unsupported). Everything derives from it — the per-schema `ListExtendedObjects` commands, the account-wide search plan, `BuildObjectPropertiesQuery`, `buildGetDDLQuery` and its reject-list, and (via `go generate`) the frontend's `OBJECT_KIND_ORDER` / `OBJECT_KIND_LABEL` / `DDL_UNSUPPORTED_KINDS`.
+
+Adding a kind is therefore:
+
+1. One entry in `objectkind.Kinds`, positioned where it should appear in the tree.
+2. `go generate ./internal/objectkind/` → refreshes `frontend/src/generated/objectKinds.ts`.
+3. An icon + colour in `frontend/src/components/sidebar/objectIcons.tsx`, plus the `--icon-*` variable in `frontend/src/styles/global.css` (light **and** dark blocks).
+
+Icons are the one hand-maintained part (they are React components). Coverage tests fail if any step is skipped — see [testing.md](testing.md#generated-artifact-guards). Kinds that are *not* schema-scoped objects (DATABASE, SCHEMA, WAREHOUSE, ROLE, USER) are deliberately outside the registry and stay explicit in their few consumers.
+
 ## Object-listing cache (backend)
 
 `Client` (`internal/snowflake/client.go`) has a per-schema 30 s TTL cache for `ListObjects`/`ListBasicObjects`, keyed by `"DB\x00SCHEMA"` (full) and `"basic\x00DB\x00SCHEMA"` (basic). `getObjectCache` returns `slices.Clone()` to avoid corrupting the backing array. `ClearObjectCache()` / `ClearObjectCacheForDatabase(db)` are IPC methods. The sidebar search cascade is three-tier: `objectStore` (instant) → Go TTL cache → `ListBasicObjects` fallback.

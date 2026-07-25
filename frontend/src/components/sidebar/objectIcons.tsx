@@ -79,7 +79,16 @@ import {
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
-const KIND_VAR: Record<string, string> = {
+//
+// KIND_VAR and KIND_ICON are the one part of an object kind's metadata that
+// stays hand-maintained rather than generated from the Go registry
+// (internal/objectkind): the icons are React components and the colours are
+// theme-dependent CSS variables, neither of which the backend can express.
+// objectIcons.test.ts asserts every generated kind has an entry in both maps and
+// that each colour variable is actually defined in global.css, so adding a kind
+// to the registry without an icon fails the build instead of silently rendering
+// a grey generic file.
+export const KIND_VAR: Record<string, string> = {
   TABLE:             "--icon-table",
   VIEW:              "--icon-view",
   "DYNAMIC TABLE":   "--icon-dynamictable",
@@ -132,7 +141,7 @@ const KIND_VAR: Record<string, string> = {
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
-const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSProperties }>> = {
+export const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSProperties }>> = {
   TABLE:            TableOutlined,
   VIEW:             EyeOutlined,
   "DYNAMIC TABLE":  RetweetOutlined,

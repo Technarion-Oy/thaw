@@ -110,6 +110,7 @@ func GetCodebaseSemanticMap() string {
         "internal/modelmonitor/",
         "internal/networkrule/",
         "internal/notebook/",
+        "internal/objectkind/",
         "internal/objects/",
         "internal/packagespolicy/",
         "internal/passwordpolicy/",

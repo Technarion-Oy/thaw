@@ -12,7 +12,8 @@ imports helpers from this folder). This folder provides the icon registry used b
 
 | File | Purpose |
 |------|---------|
-| `objectIcons.tsx` | Maps every Snowflake object kind to a distinct Ant Design Outlined icon and a CSS variable colour (`--icon-*`). Exports `objectIcon(kind)`, `databaseIcon()`, `schemaIcon()`, `typeGroupIcon(kind)`, `columnIcon()`. Using `style={{ color: "var(--icon-x)" }}` instead of TwoTone icons lets the palette adapt to dark/light theme via CSS without recompiling TypeScript. |
+| `objectIcons.tsx` | Maps every Snowflake object kind to a distinct Ant Design Outlined icon (`KIND_ICON`) and a CSS variable colour (`KIND_VAR`, `--icon-*`). Exports `objectIcon(kind)`, `databaseIcon()`, `schemaIcon()`, `typeGroupIcon(kind)`, `columnIcon()`, plus both maps for the coverage test. Using `style={{ color: "var(--icon-x)" }}` instead of TwoTone icons lets the palette adapt to dark/light theme via CSS without recompiling TypeScript. |
+| `objectIcons.test.ts` | Coverage guard: every kind in the generated registry (`src/generated/objectKinds.ts`) must have an icon **and** a colour variable, that variable must actually be declared in `global.css`, and no icon may map a kind the registry no longer has. |
 
 ## Patterns & integration
 
@@ -26,15 +27,19 @@ import { objectIcon, databaseIcon, schemaIcon, typeGroupIcon, columnIcon } from 
 (`--icon-table`, `--icon-view`, `--icon-function`, etc.). The icon module never hardcodes hex
 values — all theming is delegated to CSS.
 
-**Object kinds covered:** TABLE, VIEW, FUNCTION/PROCEDURE/EXTERNAL FUNCTION (function icon),
-SEQUENCE, STAGE, PIPE, STREAM, TASK, FILE FORMAT, ALERT, POLICY, NETWORK RULE, BRANCH/TAG (git),
-FILE, SECRET, DATA METRIC FUNCTION, INTEGRATION, DYNAMIC TABLE, MATERIALIZED VIEW, EVENT TABLE,
-ICEBERG TABLE, APPLICATION, SNAPSHOT, EXTERNAL TABLE, DBT PROJECT, and fallback.
+**Object kinds covered:** every kind in the canonical registry — `KIND_ICON` / `KIND_VAR` are the
+one piece of object-kind metadata that is *not* generated from
+[`internal/objectkind`](../../../../internal/objectkind/README.md) (icons are React components,
+colours are theme-dependent CSS variables), so `objectIcons.test.ts` asserts they cover exactly the
+kinds in `src/generated/objectKinds.ts`. An unknown kind falls back to a grey `FileOutlined`.
 
 ## Gotchas
 
-- This folder contains only `objectIcons.tsx`. All tree logic, node key formats, context menus,
-  and IPC calls live in `frontend/src/components/layout/Sidebar.tsx`.
+- This folder contains only `objectIcons.tsx` and its test. All tree logic, node key formats, context
+  menus, and IPC calls live in `frontend/src/components/layout/Sidebar.tsx`.
+- **Adding an object kind starts in Go**, not here: one entry in `internal/objectkind/kinds.go`, then
+  `go generate ./internal/objectkind/`, then the icon + colour in this folder (and the `--icon-*`
+  variable in `global.css`, in both the light and dark blocks).
 - **Node key format reference** (documented here for proximity to the icon module):
   - Databases: `db:NAME`
   - Schemas: `schema:DB:SCHEMA`

@@ -7,129 +7,43 @@ import (
 	"fmt"
 	"strings"
 
+	"thaw/internal/objectkind"
 	"thaw/internal/snowflake"
 )
 
-// BuildObjectPropertiesQuery returns the SHOW/DESCRIBE query that fetches the
-// metadata for a single Snowflake object. kind is one of: DATABASE, SCHEMA,
-// TABLE, VIEW, DYNAMIC TABLE, EXTERNAL TABLE, ICEBERG TABLE, HYBRID TABLE, EVENT TABLE, MATERIALIZED VIEW, ALERT, TAG,
-// MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY, PRIVACY POLICY, STORAGE LIFECYCLE POLICY, PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY, AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK RULE, IMAGE REPOSITORY, SERVICE, GATEWAY, CONTACT, STREAMLIT, FUNCTION, EXTERNAL FUNCTION, DATA METRIC FUNCTION, PROCEDURE, SEQUENCE, STAGE, STREAM,
-// TASK, FILE FORMAT, PIPE, SECRET, GIT REPOSITORY, DBT PROJECT, MODEL, WAREHOUSE, ROLE,
-// USER.
+// BuildObjectPropertiesQuery returns the SHOW query that fetches the metadata for
+// a single Snowflake object.
+//
+// Every schema-scoped kind takes the same shape — SHOW <plural> LIKE '<name>' IN
+// SCHEMA <db>.<schema> — so the plural comes from the canonical registry
+// (internal/objectkind) rather than a per-kind case, and a kind added there is
+// automatically supported here. The kinds that live outside that registry
+// (DATABASE, SCHEMA, WAREHOUSE, ROLE, USER) each need their own scope clause and
+// stay explicit below.
+//
+// An unknown kind — or one the registry marks NoPropertiesQuery (NOTEBOOK, whose
+// properties are read through the dedicated notebook IPC methods) — is an error.
 func BuildObjectPropertiesQuery(database, schema, kind, name string) (string, error) {
 	like := strings.ReplaceAll(name, `\`, `\\`)
 	like = snowflake.EscapeStringLit(like)
 
-	switch strings.ToUpper(kind) {
+	switch strings.ToUpper(strings.TrimSpace(kind)) {
 	case "DATABASE":
 		return fmt.Sprintf("SHOW DATABASES LIKE '%s'", like), nil
-	case "DYNAMIC TABLE":
-		return fmt.Sprintf("SHOW DYNAMIC TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "EXTERNAL TABLE":
-		return fmt.Sprintf("SHOW EXTERNAL TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "ICEBERG TABLE":
-		return fmt.Sprintf("SHOW ICEBERG TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "HYBRID TABLE":
-		return fmt.Sprintf("SHOW HYBRID TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "EVENT TABLE":
-		return fmt.Sprintf("SHOW EVENT TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "MATERIALIZED VIEW":
-		return fmt.Sprintf("SHOW MATERIALIZED VIEWS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "ALERT":
-		return fmt.Sprintf("SHOW ALERTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "TAG":
-		return fmt.Sprintf("SHOW TAGS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "MASKING POLICY":
-		return fmt.Sprintf("SHOW MASKING POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "ROW ACCESS POLICY":
-		return fmt.Sprintf("SHOW ROW ACCESS POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "JOIN POLICY":
-		return fmt.Sprintf("SHOW JOIN POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PRIVACY POLICY":
-		return fmt.Sprintf("SHOW PRIVACY POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "STORAGE LIFECYCLE POLICY":
-		return fmt.Sprintf("SHOW STORAGE LIFECYCLE POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PASSWORD POLICY":
-		return fmt.Sprintf("SHOW PASSWORD POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "SESSION POLICY":
-		return fmt.Sprintf("SHOW SESSION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "AGGREGATION POLICY":
-		return fmt.Sprintf("SHOW AGGREGATION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PROJECTION POLICY":
-		return fmt.Sprintf("SHOW PROJECTION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "AUTHENTICATION POLICY":
-		return fmt.Sprintf("SHOW AUTHENTICATION POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PACKAGES POLICY":
-		return fmt.Sprintf("SHOW PACKAGES POLICIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "NETWORK RULE":
-		return fmt.Sprintf("SHOW NETWORK RULES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "IMAGE REPOSITORY":
-		return fmt.Sprintf("SHOW IMAGE REPOSITORIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "SERVICE":
-		return fmt.Sprintf("SHOW SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "GATEWAY":
-		return fmt.Sprintf("SHOW GATEWAYS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "CONTACT":
-		return fmt.Sprintf("SHOW CONTACTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "STREAMLIT":
-		return fmt.Sprintf("SHOW STREAMLITS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "SCHEMA":
 		return fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database)), nil
-	case "TABLE":
-		return fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "VIEW":
-		return fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "FUNCTION":
-		return fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "EXTERNAL FUNCTION":
-		return fmt.Sprintf("SHOW EXTERNAL FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "DATA METRIC FUNCTION":
-		return fmt.Sprintf("SHOW DATA METRIC FUNCTIONS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PROCEDURE":
-		return fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "SEQUENCE":
-		return fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "STAGE":
-		return fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "STREAM":
-		return fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "TASK":
-		return fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "FILE FORMAT":
-		return fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "PIPE":
-		return fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "SECRET":
-		return fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "GIT REPOSITORY":
-		return fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "DBT PROJECT":
-		return fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "MODEL":
-		return fmt.Sprintf("SHOW MODELS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "MODEL MONITOR":
-		return fmt.Sprintf("SHOW MODEL MONITORS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "DATASET":
-		return fmt.Sprintf("SHOW DATASETS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "CORTEX SEARCH SERVICE":
-		return fmt.Sprintf("SHOW CORTEX SEARCH SERVICES LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "AGENT":
-		return fmt.Sprintf("SHOW AGENTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "EXTERNAL AGENT":
-		return fmt.Sprintf("SHOW EXTERNAL AGENTS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "MCP SERVER":
-		return fmt.Sprintf("SHOW MCP SERVERS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
-	case "SEMANTIC VIEW":
-		return fmt.Sprintf("SHOW SEMANTIC VIEWS LIKE '%s' IN SCHEMA %s", like, snowflake.Qualify(database, schema)), nil
 	case "WAREHOUSE":
 		return fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like), nil
 	case "ROLE":
 		return fmt.Sprintf("SHOW ROLES LIKE '%s'", like), nil
 	case "USER":
 		return fmt.Sprintf("SHOW USERS LIKE '%s'", like), nil
-	default:
-		return "", fmt.Errorf("unsupported object kind: %s", kind)
 	}
+
+	if k, ok := objectkind.ByName(kind); ok && !k.NoPropertiesQuery {
+		return fmt.Sprintf("SHOW %s LIKE '%s' IN SCHEMA %s", k.Plural, like, snowflake.Qualify(database, schema)), nil
+	}
+	return "", fmt.Errorf("unsupported object kind: %s", kind)
 }
 
 // BuildDescribeStageQuery returns the DESCRIBE STAGE query used to enrich the
@@ -751,4 +665,3 @@ func GetRoutineProperties(ctx context.Context, client *snowflake.Client, databas
 	}
 	return pairs, nil
 }
-
