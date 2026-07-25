@@ -53,7 +53,7 @@ schemas/<SCHEMA>.sql
 …
 ```
 
-`(o *Object).FilePathFor(template, database string, naming OverloadNaming) string` — same but applies a user-configured path template with placeholders `{database}`, `{schema}`, `{object_type}`, `{object_name}`. `DefaultExportPathTemplate = "{database}/{schema}/{object_type}/{object_name}.sql"`. The result is a *candidate* path — two overloads can still map to the same one; `planFiles` resolves that.
+`(o *Object).FilePathFor(template, database string, naming OverloadNaming) string` — same but applies a user-configured path template with placeholders `{database}`, `{schema}`, `{object_type}`, `{object_name}`. `DefaultExportPathTemplate = "{database}/{schema}/{object_type}/{object_name}.sql"`. The result is a *candidate* path — two overloads can still map to the same one; `planFiles` resolves that. The placeholder list is mirrored on the frontend in `frontend/src/components/export/pathTemplate.ts` (insert tags + preview in both export dialogs) — add a placeholder there too when adding one here.
 
 `nameTracker` — mutex-protected collision resolver; first occurrence keeps the plain path, subsequent ones get `_2`, `_3`, … suffixes. Used by `planFiles` as the uniqueness registry.
 
