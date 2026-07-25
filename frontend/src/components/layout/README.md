@@ -200,7 +200,7 @@ cue which is which. Membership also pins the node kind — an `obj:` key can onl
 selection — so `bulkTarget === "obj"` alone keeps **Delete N selected objects…** off database,
 schema, column, git and stage rows, which the `selectionKind` check alone did not. Right-clicking
 never modifies the selection. The entries are **Delete N selected objects…** / **Add N selected as
-Insert Sources** for `obj`, and **Export DDL for N selected databases** / **Drop N selected
+Insert Sources** for `obj`, and **Export DDL for N selected databases…** / **Drop N selected
 databases…** for `db`.
 
 The bulk drop confirmation lists every database with its own Time Travel retention window (zero
@@ -236,13 +236,13 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
 `AppLayout.tsx`: `panelLayoutStore` (panel order, widths), `featureFlagsStore`, `gitStore`.
 
 `Sidebar.tsx`: `queryStore` (open new tab, insert SQL), `objectStore` (schema/object cache),
-`connectionStore` (active DB/schema/role), `gitStore`, `diffStore`, `insertMappingStore`,
+`connectionStore` (active DB/schema/role), `diffStore`, `insertMappingStore`,
 `featureFlagsStore`.
 
 ## IPC calls in `Sidebar.tsx` (representative)
 
 `ListDatabases`, `ListSchemas`, `ListObjects`, `ListBasicObjects`, `SearchAccountObjects`, `ClearObjectCache`,
-`ClearObjectCacheForDatabase`, `GetObjectDDL`, `GetObjectProperties`, `ExportDatabaseDDL`,
+`ClearObjectCacheForDatabase`, `GetObjectDDL`, `GetObjectProperties`,
 `ListDroppedTables`, `ListDroppedSchemas`, `ListDroppedDatabases`, `GetTableRetentionDays`,
 `GetERDiagramData`, `FetchNotebookContent`, `DropTaskTree`, `GetTableColumnsWithTypes`,
 `GetTableForeignKeys`, `ListGitRepoEntries`, `ListGitBranches`, `ListGitTags`, `ExecuteGitFile`,

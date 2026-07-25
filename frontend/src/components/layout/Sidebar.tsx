@@ -91,14 +91,13 @@ import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/editorRef";
 import { useObjectStore } from "../../store/objectStore";
 import { useConnectionStore } from "../../store/connectionStore";
-import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -3542,29 +3541,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDepsModal({ db, schema, kind: objKind, name, args: objArgs });
   };
 
-  const exportDatabase = async () => {
+  // Hands the databases off to the DDL export dialog (owned by QueryPage, the
+  // same one Tools → Export Database DDL… opens) with them pre-selected, so the
+  // output directory, filters, path template and warehouse can be reviewed
+  // before anything is written.
+  const openDdlExport = (databases: string[]) => {
+    window.dispatchEvent(new CustomEvent("thaw:export-ddl", { detail: { databases } }));
+  };
+
+  const exportDatabase = () => {
     if (!ctxMenu) return;
     const db = ctxMenu.nodeKey.slice("db:".length);
     setCtxMenu(null);
-    const exportDir = useGitStore.getState().exportDir;
-    if (!exportDir) {
-      message.warning("Set a working directory in the Git panel first.");
-      return;
-    }
-    const hide = message.loading(`Exporting ${db}…`, 0);
-    try {
-      const result = await ExportDatabaseDDL(db, exportDir);
-      hide();
-      const errs = result.errors?.length ?? 0;
-      if (errs > 0) {
-        message.warning(`${db}: ${result.files} files, ${errs} error(s)`);
-      } else {
-        message.success(`${db}: ${result.files} files written`);
-      }
-    } catch (e) {
-      hide();
-      message.error(String(e));
-    }
+    openDdlExport([db]);
   };
 
   const generateERDiagram = async () => {
@@ -4317,36 +4306,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       .filter((key) => key.startsWith("db:"))
       .map((key) => key.slice("db:".length));
 
-  const exportSelectedDatabases = async () => {
+  const exportSelectedDatabases = () => {
     const dbs = selectedDatabaseNames();
     clearNodeSelection();
     setCtxMenu(null);
-    const exportDir = useGitStore.getState().exportDir;
-    if (!exportDir) {
-      message.warning("Set a working directory in the Git panel first.");
-      return;
-    }
-    const hide = message.loading(`Exporting ${dbs.length} databases…`, 0);
-    let files = 0;
-    let failed = 0;
-    for (const db of dbs) {
-      try {
-        const result = await ExportDatabaseDDL(db, exportDir);
-        files += result.files;
-        if ((result.errors?.length ?? 0) > 0) failed++;
-      } catch (e) {
-        failed++;
-        message.error(`${db}: ${String(e)}`);
-      }
-    }
-    hide();
-    if (failed === 0) {
-      message.success(`${dbs.length} databases: ${files} files written`);
-    } else if (failed < dbs.length) {
-      message.warning(`${dbs.length - failed} of ${dbs.length} databases exported cleanly, ${files} files written`);
-    } else {
-      message.error(`0 of ${dbs.length} databases exported cleanly, ${files} files written`);
-    }
+    openDdlExport(dbs);
   };
 
   const dropSelectedDatabases = async () => {
@@ -4994,7 +4958,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
-          {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase, undefined, !featureFlags.ddlExport, "DDL Export is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "db" && menuItem("Export DDL…", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase, undefined, !featureFlags.ddlExport, "DDL Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram, undefined, !featureFlags.erDiagramDesigner, "ER Diagram & Designer is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "db" && menuItemSub("Reports", <BarChartOutlined style={{ fontSize: 12 }} />, "db-reports", (
             <>
@@ -5012,7 +4976,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             <>
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {menuItem(
-                `Export DDL for ${selectedNodeKeys.size} selected databases`,
+                `Export DDL for ${selectedNodeKeys.size} selected databases…`,
                 <CloudUploadOutlined style={{ fontSize: 12 }} />,
                 exportSelectedDatabases,
                 undefined, !featureFlags.ddlExport, "DDL Export is disabled. Enable it under View → Enabled Features…",

@@ -53,11 +53,24 @@ const OBJECT_TYPES = [
 const ALL_TYPES = OBJECT_TYPES.map((t) => t.value);
 const DEFAULT_TEMPLATE = "{database}/{schema}/{object_type}/{object_name}.sql";
 
-interface Props {
-  onClose: () => void;
+/** Exportable databases plus any pre-selected ones the list didn't contain. */
+function mergeDbs(list: string[] | null, extra?: string[]): string[] {
+  const all = [...(list ?? [])];
+  for (const db of extra ?? []) if (!all.includes(db)) all.push(db);
+  return all;
 }
 
-export default function ExportOptionsModal({ onClose }: Props) {
+interface Props {
+  onClose: () => void;
+  /**
+   * Databases pre-selected in the dialog — set when the dialog is opened from
+   * the object browser's Export DDL context-menu action. Empty (the Tools-menu
+   * default) leaves the selection blank, which means "all databases".
+   */
+  initialDatabases?: string[];
+}
+
+export default function ExportOptionsModal({ onClose, initialDatabases }: Props) {
   const { exportDir, pickExportDir, exportPathTemplate } = useGitStore();
   const { warehouse: sessionWarehouse, warehouses, loadWarehouses } = useSessionStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
@@ -68,7 +81,7 @@ export default function ExportOptionsModal({ onClose }: Props) {
 
   // ── options state ──────────────────────────────────────────────────────────
   const [availableDbs, setAvailableDbs] = useState<string[]>([]);
-  const [databases, setDatabases] = useState<string[]>([]);
+  const [databases, setDatabases] = useState<string[]>(initialDatabases ?? []);
   const [types, setTypes] = useState<string[]>(ALL_TYPES);
   const [schemas, setSchemas] = useState<string[]>([]);
   const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
@@ -79,8 +92,10 @@ export default function ExportOptionsModal({ onClose }: Props) {
   useEffect(() => {
     loadWarehouses();
     ListExportableDatabases()
-      .then((list) => setAvailableDbs(list ?? []))
-      .catch(() => setAvailableDbs([]));
+      // Keep any pre-selected database in the option list even if the account
+      // query fails or omits it, so the dropdown never shows a bare value.
+      .then((list) => setAvailableDbs(mergeDbs(list, initialDatabases)))
+      .catch(() => setAvailableDbs(initialDatabases ?? []));
   }, []);
 
   // Schema suggestions: union of schemas across the databases the export

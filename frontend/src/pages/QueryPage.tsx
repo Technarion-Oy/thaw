@@ -204,7 +204,9 @@ export default function QueryPage() {
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [excelExportOpen, setExcelExportOpen] = useState(false);
-  const [exportDdlOpen, setExportDdlOpen] = useState(false);
+  // null = closed; an array (possibly empty) = open with those databases
+  // pre-selected. Empty means the dialog's "all databases" default.
+  const [exportDdlDbs, setExportDdlDbs] = useState<string[] | null>(null);
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [dbtCreateOpen, setDbtCreateOpen] = useState(false);
   const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
@@ -1127,8 +1129,19 @@ export default function QueryPage() {
   }, []);
 
   useEffect(() => {
-    const off = EventsOn("menu:export-ddl", () => setExportDdlOpen(true));
+    const off = EventsOn("menu:export-ddl", () => setExportDdlDbs([]));
     return () => off();
+  }, []);
+
+  // The object browser's Export DDL context-menu action opens the same dialog
+  // with the right-clicked (or multi-selected) databases pre-selected.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const dbs = (e as CustomEvent<{ databases?: string[] }>).detail?.databases ?? [];
+      setExportDdlDbs(dbs);
+    };
+    window.addEventListener("thaw:export-ddl", handler);
+    return () => window.removeEventListener("thaw:export-ddl", handler);
   }, []);
 
   useEffect(() => {
@@ -1828,7 +1841,9 @@ export default function QueryPage() {
       <Suspense fallback={null}>
         {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
         {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
-        {exportDdlOpen && <ExportOptionsModal onClose={() => setExportDdlOpen(false)} />}
+        {exportDdlDbs !== null && (
+          <ExportOptionsModal initialDatabases={exportDdlDbs} onClose={() => setExportDdlDbs(null)} />
+        )}
         {excelExportOpen && (
           <ExcelExportModal
             open
