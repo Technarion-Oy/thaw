@@ -91,6 +91,10 @@ Key prefixes identify node types:
 
 Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buildEntryNodes(...)` is the shared stage/DBT helper; `emptyChildNode` is the empty-state placeholder.
 
+Only the `obj:` and `db:` prefixes take part in the tree's Cmd/Ctrl+click and Shift+click multi-selection
+(`MULTI_SELECT_PREFIXES` in `Sidebar.tsx`), and a selection never mixes the two — `selectionKind` decides
+which bulk context-menu actions are offered. See `frontend/src/components/layout/README.md`.
+
 ## Adding a Snowflake object kind
 
 Object-kind metadata lives in **one** place: the registry in `internal/objectkind/kinds.go`. Each `Kind` carries the canonical KIND string, the SHOW plural, the display label, whether `SHOW OBJECTS` already returns it (`Basic`), and its `GET_DDL` object type (`""` = unsupported). Everything derives from it — the per-schema `ListExtendedObjects` commands, the account-wide search plan, `BuildObjectPropertiesQuery`, `buildGetDDLQuery` and its reject-list, and (via `go generate`) the frontend's `OBJECT_KIND_ORDER` / `OBJECT_KIND_LABEL` / `DDL_UNSUPPORTED_KINDS`.

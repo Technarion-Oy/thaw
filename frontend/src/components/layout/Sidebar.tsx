@@ -473,6 +473,20 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
     });
 }
 
+// Tree-node key prefixes that take part in multi-selection. A selection is
+// always homogeneous (all objects or all databases) — see `selectionKind`.
+const MULTI_SELECT_PREFIXES = ["obj:", "db:"] as const;
+const multiSelectPrefix = (key: string): string | null =>
+  MULTI_SELECT_PREFIXES.find((p) => key.startsWith(p)) ?? null;
+
+// Highlight painted on a multi-selected row (object or database).
+const SELECTED_NODE_STYLE: React.CSSProperties = {
+  background: "color-mix(in srgb, var(--accent) 22%, transparent)",
+  borderRadius: 3,
+  outline: "1px solid var(--accent)",
+  outlineOffset: 1,
+};
+
 // Cache DDL per unique key; entries expire after DDL_CACHE_TTL so changes
 // are visible without a full app restart.
 const DDL_CACHE_TTL = 60_000; // ms
@@ -767,8 +781,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
   const [selectedNodeKeys, setSelectedNodeKeys] = useState<Set<string>>(new Set());
   const [selectedNodeArgs, setSelectedNodeArgs] = useState<Map<string, string>>(new Map());
-  // Pivot for Shift+click range selection of object-store nodes.
-  const [objAnchorKey, setObjAnchorKey] = useState<string | null>(null);
+  // Pivot for Shift+click range selection of multi-selectable nodes.
+  const [selAnchorKey, setSelAnchorKey] = useState<string | null>(null);
+  // What the current multi-selection holds. Object and database selections are
+  // mutually exclusive — the Tree's onSelect replaces the selection when a node
+  // of the other kind is picked — so the first key decides for all of them.
+  const firstSelectedKey: string | undefined = selectedNodeKeys.values().next().value;
+  const selectionKind: "obj" | "db" | null =
+    firstSelectedKey === undefined ? null : firstSelectedKey.startsWith("db:") ? "db" : "obj";
+  const clearNodeSelection = () => {
+    setSelectedNodeKeys(new Set());
+    setSelectedNodeArgs(new Map());
+    setSelAnchorKey(null);
+  };
   // Path of currently-open submenu keys, indexed by nesting depth (0 = first
   // level off the context menu, 1 = a submenu nested inside that one, …).
   const [submenuPath, setSubmenuPath] = useState<string[]>([]);
@@ -4155,8 +4180,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const name   = parts.slice(4).join(":");
       addInsertSource({ db, schema, name });
     });
-    setSelectedNodeKeys(new Set());
-    setSelectedNodeArgs(new Map());
+    clearNodeSelection();
     setCtxMenu(null);
   };
 
@@ -4172,8 +4196,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         args: selectedNodeArgs.get(key) ?? "",
       };
     });
-    setSelectedNodeKeys(new Set());
-    setSelectedNodeArgs(new Map());
+    clearNodeSelection();
     setCtxMenu(null);
 
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -4264,6 +4287,114 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           message.warning(`Dropped ${items.length - failed} of ${items.length} objects`);
         }
         affectedDbs.forEach((db) => refreshDatabaseByName(db));
+      },
+    });
+  };
+
+  // Names of the multi-selected databases.
+  const selectedDatabaseNames = (): string[] =>
+    Array.from(selectedNodeKeys)
+      .filter((key) => key.startsWith("db:"))
+      .map((key) => key.slice("db:".length));
+
+  const exportSelectedDatabases = async () => {
+    const dbs = selectedDatabaseNames();
+    clearNodeSelection();
+    setCtxMenu(null);
+    const exportDir = useGitStore.getState().exportDir;
+    if (!exportDir) {
+      message.warning("Set a working directory in the Git panel first.");
+      return;
+    }
+    const hide = message.loading(`Exporting ${dbs.length} databases…`, 0);
+    let files = 0;
+    let failed = 0;
+    for (const db of dbs) {
+      try {
+        const result = await ExportDatabaseDDL(db, exportDir);
+        files += result.files;
+        if ((result.errors?.length ?? 0) > 0) failed++;
+      } catch (e) {
+        failed++;
+        message.error(`${db}: ${String(e)}`);
+      }
+    }
+    hide();
+    if (failed === 0) {
+      message.success(`${dbs.length} databases: ${files} files written`);
+    } else {
+      message.warning(`${dbs.length - failed} of ${dbs.length} databases exported cleanly, ${files} files written`);
+    }
+  };
+
+  const dropSelectedDatabases = async () => {
+    const dbs = selectedDatabaseNames();
+    clearNodeSelection();
+    setCtxMenu(null);
+    // Time Travel retention is per database, so each one gets its own note —
+    // a zero-retention database in the list is an irreversible drop.
+    const retentions = await Promise.all(dbs.map(async (db) => {
+      try {
+        return await GetDatabaseRetentionDays(db);
+      } catch {
+        return 1; // fall back to default; non-fatal
+      }
+    }));
+    let dropMode = "CASCADE";
+    modal.confirm({
+      title: `Drop ${dbs.length} databases?`,
+      content: (
+        <div>
+          <p style={{ marginBottom: 8 }}>
+            This will permanently drop the following databases and every schema and object inside them.
+          </p>
+          <ul style={{ margin: "0 0 12px", paddingLeft: 20, maxHeight: 200, overflowY: "auto" }}>
+            {dbs.map((db, i) => (
+              <li key={db} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                {db}
+                <span style={{ color: retentions[i] > 0 ? "var(--text-muted)" : "#cf222e" }}>
+                  {retentions[i] > 0
+                    ? ` — undoable within ${retentions[i]} day${retentions[i] > 1 ? "s" : ""}`
+                    : " — no Time Travel retention, cannot be undone"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span>Mode:</span>
+            <Select
+              defaultValue="CASCADE"
+              style={{ width: 120 }}
+              onChange={(v: string) => { dropMode = v; }}
+              options={[
+                { value: "CASCADE", label: "CASCADE" },
+                { value: "RESTRICT", label: "RESTRICT" },
+              ]}
+            />
+          </div>
+        </div>
+      ),
+      okText: "Drop All",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        let failed = 0;
+        for (const db of dbs) {
+          try {
+            await DropDatabase(db, dropMode);
+            useObjectStore.getState().removeDatabase(db);
+            setTreeData((prev) => prev.filter((n) => n.key !== `db:${db}`));
+          } catch (e) {
+            failed++;
+            contextMsg.error(`Failed to drop database "${db}": ${String(e)}`);
+          }
+        }
+        if (failed === 0) {
+          contextMsg.success(`Dropped ${dbs.length} databases`);
+        } else if (failed < dbs.length) {
+          contextMsg.warning(`Dropped ${dbs.length - failed} of ${dbs.length} databases`);
+        }
+        refreshActiveSearch();
       },
     });
   };
@@ -4565,12 +4696,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
               onClick={(e) => {
                 // Clear multi-selection on any plain (non-modifier) click that
-                // bubbles up from the tree. Ctrl/Cmd/Shift+clicks on obj nodes
-                // call stopPropagation() so they never reach this handler.
+                // bubbles up from the tree. Ctrl/Cmd/Shift+clicks on selectable
+                // nodes call stopPropagation() so they never reach this handler.
                 if (!e.ctrlKey && !e.metaKey && !e.shiftKey && selectedNodeKeys.size > 0) {
-                  setSelectedNodeKeys(new Set());
-                  setSelectedNodeArgs(new Map());
-                  setObjAnchorKey(null);
+                  clearNodeSelection();
                 }
               }}
             >
@@ -4594,22 +4723,26 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                    return;
                  }
 
-                 if (!key.startsWith("obj:")) return;
+                 // Only object and database nodes are multi-selectable, and a
+                 // selection never mixes the two: range walks and the bulk
+                 // context-menu actions are only meaningful within one kind.
+                 const prefix = multiSelectPrefix(key);
+                 if (!prefix) return;
 
                 // Shift+click — select the range between the anchor and this node
-                // across the visible object nodes.
+                // across the visible nodes of the same kind.
                 if (nativeEvent.shiftKey) {
                   nativeEvent.stopPropagation();
                   const expandedSet = new Set((searchActive ? searchExpandedKeys : expandedKeys).map(String));
                   const flat = flattenVisibleNodes(displayData, expandedSet, []);
                   const keys = flat.map((n) => String(n.key));
-                  const anchor = objAnchorKey && keys.includes(objAnchorKey) ? objAnchorKey : key;
+                  const anchor = selAnchorKey && selAnchorKey.startsWith(prefix) && keys.includes(selAnchorKey) ? selAnchorKey : key;
                   const ai = keys.indexOf(anchor);
                   const bi = keys.indexOf(key);
                   if (ai >= 0 && bi >= 0) {
                     const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
-                    const rangeNodes = flat.slice(lo, hi + 1).filter((n) => String(n.key).startsWith("obj:"));
-                    setObjAnchorKey(anchor);
+                    const rangeNodes = flat.slice(lo, hi + 1).filter((n) => String(n.key).startsWith(prefix));
+                    setSelAnchorKey(anchor);
                     setSelectedNodeKeys(new Set(rangeNodes.map((n) => String(n.key))));
                     setSelectedNodeArgs(new Map(
                       rangeNodes
@@ -4622,14 +4755,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
                 if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
                   nativeEvent.stopPropagation();
-                  setObjAnchorKey(key);
+                  setSelAnchorKey(key);
+                  // Keys of the other kind are dropped, so toggling starts a
+                  // fresh selection when the user switches between the two.
                   setSelectedNodeKeys((prev) => {
-                    const next = new Set(prev);
+                    const next = new Set(Array.from(prev).filter((k) => k.startsWith(prefix)));
                     if (next.has(key)) next.delete(key); else next.add(key);
                     return next;
                   });
                   setSelectedNodeArgs((prev) => {
-                    const next = new Map(prev);
+                    const next = new Map(Array.from(prev).filter(([k]) => k.startsWith(prefix)));
                     if (next.has(key)) {
                       next.delete(key);
                     } else {
@@ -4643,7 +4778,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               expandedKeys={searchActive ? searchExpandedKeys : expandedKeys}
               expandAction={"click" as any}
               motion={false as any}
-              onExpand={(keys, { expanded, node }) => {
+              onExpand={(keys, { expanded, node, nativeEvent }) => {
+                // expandAction="click" fires this for plain and modified clicks
+                // alike. A Cmd/Ctrl/Shift+click is a multi-selection gesture, so
+                // swallow it here — otherwise picking N databases would also
+                // expand N of them and kick off N schema loads. Ignoring the new
+                // keys is enough: expandedKeys is controlled, so rc-tree's own
+                // (uncontrolled) update is discarded.
+                const me = nativeEvent as MouseEvent | undefined;
+                if ((me?.ctrlKey || me?.metaKey || me?.shiftKey) && multiSelectPrefix(String(node.key))) return;
                 if (searchActive) {
                   setSearchExpandedKeys(keys as Key[]);
                   // Trigger lazy load when a node without children is expanded during search.
@@ -4667,14 +4810,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 const key = String(node.key);
                 if (key.startsWith("db:") || key.startsWith("schema:")) {
                   const isLoading = loadingTreeNodes.has(key);
+                  // Only databases join the multi-selection; schemas render plain.
+                  const dbSelectionStyle = selectedNodeKeys.has(key) ? SELECTED_NODE_STYLE : undefined;
                   if (isLoading) {
                     return (
                       <Space size={4}>
-                        <span>{node.title as React.ReactNode}</span>
+                        <span style={dbSelectionStyle}>{node.title as React.ReactNode}</span>
                         <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />
                       </Space>
                     );
                   }
+                  if (dbSelectionStyle) return <span style={dbSelectionStyle}>{node.title as React.ReactNode}</span>;
                   return node.title as React.ReactNode;
                 }
                 if (key.startsWith("obj:")) {
@@ -4708,7 +4854,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     );
                   const selectionStyle: React.CSSProperties | undefined =
                     isSelected
-                      ? { background: "color-mix(in srgb, var(--accent) 22%, transparent)", borderRadius: 3, outline: "1px solid var(--accent)", outlineOffset: 1 }
+                      ? SELECTED_NODE_STYLE
                       : isInsertSource
                         ? { borderRadius: 3, outline: "1px dashed var(--accent)", outlineOffset: 1 }
                         : undefined;
@@ -4832,6 +4978,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
+          {/* Bulk actions for a multi-database selection (Cmd/Ctrl or Shift+click). */}
+          {ctxMenu.nodeType === "db" && selectionKind === "db" && selectedNodeKeys.size >= 2 && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {menuItem(
+                `Export DDL for ${selectedNodeKeys.size} selected databases`,
+                <CloudUploadOutlined style={{ fontSize: 12 }} />,
+                exportSelectedDatabases,
+                undefined, !featureFlags.ddlExport, "DDL Export is disabled. Enable it under View → Enabled Features…",
+              )}
+              {menuItem(
+                `Drop ${selectedNodeKeys.size} selected databases…`,
+                <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />,
+                dropSelectedDatabases,
+                "#f85149",
+              )}
+            </>
+          )}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && !isInfoSchema(ctxMenu.nodeKey) && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
@@ -5245,7 +5409,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "VIEW" && insertTarget !== null &&
             menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
-          {selectedNodeKeys.size > 0 && insertTarget !== null &&
+          {selectionKind === "obj" && selectedNodeKeys.size > 0 && insertTarget !== null &&
             menuItem(
               `Add ${selectedNodeKeys.size} selected as Insert Sources for ${insertTarget.name}`,
               <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />,
@@ -5287,7 +5451,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
-          {selectedNodeKeys.size >= 2 && (
+          {selectionKind === "obj" && selectedNodeKeys.size >= 2 && (
             <>
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {menuItem(
