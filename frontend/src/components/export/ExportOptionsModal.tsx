@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Checkbox, Input, Select, Button, Space, Typography, Radio,
+  Modal, Checkbox, Select, Button, Space, Typography, Radio,
   Progress, Alert, Tag, Collapse, Tooltip, message,
 } from "antd";
 import {
@@ -29,6 +29,8 @@ import {
   normalizeOverloadNaming,
   type OverloadNaming,
 } from "./overloadNaming";
+import PathTemplateField from "./PathTemplateField";
+import { validateTemplate } from "./pathTemplate";
 import type { ddl } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -56,7 +58,6 @@ const OBJECT_TYPES = [
 ];
 
 const ALL_TYPES = OBJECT_TYPES.map((t) => t.value);
-const DEFAULT_TEMPLATE = "{database}/{schema}/{object_type}/{object_name}.sql";
 
 /** Exportable databases plus any pre-selected ones the list didn't contain. */
 function mergeDbs(list: string[] | null, extra?: string[]): string[] {
@@ -143,8 +144,12 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
 
+  // Blocks the export rather than appending ".sql" for the user: a template
+  // that already ends in it would silently become "….sql.sql".
+  const templateError = validateTemplate(template);
+
   const runExport = async () => {
-    if (!exportDir || running) return;
+    if (!exportDir || running || templateError) return;
     setRunning(true);
     setFinished(false);
     setResults([]);
@@ -212,11 +217,15 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
           ) : (
             <Button onClick={onClose}>Close</Button>
           )}
-          <Tooltip title={!isConnected ? "Connect to Snowflake to export" : undefined}>
+          <Tooltip
+            title={
+              !isConnected ? "Connect to Snowflake to export" : templateError ?? undefined
+            }
+          >
             <Button
               type="primary"
               icon={<CloudUploadOutlined />}
-              disabled={!isConnected || !exportDir || types.length === 0}
+              disabled={!isConnected || !exportDir || types.length === 0 || !!templateError}
               loading={running}
               onClick={runExport}
             >
@@ -314,19 +323,13 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
           />
         </div>
 
-        <div>
-          <Text strong style={{ display: "block", marginBottom: 6 }}>File path template</Text>
-          <Input
-            value={template}
-            onChange={(e) => setTemplate(e.target.value)}
-            disabled={running}
-            placeholder={DEFAULT_TEMPLATE}
-            style={{ fontFamily: "monospace" }}
-          />
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Applies to this export only.
-          </Text>
-        </div>
+        <PathTemplateField
+          label="File path template"
+          value={template}
+          onChange={setTemplate}
+          disabled={running}
+          hint="Applies to this export only."
+        />
 
         <div>
           <Text strong style={{ display: "block", marginBottom: 6 }}>
