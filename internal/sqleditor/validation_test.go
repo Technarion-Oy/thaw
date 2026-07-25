@@ -811,7 +811,7 @@ create function age_days(d date)
 			expectedError: "",
 		},
 		{
-			// #871: "quoted" argument names must be recognised as arguments —
+			// #871: "quoted" argument names must be recognized as arguments —
 			// otherwise the type name is mistaken for the argument name and every
 			// body reference is flagged.
 			name: "Scalar SQL function with quoted argument names",
