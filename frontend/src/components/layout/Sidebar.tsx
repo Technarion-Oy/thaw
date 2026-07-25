@@ -789,6 +789,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const firstSelectedKey: string | undefined = selectedNodeKeys.values().next().value;
   const selectionKind: "obj" | "db" | null =
     firstSelectedKey === undefined ? null : firstSelectedKey.startsWith("db:") ? "db" : "obj";
+  // Which kind of bulk actions the open context menu may offer. A bulk entry acts
+  // on the whole selection, so it only belongs on a row that is *in* the
+  // selection — right-clicking outside it would put two entries with different
+  // targets ("Drop Database…" for the row under the cursor, "Drop N selected
+  // databases…" for rows elsewhere) side by side with no cue which is which.
+  // Membership also pins the node kind: an "obj:" / "db:" key can only appear in
+  // a selection of that kind, so no separate ctxMenu.nodeType check is needed to
+  // keep object bulk entries off database, schema, column, git and stage rows.
+  const bulkTarget: "obj" | "db" | null =
+    ctxMenu !== null && selectedNodeKeys.has(ctxMenu.nodeKey) ? selectionKind : null;
   const clearNodeSelection = () => {
     setSelectedNodeKeys(new Set());
     setSelectedNodeArgs(new Map());
@@ -3688,11 +3698,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (!ctxMenu) return;
     const db = ctxMenu.nodeKey.slice("db:".length);
     setCtxMenu(null);
+    // The retention lookup is a round trip to Snowflake and the confirmation can't
+    // open until it lands, so say the click registered rather than leaving the UI
+    // silent (and inviting a second click).
+    const hide = message.loading(`Checking Time Travel retention for "${db}"…`, 0);
     let retentionDays = 1;
     try {
       retentionDays = await GetDatabaseRetentionDays(db);
     } catch {
       // fall back to default; non-fatal
+    } finally {
+      hide();
     }
     const retentionNote = retentionDays > 0
       ? `This action can be undone within the ${retentionDays}-day Time Travel retention window.`
@@ -4281,10 +4297,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             message.error(`Failed to drop ${item.kind.toLowerCase()} "${item.name}": ${String(e)}`);
           }
         }
+        // Every batch closes with one summary, all-failed included — the per-item
+        // error toasts can stack past the top of the screen on a long selection.
         if (failed === 0) {
           message.success(`Dropped ${items.length} object${items.length > 1 ? "s" : ""}`);
         } else if (failed < items.length) {
           message.warning(`Dropped ${items.length - failed} of ${items.length} objects`);
+        } else {
+          message.error(`Dropped 0 of ${items.length} objects`);
         }
         affectedDbs.forEach((db) => refreshDatabaseByName(db));
       },
@@ -4322,8 +4342,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     hide();
     if (failed === 0) {
       message.success(`${dbs.length} databases: ${files} files written`);
-    } else {
+    } else if (failed < dbs.length) {
       message.warning(`${dbs.length - failed} of ${dbs.length} databases exported cleanly, ${files} files written`);
+    } else {
+      message.error(`0 of ${dbs.length} databases exported cleanly, ${files} files written`);
     }
   };
 
@@ -4332,7 +4354,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     clearNodeSelection();
     setCtxMenu(null);
     // Time Travel retention is per database, so each one gets its own note —
-    // a zero-retention database in the list is an irreversible drop.
+    // a zero-retention database in the list is an irreversible drop. One round
+    // trip per database, so a large selection is a visible pause before the
+    // confirmation appears: hold a loading toast until they all land.
+    const hide = message.loading(`Checking Time Travel retention for ${dbs.length} databases…`, 0);
     const retentions = await Promise.all(dbs.map(async (db) => {
       try {
         return await GetDatabaseRetentionDays(db);
@@ -4340,6 +4365,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         return 1; // fall back to default; non-fatal
       }
     }));
+    hide();
     let dropMode = "CASCADE";
     modal.confirm({
       title: `Drop ${dbs.length} databases?`,
@@ -4393,6 +4419,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           contextMsg.success(`Dropped ${dbs.length} databases`);
         } else if (failed < dbs.length) {
           contextMsg.warning(`Dropped ${dbs.length - failed} of ${dbs.length} databases`);
+        } else {
+          contextMsg.error(`Dropped 0 of ${dbs.length} databases`);
         }
         refreshActiveSearch();
       },
@@ -4978,8 +5006,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
-          {/* Bulk actions for a multi-database selection (Cmd/Ctrl or Shift+click). */}
-          {ctxMenu.nodeType === "db" && selectionKind === "db" && selectedNodeKeys.size >= 2 && (
+          {/* Bulk actions for a multi-database selection (Cmd/Ctrl or Shift+click),
+              shown only when the right-clicked database is part of that selection. */}
+          {bulkTarget === "db" && selectedNodeKeys.size >= 2 && (
             <>
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {menuItem(
@@ -5409,7 +5438,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "VIEW" && insertTarget !== null &&
             menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource, undefined, !featureFlags.insertMapping, "Insert Mapping is disabled. Enable it under View → Enabled Features…")}
-          {selectionKind === "obj" && selectedNodeKeys.size > 0 && insertTarget !== null &&
+          {bulkTarget === "obj" && insertTarget !== null &&
             menuItem(
               `Add ${selectedNodeKeys.size} selected as Insert Sources for ${insertTarget.name}`,
               <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />,
@@ -5451,7 +5480,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
-          {selectionKind === "obj" && selectedNodeKeys.size >= 2 && (
+          {bulkTarget === "obj" && selectedNodeKeys.size >= 2 && (
             <>
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               {menuItem(
