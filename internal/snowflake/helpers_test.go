@@ -3,8 +3,12 @@
 package snowflake
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"thaw/internal/sqltok"
 )
 
 func TestIsBoolean(t *testing.T) {
@@ -99,4 +103,242 @@ func TestDollarQuoteTag(t *testing.T) {
 			t.Errorf("DollarQuoteTag(%q) returned a tag present in the body", tt.body)
 		}
 	}
+}
+
+// A body carrying many decoy tags — cheap to author inside a procedure another
+// account owns, and only seen by whoever exports that database — must not turn
+// the search into a scan per candidate index.
+func TestDollarQuoteTagManyDecoys(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("$$ $thaw$ $thaw_body$")
+	for i := range 20_000 {
+		fmt.Fprintf(&b, " $thaw_%d$", i)
+	}
+	// Non-canonical runs name no tag this package emits, so they must not
+	// reserve an index: $thaw_00020000$ leaves 20000 free.
+	b.WriteString(" $thaw_00020000$")
+	body := b.String()
+
+	start := time.Now()
+	tag := DollarQuoteTag(body)
+	elapsed := time.Since(start)
+
+	if tag != "$thaw_20000$" {
+		t.Errorf("DollarQuoteTag = %q, want $thaw_20000$", tag)
+	}
+	if strings.Contains(body, tag) {
+		t.Errorf("DollarQuoteTag returned %q, which the body contains", tag)
+	}
+	// A single pass over ~250 KB is sub-millisecond; the pre-fix sequential
+	// probe took O(N · len(body)). The bound is loose enough not to flake on a
+	// loaded machine while still failing on a return to quadratic behavior.
+	if elapsed > time.Second {
+		t.Errorf("DollarQuoteTag over %d bytes took %v", len(body), elapsed)
+	}
+}
+
+func TestUnescapeStringLiteral(t *testing.T) {
+	tests := []struct {
+		name     string
+		inner    string
+		want     string
+		wantSafe bool
+	}{
+		{"plain", "select 1", "select 1", true},
+		{"doubled quote", "let x := ''hello''", "let x := 'hello'", true},
+		{"backslash quote", `it\'s`, "it's", true},
+		{"backslash escapes", `a\\b\nc\td`, "a\\b\nc\td", true},
+		{"double quote escape", `say \"hi\"`, `say "hi"`, true},
+		{"unknown escape drops backslash", `\z`, "z", true},
+		{"trailing backslash", `end\`, `end\`, true},
+		{"hex escape", `A\x42C`, "ABC", true},
+		{"unicode escape", `\u0042`, "B", true},
+		{"octal escape", `\101`, "A", true},
+		{"malformed hex is a plain x", `\xZZ`, "xZZ", true},
+		{"nul is not verbatim safe", `a\0b`, "a\x00b", false},
+		{"backspace is not verbatim safe", `a\bb`, "a\bb", false},
+		{"non-ascii hex is ambiguous", `caf\xe9`, "café", false},
+		{"unicode above ascii is fine", `caf\u00e9`, "café", true},
+		{"lone surrogate is not encodable", `\ud83d`, "�", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, safe := UnescapeStringLiteral(tt.inner)
+			if got != tt.want {
+				t.Errorf("UnescapeStringLiteral(%q) = %q, want %q", tt.inner, got, tt.want)
+			}
+			if safe != tt.wantSafe {
+				t.Errorf("UnescapeStringLiteral(%q) safe = %v, want %v", tt.inner, safe, tt.wantSafe)
+			}
+		})
+	}
+}
+
+func TestDollarQuoteBody(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+		want string
+	}{
+		{
+			name: "procedure body",
+			stmt: "CREATE OR REPLACE PROCEDURE FOO()\nRETURNS VARCHAR\nLANGUAGE SQL\nAS 'begin\n  let x := ''hello'';\n  return x;\nend'",
+			want: "CREATE OR REPLACE PROCEDURE FOO()\nRETURNS VARCHAR\nLANGUAGE SQL\nAS $$begin\n  let x := 'hello';\n  return x;\nend$$",
+		},
+		{
+			name: "trailing semicolon and whitespace are preserved",
+			stmt: "CREATE FUNCTION F() RETURNS INT AS 'select 1' ;",
+			want: "CREATE FUNCTION F() RETURNS INT AS $$select 1$$ ;",
+		},
+		{
+			name: "secure function",
+			stmt: "CREATE OR REPLACE SECURE FUNCTION F() RETURNS INT AS 'select ''x'''",
+			want: "CREATE OR REPLACE SECURE FUNCTION F() RETURNS INT AS $$select 'x'$$",
+		},
+		{
+			name: "python handler body",
+			stmt: "CREATE FUNCTION F() RETURNS INT LANGUAGE PYTHON HANDLER = 'run' AS 'def run():\n\treturn 1'",
+			want: "CREATE FUNCTION F() RETURNS INT LANGUAGE PYTHON HANDLER = 'run' AS $$def run():\n\treturn 1$$",
+		},
+		{
+			name: "javascript body with backslash escapes",
+			stmt: `CREATE FUNCTION F() RETURNS STRING LANGUAGE JAVASCRIPT AS 'return "a\\nb".replace(/\\s/g, '''')'`,
+			want: "CREATE FUNCTION F() RETURNS STRING LANGUAGE JAVASCRIPT AS $$return \"a\\nb\".replace(/\\s/g, '')$$",
+		},
+		{
+			name: "AS inside RETURNS TABLE is not the body",
+			stmt: "CREATE FUNCTION F() RETURNS TABLE (A NUMBER AS X) AS 'select 1'",
+			want: "CREATE FUNCTION F() RETURNS TABLE (A NUMBER AS X) AS $$select 1$$",
+		},
+		{
+			name: "comment clause before the body",
+			stmt: "CREATE FUNCTION F() RETURNS INT COMMENT = 'a comment' AS 'select 1'",
+			want: "CREATE FUNCTION F() RETURNS INT COMMENT = 'a comment' AS $$select 1$$",
+		},
+		{
+			name: "body containing $$ gets a named tag",
+			stmt: "CREATE FUNCTION F() RETURNS INT AS 'select ''$$'''",
+			want: "CREATE FUNCTION F() RETURNS INT AS $thaw$select '$$'$thaw$",
+		},
+		{
+			name: "body ending in a dollar gets a named tag",
+			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'select ''x''$'",
+			want: "CREATE FUNCTION F() RETURNS STRING AS $thaw$select 'x'$$thaw$",
+		},
+		{
+			// The scan for the closing delimiter starts after the opening one,
+			// so a leading "$" cannot collide and needs no escalation.
+			name: "body starting with a dollar keeps the bare tag",
+			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'select $ x'",
+			want: "CREATE FUNCTION F() RETURNS STRING AS $$select $ x$$",
+		},
+		{
+			// "$thaw$" would close inside the body's own "$thaw" tail, even
+			// though the body neither contains "$thaw$" nor ends with "$".
+			name: "body ending in a tag prefix escalates past that tag",
+			stmt: "CREATE FUNCTION F() RETURNS STRING AS 'x$$y$thaw'",
+			want: "CREATE FUNCTION F() RETURNS STRING AS $thaw_body$x$$y$thaw$thaw_body$",
+		},
+		{
+			name: "create or alter procedure",
+			stmt: "CREATE OR ALTER PROCEDURE P() RETURNS INT LANGUAGE SQL AS 'begin\n  return 1;\nend'",
+			want: "CREATE OR ALTER PROCEDURE P() RETURNS INT LANGUAGE SQL AS $$begin\n  return 1;\nend$$",
+		},
+		{
+			name: "already dollar-quoted is untouched",
+			stmt: "CREATE FUNCTION F() RETURNS INT AS $$select 1$$",
+			want: "CREATE FUNCTION F() RETURNS INT AS $$select 1$$",
+		},
+		{
+			name: "empty body is untouched",
+			stmt: "CREATE FUNCTION F() RETURNS INT AS ''",
+			want: "CREATE FUNCTION F() RETURNS INT AS ''",
+		},
+		{
+			name: "control character in the body is untouched",
+			stmt: `CREATE FUNCTION F() RETURNS STRING AS 'a\0b'`,
+			want: `CREATE FUNCTION F() RETURNS STRING AS 'a\0b'`,
+		},
+		{
+			name: "view is not a function body",
+			stmt: "CREATE VIEW V AS SELECT 'a' AS C",
+			want: "CREATE VIEW V AS SELECT 'a' AS C",
+		},
+		{
+			name: "table is untouched",
+			stmt: "CREATE TABLE T (C VARCHAR DEFAULT 'x')",
+			want: "CREATE TABLE T (C VARCHAR DEFAULT 'x')",
+		},
+		{
+			name: "external function endpoint is not a body",
+			stmt: "CREATE EXTERNAL FUNCTION F() RETURNS INT API_INTEGRATION = I AS 'https://example.com'",
+			want: "CREATE EXTERNAL FUNCTION F() RETURNS INT API_INTEGRATION = I AS 'https://example.com'",
+		},
+		{
+			name: "unterminated literal is untouched",
+			stmt: "CREATE FUNCTION F() RETURNS INT AS 'select 1",
+			want: "CREATE FUNCTION F() RETURNS INT AS 'select 1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DollarQuoteBody(tt.stmt); got != tt.want {
+				t.Errorf("DollarQuoteBody(%q)\n got %q\nwant %q", tt.stmt, got, tt.want)
+			}
+		})
+	}
+}
+
+// The rewritten statement must tokenize back to the exact body value: neither
+// the body's own content nor the seam where it meets the closing delimiter may
+// terminate the dollar-quoted span early. The check runs through the same
+// first-occurrence-wins scanner Snowflake's parser implements (sqltok), rather
+// than trusting the tag this package picked.
+func TestDollarQuoteBodyRoundTrip(t *testing.T) {
+	bodies := []string{
+		"select 1",
+		"a $$ b",
+		"x$",
+		"$x",
+		"$thaw$ $$ $thaw_body$",
+		"begin\n  let x := 'q';\nend",
+		// Bodies whose tail is a proper prefix of the tag that would otherwise
+		// be chosen: the closing delimiter starts inside the body unless the
+		// seam itself is checked.
+		"x$$y$thaw",
+		"x$$y$thaw_",
+		"$$ $thaw$ ends with $thaw_body",
+		"$$ $thaw$ $thaw_body$ $thaw_0",
+		"$",
+	}
+	for _, body := range bodies {
+		stmt := "CREATE FUNCTION F() RETURNS STRING AS " + quoteLiteral(body)
+		got := DollarQuoteBody(stmt)
+
+		var spans []string
+		for _, tok := range sqltok.SignificantTokens(got) {
+			if tok.Kind == sqltok.DollarQuoted {
+				spans = append(spans, tok.Text(got))
+			}
+		}
+		if len(spans) != 1 {
+			t.Errorf("body %q: rewritten as %q, tokenized into %d dollar-quoted spans, want 1",
+				body, got, len(spans))
+			continue
+		}
+
+		// The span carries the delimiter on both ends; what is left must be the
+		// original body, byte for byte.
+		span := spans[0]
+		tag := span[:strings.Index(span[1:], "$")+2]
+		inner := strings.TrimSuffix(strings.TrimPrefix(span, tag), tag)
+		if inner != body {
+			t.Errorf("round trip of %q: rewritten as %q, tag %q, recovered %q", body, got, tag, inner)
+		}
+	}
+}
+
+// quoteLiteral renders body as the single-quoted literal GET_DDL would return.
+func quoteLiteral(body string) string {
+	return "'" + strings.ReplaceAll(body, "'", "''") + "'"
 }

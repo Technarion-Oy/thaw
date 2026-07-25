@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"thaw/internal/snowflake"
 	"thaw/internal/sqltok"
 )
 
@@ -48,6 +49,14 @@ type ExportOptions struct {
 	// SkipExisting leaves files that already exist on disk untouched instead
 	// of overwriting them. Skipped files are counted in ExportResult.Skipped.
 	SkipExisting bool
+
+	// DollarQuoteBodies rewrites FUNCTION / PROCEDURE bodies from the
+	// single-quoted string-literal form GET_DDL returns into the dollar-quoted
+	// ($$…$$) form, so the exported file holds readable code instead of doubled
+	// quotes and backslash escapes. Bodies that are already dollar-quoted, and
+	// literals that would not survive the round trip, are left alone
+	// (snowflake.DollarQuoteBody).
+	DollarQuoteBodies bool
 
 	// DBConcurrency is the maximum number of databases fetched from Snowflake
 	// simultaneously.  Defaults to min(16, runtime.NumCPU()*4).
@@ -199,6 +208,13 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 					continue
 				}
 			}
+		}
+
+		// Body rewriting happens before planning so every path decision — and
+		// the overload sort key, which includes the SQL text — sees the final
+		// statement.
+		if opts.DollarQuoteBodies && (obj.Kind == KindFunction || obj.Kind == KindProcedure) {
+			obj.SQL = snowflake.DollarQuoteBody(obj.SQL)
 		}
 
 		objs = append(objs, obj)

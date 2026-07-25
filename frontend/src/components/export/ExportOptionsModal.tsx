@@ -91,6 +91,7 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
   const [schemas, setSchemas] = useState<string[]>([]);
   const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
   const [skipExisting, setSkipExisting] = useState(false);
+  const [dollarQuoteBodies, setDollarQuoteBodies] = useState(false);
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined);
   const [template, setTemplate] = useState(exportPathTemplate || "");
   // Prefilled from the persisted preference (Export Path Format dialog); changing
@@ -165,6 +166,7 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
       warehouse: warehouse ?? "",
       pathTemplate: template.trim(),
       overloadNaming,
+      dollarQuoteBodies,
     };
 
     try {
@@ -343,6 +345,22 @@ export default function ExportOptionsModal({ onClose, initialDatabases }: Props)
             {namingOption.hint} FOO(X VARCHAR(16)) + FOO(X VARCHAR(256)) →{" "}
             <span style={{ fontFamily: "monospace" }}>{namingOption.example}</span>. Applies to
             this export only; the saved default lives in Tools → Export Path Format.
+          </Text>
+          <Checkbox
+            checked={dollarQuoteBodies}
+            disabled={running}
+            onChange={(e) => setDollarQuoteBodies(e.target.checked)}
+            style={{ marginTop: 8 }}
+          >
+            <span style={{ fontSize: 13 }}>
+              Export bodies as dollar-quoted (
+              <span style={{ fontFamily: "monospace" }}>$$…$$</span>)
+            </span>
+          </Checkbox>
+          <Text type="secondary" style={{ fontSize: 11, display: "block" }}>
+            GET_DDL returns bodies as a quoted string with doubled quotes and backslash
+            escapes; this writes the literal code instead. Bodies that are already
+            dollar-quoted are left as they are.
           </Text>
         </div>
 
