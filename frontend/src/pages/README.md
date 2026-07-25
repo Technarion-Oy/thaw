@@ -106,6 +106,9 @@ Custom DOM events handled here:
 - `thaw:connect` — triggered when `runQuery` is called while disconnected,
   causing the connect modal to open.
 - `thaw:session-config-saved` — re-reads session init mode after config save.
+- `thaw:export-ddl` — emitted by `Sidebar`'s **Export DDL…** database context-menu
+  action with `detail.databases`; opens `ExportOptionsModal` (the same dialog as
+  **Tools → Export Database DDL…**) with those databases pre-selected.
 
 **File-backed tab recovery**
 
