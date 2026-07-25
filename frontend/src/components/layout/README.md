@@ -173,16 +173,32 @@ of their root task with `isFinalizer: true`; root tasks with no predecessors get
 `ddlCache` (module-level `Map`, 60 s TTL) caches DDL fetched via `GetObjectDDL` to avoid
 repeated IPC calls on tree hover.
 
-### Multi-select (object nodes)
+### Multi-select (object and database nodes)
 `selectedNodeKeys` (Set) + `selectedNodeArgs` (Map of function/procedure signatures) hold the
 selection; the `Tree` is `multiple` with `selectedKeys={Array.from(selectedNodeKeys)}`. The
 `onSelect` handler branches on the native modifiers: **Cmd/Ctrl+click** toggles a node (and sets
-`objAnchorKey`, the range pivot); **Shift+click** selects every object node between `objAnchorKey`
+`selAnchorKey`, the range pivot); **Shift+click** selects every node between `selAnchorKey`
 and the click. Visible order for the range comes from `flattenVisibleNodes(displayData, expandedSet, …)`,
 which walks the tree against the controlled `expandedKeys`/`searchExpandedKeys`. A plain (no-modifier)
-click on the tree container clears the selection. The tree wrapper sets `userSelect: none` and
-`preventDefault`s shift-mousedown so a range click doesn't paint a browser text selection. The
-selection drives the context menu's bulk **Delete N selected objects** and **Add N as insert sources**.
+click on the tree container clears the selection (`clearNodeSelection`). The tree wrapper sets
+`userSelect: none` and `preventDefault`s shift-mousedown so a range click doesn't paint a browser
+text selection. Selected rows are painted with the shared module-level `SELECTED_NODE_STYLE`.
+
+Two node kinds take part, listed in `MULTI_SELECT_PREFIXES` and matched by `multiSelectPrefix(key)`:
+object nodes (`obj:`) and database nodes (`db:`); schemas and the synthetic type/git/stage nodes
+stay single-select. **A selection is never mixed** — range walks filter to the clicked node's own
+prefix, and a Cmd/Ctrl toggle drops keys of the other kind, so picking a database clears an object
+selection and vice versa. `selectionKind` (`"obj" | "db" | null`, read off the first key) is what the
+context menu gates its bulk entries on: **Delete N selected objects** / **Add N as insert sources**
+for `obj`, and **Export DDL for N selected databases** / **Drop N selected databases…** for `db`.
+The bulk drop confirmation lists every database with its own Time Travel retention window (zero
+retention is called out in red) and offers the same CASCADE/RESTRICT mode select as the single-node
+**Drop Database…**.
+
+Because `expandAction="click"`, rc-tree also treats a modified click as an expand; `onExpand` returns
+early when the event carries Cmd/Ctrl/Shift and the node is multi-selectable, so building a selection
+doesn't expand (and lazily load) every row it touches. Ignoring the event is enough — `expandedKeys`
+is controlled, so rc-tree's own uncontrolled update is discarded.
 
 ### Show Dropped Objects (Time Travel undrop)
 Three modals — schema scope (`undropModal`, from the schema context menu's **Show Dropped Objects…**),
