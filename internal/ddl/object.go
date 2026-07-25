@@ -71,7 +71,12 @@ type Object struct {
 	Schema   string // may be empty for DB-level objects
 	Name     string // bare object name (unquoted)
 	ArgSig   string // non-empty only for FUNCTION / PROCEDURE overloads
-	SQL      string // full DDL text (without trailing semicolon)
+	// ArgSigFull is the same signature with size qualifiers kept, e.g.
+	// "VARCHAR_256" where ArgSig is "VARCHAR". Used by
+	// OverloadNamingSignature to keep VARCHAR(16) and VARCHAR(256) overloads
+	// in separate files.
+	ArgSigFull string
+	SQL        string // full DDL text (without trailing semicolon)
 }
 
 // DefaultExportPathTemplate is the path template used when no custom template
@@ -101,10 +106,7 @@ func (o *Object) FilePath() string {
 		if schema == "" {
 			schema = "_root"
 		}
-		fname := sanitize(o.Name)
-		if (o.Kind == KindFunction || o.Kind == KindProcedure) && o.ArgSig != "" {
-			fname = fname + "__" + o.ArgSig
-		}
+		fname := sanitize(o.Name) + o.overloadSuffix(OverloadNamingArgTypes)
 		return filepath.Join(sanitize(schema), dirFor(o.Kind), fname+".sql")
 	}
 }
@@ -123,10 +125,15 @@ func (o *Object) FilePath() string {
 //	{database}    → sanitized database name
 //	{schema}      → sanitized schema name (or "_root" when absent)
 //	{object_type} → plural lowercase type directory (e.g. "tables", "views")
-//	{object_name} → sanitized object name (includes __argsig for overloads)
+//	{object_name} → sanitized object name (plus the overload suffix that
+//	                naming selects for FUNCTION / PROCEDURE)
 //
-// An empty template falls back to DefaultExportPathTemplate.
-func (o *Object) FilePathFor(template, database string) string {
+// An empty template falls back to DefaultExportPathTemplate; the zero
+// OverloadNaming falls back to DefaultOverloadNaming.
+//
+// The path is a *candidate*: two overloads can still map to the same one (see
+// OverloadNamingArgTypes). planFiles resolves such collisions.
+func (o *Object) FilePathFor(template, database string, naming OverloadNaming) string {
 	switch o.Kind {
 	case KindDatabase:
 		return filepath.Join(sanitize(database), "_database.sql")
@@ -140,10 +147,7 @@ func (o *Object) FilePathFor(template, database string) string {
 		if schema == "" {
 			schema = "_root"
 		}
-		fname := sanitize(o.Name)
-		if (o.Kind == KindFunction || o.Kind == KindProcedure) && o.ArgSig != "" {
-			fname = fname + "__" + o.ArgSig
-		}
+		fname := sanitize(o.Name) + o.overloadSuffix(naming)
 		// Four direct replacements on a short template string are faster
 		// than constructing a strings.Replacer state machine per object.
 		path := strings.ReplaceAll(template, "{database}", sanitize(database))
@@ -243,10 +247,14 @@ func Parse(sql string) Object {
 	}
 
 	// For overloadable objects, derive a signature from the argument list that
-	// follows the name so that overloads land in distinct files.
+	// follows the name so that overloads land in distinct files. Both the
+	// size-stripped and the size-keeping form are recorded; which one ends up in
+	// the file name is the exporter's OverloadNaming choice.
 	if obj.Kind == KindFunction || obj.Kind == KindProcedure {
 		if next < len(sig) {
-			obj.ArgSig = parseArgSig(sql[sig[next].Start:])
+			after := sql[sig[next].Start:]
+			obj.ArgSig = parseArgSig(after)
+			obj.ArgSigFull = parseArgSigFull(after)
 		}
 	}
 
@@ -290,16 +298,19 @@ func splitParamList(s string) []string {
 	return parts
 }
 
-// parseArgSig extracts a simplified, sanitized argument-type signature from
-// the text that immediately follows a function/procedure name, e.g.:
+// paramTypeTokens returns the raw type token of every parameter in the argument
+// list that immediately follows a function/procedure name:
 //
-//	"(X FLOAT, Y VARCHAR(256))"  →  "FLOAT_VARCHAR"
-//	"()"                         →  "noargs"
-//	""                           →  ""  (no parens found)
-func parseArgSig(after string) string {
+//	"(X FLOAT, Y VARCHAR(256))"  →  ["FLOAT", "VARCHAR(256)"], true
+//	"()"                         →  [], true
+//	"FLOAT" / "(FLOAT"           →  nil, false   (no balanced list)
+//
+// The second result distinguishes "no argument list here" from "an empty one",
+// which the callers render as "" and "noargs" respectively.
+func paramTypeTokens(after string) ([]string, bool) {
 	after = strings.TrimSpace(after)
 	if len(after) == 0 || after[0] != '(' {
-		return ""
+		return nil, false
 	}
 
 	// Find the matching closing parenthesis.
@@ -320,41 +331,108 @@ func parseArgSig(after string) string {
 		}
 	}
 	if end < 0 {
-		return ""
+		return nil, false
 	}
 
 	inner := strings.TrimSpace(after[1:end])
 	if inner == "" {
-		return "noargs"
+		return nil, true
 	}
 
-	// Each comma-separated param is either "name TYPE" or just "TYPE".
-	// We want only the TYPE portion, stripped of size qualifiers like (256).
-	// Use a paren-depth-aware split so commas inside NUMBER(38,0) are not
-	// treated as parameter separators.
-	var types []string
+	// Each comma-separated param is either "name TYPE" or just "TYPE"; we want
+	// only the TYPE portion. Use a paren-depth-aware split so commas inside
+	// NUMBER(38,0) are not treated as parameter separators.
+	var toks []string
 	for _, param := range splitParamList(inner) {
 		param = strings.TrimSpace(param)
 		if param == "" {
 			continue
 		}
 		fields := strings.Fields(param)
-		var typeName string
 		if len(fields) >= 2 {
-			typeName = fields[1] // "name TYPE …"
+			toks = append(toks, fields[1]) // "name TYPE …"
 		} else {
-			typeName = fields[0] // "TYPE"
+			toks = append(toks, fields[0]) // "TYPE"
 		}
+	}
+	return toks, true
+}
+
+// parseArgSig extracts a simplified, sanitized argument-type signature from
+// the text that immediately follows a function/procedure name, with size
+// qualifiers stripped:
+//
+//	"(X FLOAT, Y VARCHAR(256))"  →  "FLOAT_VARCHAR"
+//	"()"                         →  "noargs"
+//	""                           →  ""  (no parens found)
+func parseArgSig(after string) string {
+	toks, ok := paramTypeTokens(after)
+	if !ok {
+		return ""
+	}
+	types := make([]string, 0, len(toks))
+	for _, tok := range toks {
 		// Strip any size qualifier: VARCHAR(256) → VARCHAR
-		if idx := strings.IndexByte(typeName, '('); idx >= 0 {
-			typeName = typeName[:idx]
+		if idx := strings.IndexByte(tok, '('); idx >= 0 {
+			tok = tok[:idx]
 		}
-		types = append(types, sanitize(strings.ToUpper(typeName)))
+		types = append(types, sanitize(strings.ToUpper(tok)))
 	}
 	if len(types) == 0 {
 		return "noargs"
 	}
 	return strings.Join(types, "_")
+}
+
+// parseArgSigFull is parseArgSig with the size qualifiers folded into the
+// signature instead of dropped, so overloads that differ only in a qualifier
+// still get distinct names:
+//
+//	"(X VARCHAR(16))"             →  "VARCHAR_16"
+//	"(A NUMBER(38,0), B FLOAT)"   →  "NUMBER_38_0_FLOAT"
+//	"()"                          →  "noargs"
+//	""                            →  ""  (no parens found)
+func parseArgSigFull(after string) string {
+	toks, ok := paramTypeTokens(after)
+	if !ok {
+		return ""
+	}
+	types := make([]string, 0, len(toks))
+	for _, tok := range toks {
+		types = append(types, flattenType(tok))
+	}
+	if len(types) == 0 {
+		return "noargs"
+	}
+	return strings.Join(types, "_")
+}
+
+// flattenType folds a parameter type token into one path-safe component,
+// keeping the size qualifier that parseArgSig throws away:
+//
+//	VARCHAR(256)  →  VARCHAR_256
+//	NUMBER(38,0)  →  NUMBER_38_0
+//	FLOAT         →  FLOAT
+func flattenType(tok string) string {
+	s := sanitize(strings.ToUpper(tok))
+	// Every paren and comma became an underscore, so "(38,0)" arrives as
+	// "_38_0_": collapse the runs and drop the edges so the component reads
+	// like a name rather than punctuation.
+	var b strings.Builder
+	b.Grow(len(s))
+	prevUnderscore := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '_' {
+			if prevUnderscore {
+				continue
+			}
+			prevUnderscore = true
+		} else {
+			prevUnderscore = false
+		}
+		b.WriteByte(s[i])
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // ─── sanitize ────────────────────────────────────────────────────────────────

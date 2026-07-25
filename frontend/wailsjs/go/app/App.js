@@ -2018,6 +2018,10 @@ export function SaveGitConfig(arg1) {
   return window['go']['app']['App']['SaveGitConfig'](arg1);
 }
 
+export function SaveGitExportOverloadNaming(arg1) {
+  return window['go']['app']['App']['SaveGitExportOverloadNaming'](arg1);
+}
+
 export function SaveGitExportPathTemplate(arg1) {
   return window['go']['app']['App']['SaveGitExportPathTemplate'](arg1);
 }
