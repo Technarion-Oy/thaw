@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, Dropdown, App as AntApp } from "antd";
+import { Tree, Typography, Spin, Button, Input, Switch, Tooltip, Dropdown, App as AntApp } from "antd";
 import type { MenuProps } from "antd";
 import {
   FolderOutlined,
@@ -52,6 +52,17 @@ import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
+import {
+  type NewItemKind,
+  newItemKey,
+  isNewItemKey,
+  insertSorted,
+  findNode,
+  childrenOf,
+  insertPlaceholder,
+  finalNewName,
+  validateNewName,
+} from "./fileTreeUtils";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -150,18 +161,6 @@ function makeNode(path: string, name: string, isDir: boolean): DataNode {
   };
 }
 
-/** Find a node by key anywhere in the tree (depth-first). */
-function findNode(nodes: DataNode[], key: string): DataNode | null {
-  for (const n of nodes) {
-    if (n.key === key) return n;
-    if (n.children) {
-      const f = findNode(n.children, key);
-      if (f) return f;
-    }
-  }
-  return null;
-}
-
 /** Remove a node by key from the tree. */
 function removeNode(nodes: DataNode[], key: string): DataNode[] {
   return nodes
@@ -200,22 +199,6 @@ function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string):
     key: newPrefix + String(n.key).substring(oldPrefix.length),
     children: n.children ? reKeyChildren(n.children, oldPrefix, newPrefix) : undefined,
   }));
-}
-
-/** Insert a node into a sibling list, maintaining dirs-first alphabetical order. */
-function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] {
-  const kids = [...siblings];
-  const isDir = !child.isLeaf;
-  const name = String(child.title ?? "");
-  let i = 0;
-  if (isDir) {
-    while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-  } else {
-    while (i < kids.length && !kids[i].isLeaf) i++;
-    while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-  }
-  kids.splice(i, 0, child);
-  return kids;
 }
 
 /** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
@@ -336,6 +319,12 @@ export default function FileBrowser() {
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
   const [loadedKeys,  setLoadedKeys]  = useState<Key[]>([]);
+  // Expansion is CONTROLLED (rather than rc-tree's default uncontrolled, lazy
+  // expansion) so `startNewItem` can programmatically open the directory the
+  // inline "new item" placeholder is being created in. rc-tree only fires
+  // `loadData` from a user-driven expand, so `startNewItem` also lists the
+  // directory itself when it isn't in `loadedKeys` yet.
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   // Multi-selection: the set of selected node keys (drives highlight + bulk ops).
   // `anchorKey` is the pivot for Shift+click range selection.
   const [selKeys,     setSelKeys]     = useState<string[]>([]);
@@ -373,14 +362,23 @@ export default function FileBrowser() {
   const [editingKey, setEditingKey] = useState<Key | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const editActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
-  const editInitRef = useRef(false);
 
-  // ── Modal state (new folder / new file) ─────────────────────────────────
-  const [inlineInput, setInlineInput] = useState<{ kind: "newFolder" | "newFile"; path: string; value: string } | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // ── Inline creation state (new folder / new file) ───────────────────────
+  // VS Code style: an editable placeholder row is injected into the tree under
+  // `parent` instead of opening a modal. It lives in the render-time tree only
+  // (see `treeForRender`), so `treeData` stays a pure mirror of the filesystem
+  // and refreshes/watcher events can't disturb the edit in progress.
+  const [pendingCreate, setPendingCreate] = useState<{ kind: NewItemKind; parent: string; value: string } | null>(null);
+  // Same Enter→blur double-submit guard the rename editor uses.
+  const createActionRef = useRef<"idle" | "submitting">("idle");
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
+
+  // The workspace root is not itself a tree node (treeData holds its children
+  // directly), so root-level inserts and sibling lookups pass `null` as the
+  // parent key. `exportDir` may carry a trailing separator — strip it once here.
+  const rootDir = exportDir.replace(/[/\\]+$/, "");
 
   // ── Platform detection for labels ─────────────────────────────────────────
   const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
@@ -518,9 +516,11 @@ export default function FileBrowser() {
     setRootError(null);
     setTreeData([]);
     setLoadedKeys([]);
+    setExpandedKeys([]);
     setSelKeys([]);
     setAnchorKey(null);
     setClipboard(null);
+    setPendingCreate(null);
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
@@ -733,13 +733,13 @@ export default function FileBrowser() {
 
   // Keys of currently-rendered tree nodes in visual (top-to-bottom) order. Read
   // from the DOM (each title carries a data-fbkey attribute, set in titleRender)
-  // so it honors expand/collapse without us controlling rc-tree's expandedKeys —
-  // this tree uses uncontrolled, lazy expansion, so there's no in-memory expanded
-  // set to walk (unlike the object-store sidebar's flattenVisibleNodes).
+  // rather than walked from expandedKeys + treeData (as the object-store sidebar's
+  // flattenVisibleNodes does): the DOM is the one source that already reflects
+  // expand/collapse, and it skips the inline-creation placeholder for free — that
+  // row deliberately carries no data-fbkey.
   // ponytail: correct as long as the tree isn't virtualized. If the rc-tree
   // `height` prop is ever set, only viewport rows render, so an off-screen anchor
-  // would drop from the range — switch to controlled expandedKeys + a treeData
-  // walk at that point.
+  // would drop from the range — switch to an expandedKeys + treeData walk then.
   const visibleKeysInOrder = (): string[] => {
     const root = treeWrapRef.current;
     if (!root) return [];
@@ -753,6 +753,7 @@ export default function FileBrowser() {
   const onSelect = async (_keys: Key[], info: { node: DataNode; nativeEvent: MouseEvent }) => {
     const node = info.node;
     const path = String(node.key);
+    if (isNewItemKey(path)) return; // the inline creation placeholder isn't a real node
     const isDir = (node as any).isLeaf === false;
     const ne = info.nativeEvent;
 
@@ -873,6 +874,7 @@ export default function FileBrowser() {
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
     const path = String(node.key);
+    if (isNewItemKey(path)) return; // no context menu on the creation placeholder
     const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
     // Right-clicking a node outside the current multi-selection acts on just that
@@ -1342,10 +1344,12 @@ export default function FileBrowser() {
             }
             // Update tree in-place instead of full refresh.
             setTreeData((prev) => removeNode(prev, path));
-            setLoadedKeys((prev) => prev.filter((k) => {
+            const keepKey = (k: Key) => {
               const ks = String(k);
               return ks !== path && !ks.startsWith(path + sep);
-            }));
+            };
+            setLoadedKeys((prev) => prev.filter(keepKey));
+            setExpandedKeys((prev) => prev.filter(keepKey));
             setSelKeys((prev) => prev.filter((k) => k !== path && !k.startsWith(path + sep)));
           } catch (e) {
             failed.push(`${pathBase(path)}: ${String(e)}`);
@@ -1364,7 +1368,9 @@ export default function FileBrowser() {
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
     editActionRef.current = "idle";
-    editInitRef.current = false;
+    // At most one inline editor at a time — a pending create is abandoned.
+    createActionRef.current = "idle";
+    setPendingCreate(null);
     setEditingKey(fileCtxMenu.path);
     setEditingValue(fileCtxMenu.name);
     setFileCtxMenu(null);
@@ -1395,12 +1401,14 @@ export default function FileBrowser() {
       const prefix = path + sep;
       remapTabsForMove(path, newPath, isDirKey(path));
       setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
-      setLoadedKeys(prev => prev.map(k => {
+      const remapKey = (k: Key) => {
         const ks = String(k);
         if (ks === path) return newPath;
         if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
         return k;
-      }));
+      };
+      setLoadedKeys(prev => prev.map(remapKey));
+      setExpandedKeys(prev => prev.map(remapKey));
       setSelKeys(prev => prev.map(k => {
         if (k === path) return newPath;
         if (k.startsWith(prefix)) return newPath + k.substring(path.length);
@@ -1419,66 +1427,100 @@ export default function FileBrowser() {
     setEditingKey(null);
   };
 
+  // ── Inline creation (VS Code–style placeholder row) ────────────────────────
   // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
   // both the context menu (a node or the root) and the header toolbar buttons
   // can share this — the root is just exportDir.
-  const startNewItem = (kind: "newFolder" | "newFile", dir: string) => {
+  const startNewItem = async (kind: NewItemKind, dir: string) => {
     if (!dir) return;
-    setInlineInput({ kind, path: dir, value: "" });
     setFileCtxMenu(null);
+    // At most one inline editor at a time — an in-flight rename is abandoned.
+    if (editingKey !== null) cancelRename();
+    const parent = dir.replace(/[/\\]+$/, "");
+    createActionRef.current = "idle";
+    setPendingCreate({ kind, parent, value: "" });
+    if (parent === rootDir) return; // the root is always "expanded"
+    // Expand first so the placeholder is on screen immediately, then make sure
+    // the real siblings are present: rc-tree only runs `loadData` for a
+    // user-driven expand, so a programmatic one has to list the directory here.
+    setExpandedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
+    if (loadedKeysRef.current.some((k) => String(k) === parent)) return;
+    try {
+      const entries = await ListDirectory(parent);
+      // Built outside the updater — a throw inside one unmounts the React tree.
+      const children = entriesToNodes(entries);
+      setTreeData((prev) => updateNode(prev, parent, children, true));
+      setLoadedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
+    } catch {
+      // Non-fatal: the placeholder still works, the inline duplicate check just
+      // has nothing to compare against and the backend's O_EXCL create catches it.
+    }
   };
 
-  const submitInlineInput = async () => {
-    if (isSubmitting) return;
-    if (!inlineInput || !inlineInput.value.trim()) {
-      setInlineInput(null);
-      return;
-    }
-    const { kind, value } = inlineInput;
-    // The target may be exportDir, which can be stored with a trailing separator —
-    // strip it so we don't build a `root//child` path.
-    const path = inlineInput.path.replace(/[/\\]+$/, "");
-    const sanitized = value.trim().replace(/[/\\]/g, "");
-    if (!sanitized) {
-      message.error("Name cannot be empty or contain path separators");
-      return;
-    }
-    // Reject characters invalid on Windows (and generally problematic).
-    if (/[:"*?<>|]/.test(sanitized)) {
-      message.error("Name contains invalid characters (: \" * ? < > |)");
-      return;
-    }
-    // The workspace root isn't itself a tree node (treeData holds its children
-    // directly), so a root-level create inserts into the top-level list rather
-    // than via addChild, which only matches an existing parent node.
-    const isRoot = path === exportDir.replace(/[/\\]+$/, "");
-    const insert = (node: DataNode) =>
-      setTreeData(prev => (isRoot ? insertSorted(prev, node) : addChild(prev, path, node)));
-    setIsSubmitting(true);
+  // Siblings the pending item will join — drives the inline duplicate check.
+  const pendingSiblings = useMemo(
+    () => (pendingCreate ? childrenOf(treeData, pendingCreate.parent === rootDir ? null : pendingCreate.parent) : []),
+    [pendingCreate, treeData, rootDir],
+  );
+
+  // Inline validation message, shown under the input while it's still open.
+  // Suppressed for the untouched empty value so the row doesn't open nagging.
+  const createError = useMemo(() => {
+    if (!pendingCreate || !pendingCreate.value.trim()) return null;
+    return validateNewName(pendingCreate.value, pendingCreate.kind, pendingSiblings);
+  }, [pendingCreate, pendingSiblings]);
+
+  const cancelCreate = () => {
+    createActionRef.current = "idle";
+    setPendingCreate(null);
+  };
+
+  const submitCreate = async () => {
+    if (createActionRef.current !== "idle" || !pendingCreate) return;
+    const { kind, parent, value } = pendingCreate;
+    // Nothing typed — treat like the rename editor does and just drop the row.
+    if (!value.trim()) { cancelCreate(); return; }
+    // Keep the input open for correction — `createError` is already showing the
+    // same message inline, so a toast on top of it would just be noise.
+    if (validateNewName(value, kind, pendingSiblings)) return;
+    const name = finalNewName(value, kind);
+    const sep = pathSep(parent);
+    const fullPath = `${parent}${sep}${name}`;
+    // A root-level create inserts into the top-level list rather than via
+    // addChild, which only matches an existing parent node.
+    const isRoot = parent === rootDir;
+    createActionRef.current = "submitting";
     try {
-      if (kind === "newFolder") {
-        const sep = pathSep(path);
-        const folderPath = `${path}${sep}${sanitized}`;
-        await CreateDirectory(folderPath);
-        markSelfChanged(path);
-        insert(makeNode(folderPath, sanitized, true));
-        message.success(`Created folder ${sanitized}`);
+      if (kind === "newFolder") await CreateDirectory(fullPath);
+      else await CreateFile(fullPath);
+      markSelfChanged(parent);
+      const node = makeNode(fullPath, name, kind === "newFolder");
+      setTreeData((prev) => (isRoot ? insertSorted(prev, node) : addChild(prev, parent, node)));
+      setPendingCreate(null);
+      createActionRef.current = "idle";
+      message.success(kind === "newFolder" ? `Created folder ${name}` : `Created ${name}`);
+      if (kind === "newFile") {
+        // Open the new file like a single click would (preview-tab aware, #849).
+        // The tab-sync effect then moves the tree selection onto it.
+        const openErr = await openFileInTab(fullPath, previewTabsEnabled);
+        if (openErr) message.error(`Could not open file: ${openErr}`);
       } else {
-        const sep = pathSep(path);
-        const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
-        const filePath = `${path}${sep}${name}`;
-        await CreateFile(filePath);
-        markSelfChanged(path);
-        insert(makeNode(filePath, name, false));
-        message.success(`Created ${name}`);
+        setSelKeys([fullPath]);
+        setAnchorKey(fullPath);
       }
-      setInlineInput(null);
     } catch (e) {
       const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
       message.error(`${prefix}: ${String(e)}`);
-    } finally {
-      setIsSubmitting(false);
+      createActionRef.current = "idle"; // allow retry — mirrors the rename editor
     }
+  };
+
+  // Blur mirrors the rename editor: submit what was typed, drop the row when
+  // there's nothing usable (empty or failing validation) rather than nagging.
+  const blurCreate = () => {
+    if (createActionRef.current !== "idle") return;
+    if (!pendingCreate?.value.trim() || createError) cancelCreate();
+    else submitCreate();
   };
 
   // Set of cut paths, derived once per clipboard change — titleRender runs for
@@ -1490,35 +1532,35 @@ export default function FileBrowser() {
   );
 
   const titleRender = (nodeData: DataNode) => {
+    // The synthetic "new item" placeholder row — its file/folder icon comes from
+    // the node's own `icon`, so the title is just the editor. Deliberately no
+    // data-fbkey: it must stay invisible to visibleKeysInOrder() / Shift+range.
+    if (pendingCreate && nodeData.key === newItemKey(pendingCreate.parent)) {
+      return (
+        <InlineNameInput
+          value={pendingCreate.value}
+          error={createError}
+          placeholder={pendingCreate.kind === "newFolder" ? "Folder name" : "File name"}
+          onChange={(v) => setPendingCreate((p) => (p ? { ...p, value: v } : p))}
+          onSubmit={submitCreate}
+          onCancel={cancelCreate}
+          onBlur={blurCreate}
+        />
+      );
+    }
     if (editingKey !== null && nodeData.key === editingKey) {
       // Keep the data-fbkey wrapper even while editing so the renaming node stays
       // visible to visibleKeysInOrder() (it may be the Shift+range anchor).
       return (
         <span data-fbkey={String(nodeData.key)}>
-        <Input
-          size="small"
-          autoFocus
-          value={editingValue}
-          onChange={(e) => setEditingValue(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation(); // prevent tree keyboard navigation
-            if (e.key === "Enter") submitRename();
-            else if (e.key === "Escape") cancelRename();
-          }}
-          onBlur={submitRename}
-          onClick={(e) => e.stopPropagation()} // prevent tree selection
-          style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
-          ref={(el) => {
-            if (!el || editInitRef.current) return;
-            editInitRef.current = true;
-            const input = (el as any).input ?? el;
-            if (input?.setSelectionRange) {
-              const dot = editingValue.lastIndexOf(".");
-              const end = dot > 0 ? dot : editingValue.length;
-              requestAnimationFrame(() => input.setSelectionRange(0, end));
-            }
-          }}
-        />
+          <InlineNameInput
+            value={editingValue}
+            selectStem
+            onChange={setEditingValue}
+            onSubmit={submitRename}
+            onCancel={cancelRename}
+            onBlur={submitRename}
+          />
         </span>
       );
     }
@@ -1554,6 +1596,28 @@ export default function FileBrowser() {
 
   const grouped = groupByPath(searchResults);
 
+  // The inline-creation placeholder is a render-only node: injecting it here
+  // rather than into `treeData` keeps `treeData` a pure mirror of the filesystem,
+  // so mergeNodes / refresh() / the fs:changed watcher need no knowledge of it and
+  // can never wipe or duplicate it mid-edit. Rebuilt only when the target or kind
+  // changes — the typed value lives in `pendingCreate` and reaches the input
+  // through titleRender, so keystrokes don't re-clone the tree.
+  const placeholderNode = useMemo<DataNode | null>(() => {
+    if (!pendingCreate) return null;
+    const isDir = pendingCreate.kind === "newFolder";
+    return {
+      key: newItemKey(pendingCreate.parent),
+      // Empty title: insertSorted puts the row first among its own kind, giving it
+      // a stable position instead of one that jumps around while the user types.
+      title: "",
+      // isLeaf even for a folder — a switcher on a path that doesn't exist yet
+      // would offer to expand (and lazily list) it.
+      isLeaf: true,
+      selectable: false,
+      icon: isDir ? <FolderOutlined /> : <FileOutlined style={{ color: CLR_SECONDARY }} />,
+    };
+  }, [pendingCreate?.kind, pendingCreate?.parent]);
+
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
@@ -1561,7 +1625,12 @@ export default function FileBrowser() {
   // deps are intentional: not read in the body, they exist to force rc-tree to
   // re-run titleRender on status change / cut-dimming. cutSet (not clipboard) so a
   // Copy — which changes no node opacity — doesn't trigger a full re-sweep.
-  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, cutSet]);
+  const treeForRender = useMemo(() => {
+    const base = [...treeData];
+    if (!placeholderNode || !pendingCreate) return base;
+    const parentKey = pendingCreate.parent === rootDir ? null : pendingCreate.parent;
+    return insertPlaceholder(base, parentKey, placeholderNode);
+  }, [treeData, gitOverlay, cutSet, placeholderNode, pendingCreate?.parent, rootDir]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
   // ctxChanged: the file is changed at all. When we don't have a precise
@@ -1640,7 +1709,7 @@ export default function FileBrowser() {
             style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
             onClick={toggleExpanded}
             // Right-click the header title area to create at the workspace root
-            // (New Folder… / New SQL File…) — no toolbar buttons needed.
+            // (New Folder… / New File…) — no toolbar buttons needed.
             onContextMenu={onRootContextMenu}
             title={exportDir || "No folder open"}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
@@ -1879,7 +1948,9 @@ export default function FileBrowser() {
             <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
           )}
 
-          {exportDir && !searchOpen && !loading && loaded && treeData.length === 0 && (
+          {/* treeForRender, not treeData: a root-level create in an empty folder
+              renders nothing but the placeholder row. */}
+          {exportDir && !searchOpen && !loading && loaded && treeForRender.length === 0 && (
             <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Directory is empty.</Text>
           )}
 
@@ -1896,7 +1967,7 @@ export default function FileBrowser() {
             </div>
           )}
 
-          {!searchOpen && loaded && treeData.length > 0 && (
+          {!searchOpen && loaded && treeForRender.length > 0 && (
             <div
               style={{ overflow: "hidden", userSelect: "none" }}
               ref={treeWrapRef}
@@ -1909,8 +1980,10 @@ export default function FileBrowser() {
               <Tree
                 treeData={treeForRender}
                 loadedKeys={loadedKeys}
+                expandedKeys={expandedKeys}
                 selectedKeys={selKeys}
                 multiple
+                onExpand={(keys) => setExpandedKeys(keys)}
                 onLoad={(keys) => setLoadedKeys(keys)}
                 loadData={onLoadData as any}
                 onSelect={onSelect as any}
@@ -1923,30 +1996,6 @@ export default function FileBrowser() {
             </div>
           )}
         </div>
-      )}
-
-      {/* Modal for new folder / new file */}
-      {inlineInput && (
-        <Modal
-          open
-          title={inlineInput.kind === "newFolder" ? "New Folder" : "New SQL File"}
-          okText="Create"
-          confirmLoading={isSubmitting}
-          onOk={submitInlineInput}
-          onCancel={() => setInlineInput(null)}
-          width={360}
-          destroyOnClose
-        >
-          <Input
-            autoFocus
-            size="small"
-            value={inlineInput.value}
-            onChange={(e) => setInlineInput({ ...inlineInput, value: e.target.value })}
-            onPressEnter={() => { if (!isSubmitting) submitInlineInput(); }}
-            placeholder={inlineInput.kind === "newFolder" ? "Folder name" : "File name (.sql)"}
-            style={{ marginTop: 8 }}
-          />
-        </Modal>
       )}
 
       {/* Context menu */}
@@ -2002,7 +2051,7 @@ export default function FileBrowser() {
           {fileCtxMenu.isRoot ? (
             <>
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
               {clipboard && (
                 <CtxItem
                   icon={<BlockOutlined />}
@@ -2076,7 +2125,7 @@ export default function FileBrowser() {
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
             </>
           )}
 
@@ -2099,6 +2148,78 @@ export default function FileBrowser() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The in-tree name editor, shared by inline rename and inline creation so the two
+ * can't drift apart. Handles the fiddly parts once: Enter/Escape, keydown
+ * `stopPropagation` (so tree keyboard navigation doesn't eat the keystrokes),
+ * click `stopPropagation` (so clicking into the field doesn't select the node),
+ * one-shot focus + name-part selection, and the inline validation message.
+ *
+ * The Enter→blur double-submit race is guarded by the caller's action ref (both
+ * `submitRename` and `submitCreate` no-op while a submit is in flight).
+ */
+function InlineNameInput({
+  value, error, placeholder, selectStem, onChange, onSubmit, onCancel, onBlur,
+}: {
+  value: string;
+  error?: string | null;
+  placeholder?: string;
+  /** Preselect the name up to the extension dot (rename starts with a value). */
+  selectStem?: boolean;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  onBlur: () => void;
+}) {
+  // Per-instance: the editor unmounts when the edit ends, so the next one
+  // re-runs its initial selection.
+  const initRef = useRef(false);
+  return (
+    <span style={{ position: "relative", display: "block" }}>
+      <Input
+        size="small"
+        autoFocus
+        value={value}
+        placeholder={placeholder}
+        status={error ? "error" : undefined}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation(); // prevent tree keyboard navigation
+          if (e.key === "Enter") onSubmit();
+          else if (e.key === "Escape") onCancel();
+        }}
+        onBlur={onBlur}
+        onClick={(e) => e.stopPropagation()} // prevent tree selection
+        style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
+        ref={(el) => {
+          if (!el || initRef.current) return;
+          initRef.current = true;
+          if (!selectStem) return;
+          const input = (el as any).input ?? el;
+          if (input?.setSelectionRange) {
+            const dot = value.lastIndexOf(".");
+            const end = dot > 0 ? dot : value.length;
+            requestAnimationFrame(() => input.setSelectionRange(0, end));
+          }
+        }}
+      />
+      {error && (
+        <div
+          role="alert"
+          style={{
+            position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10,
+            background: "var(--bg-overlay)", border: "1px solid #f85149", borderTop: "none",
+            borderRadius: "0 0 4px 4px", color: "#f85149", fontSize: 11,
+            padding: "2px 6px", whiteSpace: "normal", userSelect: "none",
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </span>
   );
 }
 
