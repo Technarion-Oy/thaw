@@ -17,6 +17,8 @@ import {
   validateRawName,
   validateNewName,
   validateRenameName,
+  activeEditSession,
+  type InlineEditSession,
 } from "./fileTreeUtils";
 
 const dir = (name: string, children?: DataNode[]): DataNode => ({
@@ -26,6 +28,31 @@ const file = (name: string, parent = "/root"): DataNode => ({
   key: `${parent}/${name}`, title: name, isLeaf: true,
 });
 const names = (nodes: DataNode[]) => nodes.map((n) => String(n.title));
+
+describe("activeEditSession", () => {
+  const session = (id: number, phase: InlineEditSession["phase"] = "editing"): InlineEditSession => ({ id, phase });
+
+  it("returns the live session when the captured state belongs to it", () => {
+    const live = session(1);
+    expect(activeEditSession(live, { id: 1 })).toBe(live);
+  });
+
+  it("rejects when no editor is open", () => {
+    expect(activeEditSession(null, { id: 1 })).toBeNull();
+    expect(activeEditSession(session(1), null)).toBeNull();
+    expect(activeEditSession(session(1), undefined)).toBeNull();
+  });
+
+  it("rejects a second submit while one is already in flight", () => {
+    expect(activeEditSession(session(1, "submitting"), { id: 1 })).toBeNull();
+  });
+
+  it("rejects state captured by a previous session", () => {
+    // The repro this guards: cancel a create, immediately start another, then
+    // the first one's stray blur fires with the old pendingCreate in hand.
+    expect(activeEditSession(session(2), { id: 1 })).toBeNull();
+  });
+});
 
 describe("reserved placeholder key", () => {
   it("round-trips the parent directory", () => {

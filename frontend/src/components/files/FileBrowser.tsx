@@ -63,6 +63,8 @@ import {
   finalNewName,
   validateNewName,
   validateRenameName,
+  activeEditSession,
+  type InlineEditSession,
 } from "./fileTreeUtils";
 import type { filesystem } from "../../../wailsjs/go/models";
 
@@ -359,22 +361,26 @@ export default function FileBrowser() {
   const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean; isRoot?: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
-  // ── Inline rename state (VS Code–style editing in the tree) ────────────
-  const [editingKey, setEditingKey] = useState<Key | null>(null);
-  const [editingValue, setEditingValue] = useState("");
-  const editActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
+  // ── Inline editors (VS Code–style editing in the tree) ─────────────────────
+  // Rename and creation are the same machine over different state. Each open
+  // editor is a *session* (see InlineEditSession): the id is stamped into the
+  // state the editor owns, so a handler that captured that state — an awaited
+  // IPC resuming, a stray blur from an unmounted input — can prove it is still
+  // the live editor before touching anything. A plain enum ref couldn't: opening
+  // the next editor resets it, re-arming every stale closure from the last one.
+  // At most one session is live at a time; starting either cancels the other.
+  const sessionCounterRef = useRef(0);
+  const newSession = (): InlineEditSession => ({ id: ++sessionCounterRef.current, phase: "editing" });
 
-  // ── Inline creation state (new folder / new file) ───────────────────────
-  // VS Code style: an editable placeholder row is injected into the tree under
-  // `parent` instead of opening a modal. It lives in the render-time tree only
-  // (see `treeForRender`), so `treeData` stays a pure mirror of the filesystem
-  // and refreshes/watcher events can't disturb the edit in progress.
-  const [pendingCreate, setPendingCreate] = useState<{ kind: NewItemKind; parent: string; value: string } | null>(null);
-  // Same Enter→blur double-submit guard the rename editor uses, with the same
-  // distinct "cancelled" sentinel: only "idle" lets a submit through, so a stray
-  // blur fired as a side effect of the editor unmounting after Escape can't
-  // resurrect a create the user explicitly cancelled.
-  const createActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
+  const [pendingRename, setPendingRename] = useState<{ id: number; path: string; value: string } | null>(null);
+  const renameSessionRef = useRef<InlineEditSession | null>(null);
+
+  // Creation, VS Code style: an editable placeholder row is injected into the
+  // tree under `parent` instead of opening a modal. It lives in the render-time
+  // tree only (see `treeForRender`), so `treeData` stays a pure mirror of the
+  // filesystem and refreshes/watcher events can't disturb the edit in progress.
+  const [pendingCreate, setPendingCreate] = useState<{ id: number; kind: NewItemKind; parent: string; value: string } | null>(null);
+  const createSessionRef = useRef<InlineEditSession | null>(null);
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -524,7 +530,11 @@ export default function FileBrowser() {
     setSelKeys([]);
     setAnchorKey(null);
     setClipboard(null);
-    setPendingCreate(null);
+    // Close any open inline editor and retire its session, so an IPC still in
+    // flight against the old workspace can't come back and touch the new one.
+    cancelCreate();
+    cancelRename();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel* only touch refs/setState
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
@@ -1377,49 +1387,53 @@ export default function FileBrowser() {
 
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
-    editActionRef.current = "idle";
     // At most one inline editor at a time — a pending create is abandoned.
     cancelCreate();
-    setEditingKey(fileCtxMenu.path);
-    setEditingValue(fileCtxMenu.name);
+    const session = newSession();
+    renameSessionRef.current = session;
+    setPendingRename({ id: session.id, path: fileCtxMenu.path, value: fileCtxMenu.name });
     setFileCtxMenu(null);
   };
 
   // Siblings of the node being renamed — drives its inline duplicate check.
   const renameSiblings = useMemo(() => {
-    if (editingKey === null) return [];
-    const dir = pathDir(String(editingKey));
+    if (!pendingRename) return [];
+    const dir = pathDir(pendingRename.path);
     return childrenOf(treeData, dir === rootDir ? null : dir);
-  }, [editingKey, treeData, rootDir]);
+  }, [pendingRename, treeData, rootDir]);
 
   // Same live validation the creation editor gets — the two share `InlineNameInput`,
   // so they share the rules too. Suppressed for an empty value: the field opens
   // pre-filled, and clearing it is how you back out.
   const renameError = useMemo(() => {
-    if (editingKey === null || !editingValue.trim()) return null;
-    return validateRenameName(editingValue, renameSiblings, pathBase(String(editingKey)));
-  }, [editingKey, editingValue, renameSiblings]);
+    if (!pendingRename || !pendingRename.value.trim()) return null;
+    return validateRenameName(pendingRename.value, renameSiblings, pathBase(pendingRename.path));
+  }, [pendingRename, renameSiblings]);
+
+  const cancelRename = () => {
+    renameSessionRef.current = null;
+    setPendingRename(null);
+  };
 
   const submitRename = async () => {
-    if (editActionRef.current !== "idle" || editingKey === null) return;
-    const path = String(editingKey);
-    const sanitized = editingValue.trim();
-    if (!sanitized || sanitized === pathBase(path)) {
-      editActionRef.current = "cancelled";
-      setEditingKey(null);
-      return;
-    }
+    const session = activeEditSession(renameSessionRef.current, pendingRename);
+    if (!session || !pendingRename) return;
+    const { path, value } = pendingRename;
+    const sanitized = value.trim();
+    if (!sanitized || sanitized === pathBase(path)) { cancelRename(); return; }
     // Keep the editor open for correction — `renameError` already shows the
     // message inline. This used to silently strip path separators and cancel
     // outright on an invalid character, which threw the typed name away.
-    if (validateRenameName(editingValue, renameSiblings, pathBase(path))) return;
+    if (validateRenameName(value, renameSiblings, pathBase(path))) return;
     const dir = pathDir(path);
     const sep = pathSep(path);
     const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
-    editActionRef.current = "submitting";
+    session.phase = "submitting";
     try {
       await RenameFile(path, newPath);
       markSelfChanged(dir);
+      // The file has moved on disk, so the tree, key sets and open tabs must be
+      // re-pointed whether or not this session is still the live one.
       const prefix = path + sep;
       remapTabsForMove(path, newPath, isDirKey(path));
       setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
@@ -1436,23 +1450,23 @@ export default function FileBrowser() {
         if (k.startsWith(prefix)) return newPath + k.substring(path.length);
         return k;
       }));
-      setEditingKey(null);
+      // Cancelled mid-flight, or superseded by a newer editor: don't close what
+      // is now someone else's editor, and don't toast a result the user backed
+      // out of. Identity compare — see InlineEditSession.
+      if (renameSessionRef.current !== session) return;
+      cancelRename();
       message.success(`Renamed to ${sanitized}`);
     } catch (e) {
+      if (renameSessionRef.current !== session) return;
+      session.phase = "editing"; // allow retry
       message.error(`Rename failed: ${String(e)}`);
-      editActionRef.current = "idle"; // allow retry
     }
-  };
-
-  const cancelRename = () => {
-    editActionRef.current = "cancelled";
-    setEditingKey(null);
   };
 
   // Blur drops the editor when what's typed can't be used, rather than leaving an
   // unfocused row stuck open on an error. Same contract as `blurCreate`.
   const blurRename = () => {
-    if (editActionRef.current !== "idle") return;
+    if (!activeEditSession(renameSessionRef.current, pendingRename)) return;
     if (renameError) cancelRename();
     else submitRename();
   };
@@ -1464,11 +1478,12 @@ export default function FileBrowser() {
   const startNewItem = async (kind: NewItemKind, dir: string) => {
     if (!dir) return;
     setFileCtxMenu(null);
-    // At most one inline editor at a time — an in-flight rename is abandoned.
-    if (editingKey !== null) cancelRename();
+    // At most one inline editor at a time — a pending rename is abandoned.
+    cancelRename();
     const parent = dir.replace(/[/\\]+$/, "");
-    createActionRef.current = "idle";
-    setPendingCreate({ kind, parent, value: "" });
+    const session = newSession();
+    createSessionRef.current = session;
+    setPendingCreate({ id: session.id, kind, parent, value: "" });
     if (parent === rootDir) return; // the root is always "expanded"
     // Expand first so the placeholder is on screen immediately, then make sure
     // the real siblings are present: rc-tree only runs `loadData` for a
@@ -1501,17 +1516,13 @@ export default function FileBrowser() {
   }, [pendingCreate, pendingSiblings]);
 
   const cancelCreate = () => {
-    createActionRef.current = "cancelled";
+    createSessionRef.current = null;
     setPendingCreate(null);
   };
 
-  // Did Escape land while a create was in flight? Read through a helper: inside
-  // `submitCreate` TypeScript has narrowed the ref to the "submitting" it just
-  // assigned and can't see that an event handler may have changed it since.
-  const createCancelled = () => createActionRef.current === "cancelled";
-
   const submitCreate = async () => {
-    if (createActionRef.current !== "idle" || !pendingCreate) return;
+    const session = activeEditSession(createSessionRef.current, pendingCreate);
+    if (!session || !pendingCreate) return;
     const { kind, parent, value } = pendingCreate;
     // Nothing typed — treat like the rename editor does and just drop the row.
     if (!value.trim()) { cancelCreate(); return; }
@@ -1524,22 +1535,23 @@ export default function FileBrowser() {
     // A root-level create inserts into the top-level list rather than via
     // addChild, which only matches an existing parent node.
     const isRoot = parent === rootDir;
-    createActionRef.current = "submitting";
+    session.phase = "submitting";
     try {
       if (kind === "newFolder") await CreateDirectory(fullPath);
       else await CreateFile(fullPath);
       markSelfChanged(parent);
-      // Escape can land while the IPC is in flight: the "cancelled" sentinel
-      // blocks a *second* submit, but this one is already past that guard. The
-      // item does exist on disk by now and can't be un-created, so the tree still
-      // gets the node — leaving it invisible would be a worse lie, especially with
-      // the fs watcher off. What is skipped is everything the user was cancelling:
-      // the toast, the selection move, and (the disruptive one) the editor tab.
+      // The item exists on disk by now and can't be un-created, so the tree gets
+      // the node whether or not this session is still the live one — leaving a
+      // real file invisible would be a worse lie, especially with the fs watcher
+      // off.
       const node = makeNode(fullPath, name, kind === "newFolder");
       setTreeData((prev) => (isRoot ? insertSorted(prev, node) : addChild(prev, parent, node)));
-      if (createCancelled()) return;
-      setPendingCreate(null);
-      createActionRef.current = "idle";
+      // Escape landed while the IPC was in flight, or a newer editor has since
+      // opened: skip everything the user was cancelling — the toast, the
+      // selection move and (the disruptive one) the editor tab — and leave the
+      // newer editor's state alone. Identity compare, see InlineEditSession.
+      if (createSessionRef.current !== session) return;
+      cancelCreate();
       message.success(kind === "newFolder" ? `Created folder ${name}` : `Created ${name}`);
       if (kind === "newFile") {
         // Open the new file like a single click would (preview-tab aware, #849).
@@ -1551,19 +1563,19 @@ export default function FileBrowser() {
         setAnchorKey(fullPath);
       }
     } catch (e) {
-      // Cancelled mid-flight and nothing was created — say nothing, and leave the
-      // sentinel in place so the abandoned editor can't be revived by a stray blur.
-      if (createCancelled()) return;
+      // Cancelled or superseded, and nothing was created — say nothing, and
+      // leave the live session (whoever it is now) untouched.
+      if (createSessionRef.current !== session) return;
+      session.phase = "editing"; // allow retry — mirrors the rename editor
       const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
       message.error(`${prefix}: ${String(e)}`);
-      createActionRef.current = "idle"; // allow retry — mirrors the rename editor
     }
   };
 
   // Blur mirrors the rename editor: submit what was typed, drop the row when
   // there's nothing usable (empty or failing validation) rather than nagging.
   const blurCreate = () => {
-    if (createActionRef.current !== "idle") return;
+    if (!activeEditSession(createSessionRef.current, pendingCreate)) return;
     if (!pendingCreate?.value.trim() || createError) cancelCreate();
     else submitCreate();
   };
@@ -1593,16 +1605,16 @@ export default function FileBrowser() {
         />
       );
     }
-    if (editingKey !== null && nodeData.key === editingKey) {
+    if (pendingRename && String(nodeData.key) === pendingRename.path) {
       // Keep the data-fbkey wrapper even while editing so the renaming node stays
       // visible to visibleKeysInOrder() (it may be the Shift+range anchor).
       return (
         <span data-fbkey={String(nodeData.key)}>
           <InlineNameInput
-            value={editingValue}
+            value={pendingRename.value}
             error={renameError}
             selectStem
-            onChange={setEditingValue}
+            onChange={(v) => setPendingRename((p) => (p ? { ...p, value: v } : p))}
             onSubmit={submitRename}
             onCancel={cancelRename}
             onBlur={blurRename}

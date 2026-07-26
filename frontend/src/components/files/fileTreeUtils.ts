@@ -6,6 +6,36 @@ import type { DataNode } from "antd/es/tree";
 export type NewItemKind = "newFolder" | "newFile";
 
 /**
+ * One open inline editor — a rename or a creation — from the moment it opens
+ * until it submits or is cancelled.
+ *
+ * A bare `"idle" | "submitting" | "cancelled"` ref cannot do this job: opening
+ * the *next* editor has to reset it to `"idle"`, which silently re-arms every
+ * stale closure left over from the previous one. An awaited IPC that resolves
+ * after the user cancelled *and* started a different edit would then pass its
+ * "was I cancelled?" check, clobber the newer editor's state and fire its own
+ * toast. Comparing the captured session **by identity** against the live one
+ * makes both "cancelled" (`null`) and "superseded" (a different object) read
+ * correctly, whatever the ref has been set to since.
+ */
+export type InlineEditSession = { id: number; phase: "editing" | "submitting" };
+
+/**
+ * The live session, if the state a handler captured still belongs to it and it
+ * isn't already in flight — the entry guard for the submit/blur handlers.
+ * `null` when no editor is open, when one is already submitting (the
+ * double-submit guard), or when `captured` came from an earlier session.
+ */
+export function activeEditSession(
+  live: InlineEditSession | null,
+  captured: { id: number } | null | undefined,
+): InlineEditSession | null {
+  if (!live || live.phase !== "editing") return null;
+  if (!captured || captured.id !== live.id) return null;
+  return live;
+}
+
+/**
  * Key prefix for the synthetic placeholder row that hosts the inline name input
  * while a new file/folder is being created (VS Code style).
  *
