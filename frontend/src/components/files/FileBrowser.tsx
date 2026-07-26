@@ -369,8 +369,11 @@ export default function FileBrowser() {
   // (see `treeForRender`), so `treeData` stays a pure mirror of the filesystem
   // and refreshes/watcher events can't disturb the edit in progress.
   const [pendingCreate, setPendingCreate] = useState<{ kind: NewItemKind; parent: string; value: string } | null>(null);
-  // Same Enter→blur double-submit guard the rename editor uses.
-  const createActionRef = useRef<"idle" | "submitting">("idle");
+  // Same Enter→blur double-submit guard the rename editor uses, with the same
+  // distinct "cancelled" sentinel: only "idle" lets a submit through, so a stray
+  // blur fired as a side effect of the editor unmounting after Escape can't
+  // resurrect a create the user explicitly cancelled.
+  const createActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -558,16 +561,22 @@ export default function FileBrowser() {
       scheduleGitRefresh();
       if (selfChangedDirs.current.has(suppressKey(evt.dir))) return;
 
-      // After refreshing a directory, prune loadedKeys entries that reference
-      // children which no longer exist (prevents unbounded stale-key growth).
-      const pruneLoadedKeys = (freshKeys: Set<string>) => {
-        setLoadedKeys((prev) => prev.filter((k) => {
+      // After refreshing a directory, prune key entries that reference children
+      // which no longer exist (prevents unbounded stale-key growth). Both key
+      // sets are pruned: expansion is controlled, so a stale expandedKeys entry
+      // would render a same-named directory that reappears later (branch switch,
+      // restore) as already-expanded but unloaded — and programmatic expansion
+      // doesn't trigger loadData, so it would look empty until manually toggled.
+      const pruneStaleKeys = (freshKeys: Set<string>) => {
+        const keep = (k: Key) => {
           const ks = String(k);
           const parent = ks.substring(0, ks.lastIndexOf("/")) || ks.substring(0, ks.lastIndexOf("\\"));
           // Only prune keys whose parent is the refreshed directory.
           if (parent !== evt.dir) return true;
           return freshKeys.has(ks);
-        }));
+        };
+        setLoadedKeys((prev) => prev.filter(keep));
+        setExpandedKeys((prev) => prev.filter(keep));
       };
 
       if (evt.dir === exportDir) {
@@ -578,7 +587,7 @@ export default function FileBrowser() {
             const list = entries ?? [];
             const fresh = entriesToNodes(list);
             setTreeData((prev) => mergeNodes(prev, fresh));
-            pruneLoadedKeys(new Set(list.map((e) => e.path)));
+            pruneStaleKeys(new Set(list.map((e) => e.path)));
           })
           .catch(() => {});
         return;
@@ -591,7 +600,7 @@ export default function FileBrowser() {
           // Nodes built outside the updater — see the collapse→expand refresh above.
           const fresh = entriesToNodes(list);
           setTreeData((prev) => updateNode(prev, evt.dir, fresh, true));
-          pruneLoadedKeys(new Set(list.map((e) => e.path)));
+          pruneStaleKeys(new Set(list.map((e) => e.path)));
         })
         .catch(() => {});
     });
@@ -1369,8 +1378,7 @@ export default function FileBrowser() {
     if (!fileCtxMenu) return;
     editActionRef.current = "idle";
     // At most one inline editor at a time — a pending create is abandoned.
-    createActionRef.current = "idle";
-    setPendingCreate(null);
+    cancelCreate();
     setEditingKey(fileCtxMenu.path);
     setEditingValue(fileCtxMenu.name);
     setFileCtxMenu(null);
@@ -1471,7 +1479,7 @@ export default function FileBrowser() {
   }, [pendingCreate, pendingSiblings]);
 
   const cancelCreate = () => {
-    createActionRef.current = "idle";
+    createActionRef.current = "cancelled";
     setPendingCreate(null);
   };
 
