@@ -12,8 +12,11 @@ import {
   insertPlaceholder,
   hasSiblingNamed,
   hasExtension,
+  isReservedDeviceName,
   finalNewName,
+  validateRawName,
   validateNewName,
+  validateRenameName,
 } from "./fileTreeUtils";
 
 const dir = (name: string, children?: DataNode[]): DataNode => ({
@@ -165,6 +168,33 @@ describe("finalNewName", () => {
   });
 });
 
+describe("isReservedDeviceName", () => {
+  it("matches the Windows device names, with or without an extension", () => {
+    for (const n of ["CON", "con", "nul.sql", "LPT1.txt", "com9", "PRN.md", "aux"]) {
+      expect(isReservedDeviceName(n)).toBe(true);
+    }
+  });
+
+  it("does not match names that merely start with one", () => {
+    for (const n of ["console.sql", "connection", "com0", "lpt10", "nulls.sql", ".gitignore"]) {
+      expect(isReservedDeviceName(n)).toBe(false);
+    }
+  });
+});
+
+describe("validateRawName", () => {
+  it("names the kind in the empty-name message when given one", () => {
+    expect(validateRawName("  ", "folder")).toMatch(/folder name must be provided/);
+    expect(validateRawName("", "file")).toMatch(/file name must be provided/);
+    expect(validateRawName("")).toBe("A name must be provided.");
+  });
+
+  it("rejects a reserved device name", () => {
+    expect(validateRawName("CON")).toMatch(/reserved device name/);
+    expect(validateRawName("nul.sql")).toMatch(/reserved device name/);
+  });
+});
+
 describe("validateNewName", () => {
   const siblings = [dir("Reports"), file("Query.sql")];
 
@@ -211,5 +241,32 @@ describe("validateNewName", () => {
     expect(validateNewName("query", "newFile", siblings)).toMatch(/"query\.sql" already exists/);
     // As a folder there is no append, so no collision.
     expect(validateNewName("query", "newFolder", siblings)).toBeNull();
+  });
+});
+
+describe("validateRenameName", () => {
+  const siblings = [dir("Reports"), file("Query.sql"), file("notes.md")];
+
+  it("applies the same rules as creation", () => {
+    expect(validateRenameName("a/b", siblings, "notes.md")).toMatch(/path separators/);
+    expect(validateRenameName("a?b", siblings, "notes.md")).toMatch(/cannot contain/);
+    expect(validateRenameName("CON", siblings, "notes.md")).toMatch(/reserved device name/);
+    expect(validateRenameName("  ", siblings, "notes.md")).toBe("A name must be provided.");
+  });
+
+  it("does not append .sql — a rename means exactly what it says", () => {
+    // As a *new* file "query" would resolve to query.sql and collide with
+    // Query.sql; renaming notes.md to "query" just gives a file called query.
+    expect(validateRenameName("query", siblings, "notes.md")).toBeNull();
+  });
+
+  it("flags a collision with a different sibling", () => {
+    expect(validateRenameName("Query.sql", siblings, "notes.md")).toMatch(/already exists/);
+    expect(validateRenameName("query.sql", siblings, "notes.md")).toMatch(/already exists/);
+  });
+
+  it("allows a case-only rename of the node itself", () => {
+    expect(validateRenameName("QUERY.SQL", siblings, "Query.sql")).toBeNull();
+    expect(validateRenameName("notes.MD", siblings, "notes.md")).toBeNull();
   });
 });

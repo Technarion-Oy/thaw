@@ -62,6 +62,7 @@ import {
   insertPlaceholder,
   finalNewName,
   validateNewName,
+  validateRenameName,
 } from "./fileTreeUtils";
 import type { filesystem } from "../../../wailsjs/go/models";
 
@@ -1384,21 +1385,34 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
   };
 
+  // Siblings of the node being renamed — drives its inline duplicate check.
+  const renameSiblings = useMemo(() => {
+    if (editingKey === null) return [];
+    const dir = pathDir(String(editingKey));
+    return childrenOf(treeData, dir === rootDir ? null : dir);
+  }, [editingKey, treeData, rootDir]);
+
+  // Same live validation the creation editor gets — the two share `InlineNameInput`,
+  // so they share the rules too. Suppressed for an empty value: the field opens
+  // pre-filled, and clearing it is how you back out.
+  const renameError = useMemo(() => {
+    if (editingKey === null || !editingValue.trim()) return null;
+    return validateRenameName(editingValue, renameSiblings, pathBase(String(editingKey)));
+  }, [editingKey, editingValue, renameSiblings]);
+
   const submitRename = async () => {
     if (editActionRef.current !== "idle" || editingKey === null) return;
     const path = String(editingKey);
-    const sanitized = editingValue.trim().replace(/[/\\]/g, "");
+    const sanitized = editingValue.trim();
     if (!sanitized || sanitized === pathBase(path)) {
       editActionRef.current = "cancelled";
       setEditingKey(null);
       return;
     }
-    if (/[:"*?<>|]/.test(sanitized)) {
-      message.error("Name contains invalid characters (: \" * ? < > |)");
-      editActionRef.current = "cancelled";
-      setEditingKey(null);
-      return;
-    }
+    // Keep the editor open for correction — `renameError` already shows the
+    // message inline. This used to silently strip path separators and cancel
+    // outright on an invalid character, which threw the typed name away.
+    if (validateRenameName(editingValue, renameSiblings, pathBase(path))) return;
     const dir = pathDir(path);
     const sep = pathSep(path);
     const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
@@ -1433,6 +1447,14 @@ export default function FileBrowser() {
   const cancelRename = () => {
     editActionRef.current = "cancelled";
     setEditingKey(null);
+  };
+
+  // Blur drops the editor when what's typed can't be used, rather than leaving an
+  // unfocused row stuck open on an error. Same contract as `blurCreate`.
+  const blurRename = () => {
+    if (editActionRef.current !== "idle") return;
+    if (renameError) cancelRename();
+    else submitRename();
   };
 
   // ── Inline creation (VS Code–style placeholder row) ────────────────────────
@@ -1483,6 +1505,11 @@ export default function FileBrowser() {
     setPendingCreate(null);
   };
 
+  // Did Escape land while a create was in flight? Read through a helper: inside
+  // `submitCreate` TypeScript has narrowed the ref to the "submitting" it just
+  // assigned and can't see that an event handler may have changed it since.
+  const createCancelled = () => createActionRef.current === "cancelled";
+
   const submitCreate = async () => {
     if (createActionRef.current !== "idle" || !pendingCreate) return;
     const { kind, parent, value } = pendingCreate;
@@ -1502,8 +1529,15 @@ export default function FileBrowser() {
       if (kind === "newFolder") await CreateDirectory(fullPath);
       else await CreateFile(fullPath);
       markSelfChanged(parent);
+      // Escape can land while the IPC is in flight: the "cancelled" sentinel
+      // blocks a *second* submit, but this one is already past that guard. The
+      // item does exist on disk by now and can't be un-created, so the tree still
+      // gets the node — leaving it invisible would be a worse lie, especially with
+      // the fs watcher off. What is skipped is everything the user was cancelling:
+      // the toast, the selection move, and (the disruptive one) the editor tab.
       const node = makeNode(fullPath, name, kind === "newFolder");
       setTreeData((prev) => (isRoot ? insertSorted(prev, node) : addChild(prev, parent, node)));
+      if (createCancelled()) return;
       setPendingCreate(null);
       createActionRef.current = "idle";
       message.success(kind === "newFolder" ? `Created folder ${name}` : `Created ${name}`);
@@ -1517,6 +1551,9 @@ export default function FileBrowser() {
         setAnchorKey(fullPath);
       }
     } catch (e) {
+      // Cancelled mid-flight and nothing was created — say nothing, and leave the
+      // sentinel in place so the abandoned editor can't be revived by a stray blur.
+      if (createCancelled()) return;
       const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
       message.error(`${prefix}: ${String(e)}`);
       createActionRef.current = "idle"; // allow retry — mirrors the rename editor
@@ -1563,11 +1600,12 @@ export default function FileBrowser() {
         <span data-fbkey={String(nodeData.key)}>
           <InlineNameInput
             value={editingValue}
+            error={renameError}
             selectStem
             onChange={setEditingValue}
             onSubmit={submitRename}
             onCancel={cancelRename}
-            onBlur={submitRename}
+            onBlur={blurRename}
           />
         </span>
       );

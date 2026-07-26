@@ -125,26 +125,74 @@ export function finalNewName(raw: string, kind: NewItemKind): string {
   return trimmed + DEFAULT_FILE_EXT;
 }
 
+/** Names Windows reserves for devices — unusable with or without an extension. */
+const RESERVED_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/** True for `CON`, `nul.sql`, `LPT1.txt`, … — reserved on Windows whatever the
+ *  extension, because the OS matches on the stem alone. */
+export function isReservedDeviceName(name: string): boolean {
+  const dot = name.indexOf(".");
+  return RESERVED_DEVICE_NAME.test(dot >= 0 ? name.slice(0, dot) : name);
+}
+
 /**
- * Validate a typed name against its future siblings. Returns the message to
- * show under the inline input, or `null` when the name is usable.
+ * The rules a name must satisfy whatever it's for — shared by creation and
+ * rename so the two inline editors can't disagree about what's typeable.
+ * `what` names the thing in the "must be provided" message; omit it when the
+ * kind isn't known (rename edits a file or a folder through one editor).
+ *
+ * The Windows-specific rules are applied on every platform on purpose: these
+ * files live in a git repo that may well be checked out on Windows, and the
+ * character blacklist has always been enforced that way here.
+ */
+export function validateRawName(raw: string, what?: "file" | "folder"): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return what ? `A ${what} name must be provided.` : "A name must be provided.";
+  if (/[/\\]/.test(trimmed)) return "A name cannot contain path separators.";
+  if (/[:"*?<>|]/.test(trimmed)) return 'A name cannot contain : " * ? < > |';
+  if (trimmed === "." || trimmed === "..") return 'A name cannot be "." or "..".';
+  // Windows silently strips trailing dots, and there is no extension to keep —
+  // reject rather than quietly turning "report." into "report..sql".
+  if (trimmed.endsWith(".")) return 'A name cannot end with a ".".';
+  if (isReservedDeviceName(trimmed)) return `"${trimmed}" is a reserved device name on Windows.`;
+  return null;
+}
+
+/**
+ * Validate a typed name for a **new** item against its future siblings. Returns
+ * the message to show under the inline input, or `null` when the name is usable.
+ * The duplicate check runs against the resolved name, so `query` collides with
+ * an existing `Query.sql`.
  */
 export function validateNewName(
   raw: string,
   kind: NewItemKind,
   siblings: DataNode[],
 ): string | null {
-  const trimmed = raw.trim();
-  const what = kind === "newFolder" ? "folder" : "file";
-  if (!trimmed) return `A ${what} name must be provided.`;
-  if (/[/\\]/.test(trimmed)) return "A name cannot contain path separators.";
-  // Rejected because they're invalid on Windows (and generally problematic).
-  if (/[:"*?<>|]/.test(trimmed)) return 'A name cannot contain : " * ? < > |';
-  if (trimmed === "." || trimmed === "..") return 'A name cannot be "." or "..".';
-  // Windows silently strips trailing dots, and there is no extension to keep —
-  // reject rather than quietly turning "report." into "report..sql".
-  if (trimmed.endsWith(".")) return 'A name cannot end with a ".".';
-  const name = finalNewName(trimmed, kind);
+  const err = validateRawName(raw, kind === "newFolder" ? "folder" : "file");
+  if (err) return err;
+  const name = finalNewName(raw, kind);
+  if (hasSiblingNamed(siblings, name)) {
+    return `A file or folder "${name}" already exists at this location.`;
+  }
+  return null;
+}
+
+/**
+ * Validate a typed name for a **rename**. Same rules as creation minus the
+ * extension default (a rename means exactly what it says), and the duplicate
+ * check skips a name that only differs from the current one by case — that's a
+ * legitimate rename, not a collision with itself.
+ */
+export function validateRenameName(
+  raw: string,
+  siblings: DataNode[],
+  currentName: string,
+): string | null {
+  const err = validateRawName(raw);
+  if (err) return err;
+  const name = raw.trim();
+  if (name.toLowerCase() === currentName.toLowerCase()) return null;
   if (hasSiblingNamed(siblings, name)) {
     return `A file or folder "${name}" already exists at this location.`;
   }
