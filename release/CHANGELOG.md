@@ -1,3 +1,43 @@
+# [0.5.0](https://github.com/Technarion-Oy/thaw/compare/v0.4.0...v0.5.0) (2026-07-26)
+
+
+### Bug Fixes
+
+* bump golang.org/x/text to v0.39.0 (GO-2026-5970) ([#834](https://github.com/Technarion-Oy/thaw/issues/834)) ([a7a957d](https://github.com/Technarion-Oy/thaw/commit/a7a957ddcb3c728ea1d259c5e9fc844a67db4fd4))
+* correct Windows "Reveal in Explorer" selecting one level up ([#294](https://github.com/Technarion-Oy/thaw/issues/294)) ([#841](https://github.com/Technarion-Oy/thaw/issues/841)) ([0da853e](https://github.com/Technarion-Oy/thaw/commit/0da853e087b13362a4d4f1e5130d5b773a0a7da3)), closes [#293](https://github.com/Technarion-Oy/thaw/issues/293)
+* only mention admin locks in feature-disabled warnings when locked ([#832](https://github.com/Technarion-Oy/thaw/issues/832)) ([a0fd6af](https://github.com/Technarion-Oy/thaw/commit/a0fd6af295dce71eec08f51e90a617d653e57265)), closes [#823](https://github.com/Technarion-Oy/thaw/issues/823)
+* open Query History "Load in Editor" in a new tab ([#830](https://github.com/Technarion-Oy/thaw/issues/830)) ([#839](https://github.com/Technarion-Oy/thaw/issues/839)) ([3081698](https://github.com/Technarion-Oy/thaw/commit/30816981ec3b248a5bac8ff60409103d89d009e3))
+* parse SQL and DDL text with the tokenizer, not substring search ([#819](https://github.com/Technarion-Oy/thaw/issues/819)) ([d6c7b72](https://github.com/Technarion-Oy/thaw/commit/d6c7b7245292815f9580089492299dc6e88ea474)), closes [#816](https://github.com/Technarion-Oy/thaw/issues/816)
+* recognize quoted function argument names in SQL diagnostics ([#873](https://github.com/Technarion-Oy/thaw/issues/873)) ([5191e55](https://github.com/Technarion-Oy/thaw/commit/5191e5566ace70a124bb7b2d9ee2d520b2cbb6c8)), closes [#871](https://github.com/Technarion-Oy/thaw/issues/871) [#509](https://github.com/Technarion-Oy/thaw/issues/509) [#705](https://github.com/Technarion-Oy/thaw/issues/705)
+* render unicode in JSX instead of literal \uXXXX escapes ([#822](https://github.com/Technarion-Oy/thaw/issues/822)) ([#831](https://github.com/Technarion-Oy/thaw/issues/831)) ([c7eabd2](https://github.com/Technarion-Oy/thaw/commit/c7eabd2975a2a9dbe5a51169ed5671e056c6e141)), closes [#823](https://github.com/Technarion-Oy/thaw/issues/823)
+* sidebar bulk actions target only the right-clicked selection ([#867](https://github.com/Technarion-Oy/thaw/issues/867)) ([14344a9](https://github.com/Technarion-Oy/thaw/commit/14344a9867217e3aec990849c362cfacae61bfdb)), closes [#862](https://github.com/Technarion-Oy/thaw/issues/862) [#861](https://github.com/Technarion-Oy/thaw/issues/861)
+* sidebar Export DDL opens the export options dialog ([#863](https://github.com/Technarion-Oy/thaw/issues/863)) ([#868](https://github.com/Technarion-Oy/thaw/issues/868)) ([0aa2fb9](https://github.com/Technarion-Oy/thaw/commit/0aa2fb9952d895237b63b7c07ba9eee8cee6c3b6))
+* sync Leaflet size in GeoMapView to fix Windows map misrender ([#828](https://github.com/Technarion-Oy/thaw/issues/828)) ([#837](https://github.com/Technarion-Oy/thaw/issues/837)) ([3923daa](https://github.com/Technarion-Oy/thaw/commit/3923daa73a2492f7ba12e58e7be612777b2d83bd))
+* treat INFORMATION_SCHEMA as read-only in the sidebar ([#854](https://github.com/Technarion-Oy/thaw/issues/854)) ([#856](https://github.com/Technarion-Oy/thaw/issues/856)) ([6beb613](https://github.com/Technarion-Oy/thaw/commit/6beb6134d05061cb236fafcc2bc6ae1b4df4ed77))
+* use the shared tokenizer for SQL and identifier matching ([#817](https://github.com/Technarion-Oy/thaw/issues/817)) ([7c77b8b](https://github.com/Technarion-Oy/thaw/commit/7c77b8b7a0a38b776f6096ecbc4a638dfc42a90c))
+
+
+### Features
+
+* advanced object-browser search (regex + type filter) on an account-wide backend query ([#855](https://github.com/Technarion-Oy/thaw/issues/855)) ([#857](https://github.com/Technarion-Oy/thaw/issues/857)) ([4ae3a56](https://github.com/Technarion-Oy/thaw/commit/4ae3a5641a0d3aff8627d8ead4e1a2ad53ae6ffc))
+* configurable file naming and grouping for overloaded functions/procedures in DDL export ([#869](https://github.com/Technarion-Oy/thaw/issues/869)) ([9c141a9](https://github.com/Technarion-Oy/thaw/commit/9c141a994d8853d91eacdb6c878863ea800b587d)), closes [#864](https://github.com/Technarion-Oy/thaw/issues/864) [#863](https://github.com/Technarion-Oy/thaw/issues/863)
+* create folders/files at the file-explorer root ([#848](https://github.com/Technarion-Oy/thaw/issues/848)) ([#851](https://github.com/Technarion-Oy/thaw/issues/851)) ([8c740e0](https://github.com/Technarion-Oy/thaw/commit/8c740e0298f9d600da93b6622def12179476ee91))
+* export function/procedure bodies as dollar-quoted ($$…$$) ([#870](https://github.com/Technarion-Oy/thaw/issues/870)) ([eb8d7aa](https://github.com/Technarion-Oy/thaw/commit/eb8d7aa1942c471554524f7ea0b75dee4cd10e11)), closes [#865](https://github.com/Technarion-Oy/thaw/issues/865)
+* insert placeholders at the caret in the DDL export path template ([#872](https://github.com/Technarion-Oy/thaw/issues/872)) ([13a00b4](https://github.com/Technarion-Oy/thaw/commit/13a00b4aef9ad0715ff0ab7603bc173ce5942701)), closes [#866](https://github.com/Technarion-Oy/thaw/issues/866)
+* manage ALTER USER variants (reset/rename/abort, policies, tags, MFA, delegated auth) in User Properties ([#826](https://github.com/Technarion-Oy/thaw/issues/826)) ([#835](https://github.com/Technarion-Oy/thaw/issues/835)) ([c7ec227](https://github.com/Technarion-Oy/thaw/commit/c7ec2278f0802e74a8cc8573b6620afffa54f219))
+* manage key-pair auth (both RSA slots, rotate/remove) in User Properties ([#833](https://github.com/Technarion-Oy/thaw/issues/833)) ([06af4d8](https://github.com/Technarion-Oy/thaw/commit/06af4d84ec9c94bbe0558b41042557ecbfb08793)), closes [#824](https://github.com/Technarion-Oy/thaw/issues/824)
+* modern one-click Windows NSIS installer ([#843](https://github.com/Technarion-Oy/thaw/issues/843)) ([093c818](https://github.com/Technarion-Oy/thaw/commit/093c81842a1478cb8ea6cae304de292d26e5973a))
+* more Query History filters (status, type, duration, database/schema) ([#827](https://github.com/Technarion-Oy/thaw/issues/827)) ([#836](https://github.com/Technarion-Oy/thaw/issues/836)) ([60e71ac](https://github.com/Technarion-Oy/thaw/commit/60e71aca6d2b43ec1b653653c3e408f5049f4e15))
+* multi-select database nodes in the sidebar tree ([#861](https://github.com/Technarion-Oy/thaw/issues/861)) ([57abd25](https://github.com/Technarion-Oy/thaw/commit/57abd25644411e8aeb260cac63c02897433332f1))
+* show full tab title tooltip when truncated in Active Files panel ([#829](https://github.com/Technarion-Oy/thaw/issues/829)) ([#838](https://github.com/Technarion-Oy/thaw/issues/838)) ([824abe4](https://github.com/Technarion-Oy/thaw/commit/824abe463ff18888072b45efdd87d0c93d859c47))
+* tags editor in Properties modals for all taggable object types ([#850](https://github.com/Technarion-Oy/thaw/issues/850)) ([#853](https://github.com/Technarion-Oy/thaw/issues/853)) ([f5f9a6f](https://github.com/Technarion-Oy/thaw/commit/f5f9a6ffd521e6174aa3224652e88d3cab4bc283))
+* VS Code-style preview tabs from the file browser ([#849](https://github.com/Technarion-Oy/thaw/issues/849)) ([#852](https://github.com/Technarion-Oy/thaw/issues/852)) ([a628e07](https://github.com/Technarion-Oy/thaw/commit/a628e07b4bbd73ddf4490f3a43cf95950d057fb5))
+
+
+### Performance Improvements
+
+* cull off-screen ER nodes and make minimap toggleable ([#842](https://github.com/Technarion-Oy/thaw/issues/842)) ([ba3f860](https://github.com/Technarion-Oy/thaw/commit/ba3f8605ce3ec6f569eccdfdb55ce6856cf706bf)), closes [#821](https://github.com/Technarion-Oy/thaw/issues/821) [#2](https://github.com/Technarion-Oy/thaw/issues/2) [#1](https://github.com/Technarion-Oy/thaw/issues/1) [#3](https://github.com/Technarion-Oy/thaw/issues/3) [#821](https://github.com/Technarion-Oy/thaw/issues/821)
+
 # [0.4.0](https://github.com/Technarion-Oy/thaw/compare/v0.3.1...v0.4.0) (2026-07-19)
 
 
