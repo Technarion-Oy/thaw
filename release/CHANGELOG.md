@@ -1,3 +1,10 @@
+## [0.5.1](https://github.com/Technarion-Oy/thaw/compare/v0.5.0...v0.5.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* empty folder in the file browser white-screens the app ([#877](https://github.com/Technarion-Oy/thaw/issues/877)) ([96a75d8](https://github.com/Technarion-Oy/thaw/commit/96a75d898f6ca5ff08e4cf5b2d7e41daaf6c12e6)), closes [848/#851](https://github.com/Technarion-Oy/thaw/issues/851)
+
 # [0.5.0](https://github.com/Technarion-Oy/thaw/compare/v0.4.0...v0.5.0) (2026-07-26)
 
 
