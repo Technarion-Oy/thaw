@@ -26,6 +26,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 | Symbol | Description |
 |---|---|
 | `FileEntry` | `{ name, path, isDir, size }` — single directory entry returned by `ListDir`. |
+| `ListDir(dir)` | Direct children of `dir`, directories first then files, each group alphabetical. **Always returns a non-nil slice on success** — an empty directory yields `[]`, never `nil` (see Gotchas). |
 | `FSChangeEvent` | `{ dir string }` — emitted by `Watcher` to the frontend via the callback. |
 | `Watcher` | Wraps a `rjeczalik/notify` recursive watch; owns debounce timers per directory. |
 | `NewWatcher(dir, opts, emit)` | Installs one recursive watch on `dir` and starts the watcher; caller must call `Close()`. `opts` (`WatchOptions`) carries exclude globs and a distinct-directory cap; the zero value keeps the historical no-exclusion behavior. |
@@ -51,6 +52,7 @@ tree for changes and emits debounced Wails events to refresh the file browser UI
 
 ## Gotchas
 
+- **Never return a nil slice to the frontend.** A nil Go slice serializes as JSON `null` (not `[]`) over the Wails bridge, so `entries.map(...)` on the other side throws. `ListDir` used to return `nil` for an empty directory; because the frontend built its tree nodes inside a React state updater — which React runs during the render phase, outside any `try`/`catch` — the resulting `TypeError` unmounted the entire React root and the window went blank (issue #875: create a folder in the file browser, expand it, app "crashes"). `ListDir` now pre-allocates its `dirs` slice so the result is always non-nil; `TestListDir_EmptyDirReturnsNonNilSlice` pins the JSON shape. Any new listing-style function here must do the same.
 - Path validation uses `filepath.EvalSymlinks` on the existing ancestor, not the full target path (which may not exist yet). There is a narrow TOCTOU window between validation and the actual OS call — acceptable on a single-user desktop app.
 - Case-only renames (e.g. `File.sql` → `file.sql`) are handled via `os.SameFile` so they work correctly on both case-sensitive and case-insensitive filesystems.
 - **Windows Explorer `/select` cannot be fixed by quoting inside an `Args` string.** Go's `os/exec` runs every `Args` entry through `syscall.EscapeArg`, which backslash-escapes quotes; Explorer's non-standard parser has no `\"` escape, so the corrupted path makes it "open one level up" (issue #294). The only reliable fixes bypass `EscapeArg`: set `SysProcAttr.CmdLine` (what `reveal_windows.go` does) or call the Win32 `SHOpenFolderAndSelectItems` shell API. Because `SysProcAttr` fields are OS-specific, `revealInFileManager` must live in a `//go:build windows` file. This is verifiable only on real Windows — CI cross-compiles but never executes it (manual-verification checklist: issue #840).

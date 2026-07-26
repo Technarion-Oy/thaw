@@ -94,8 +94,13 @@ function pathBase(p: string): string {
   return i >= 0 ? p.substring(i + 1) : p;
 }
 
-function entriesToNodes(entries: FileEntry[]): DataNode[] {
-  return entries.map((e) => ({
+/** Build tree nodes from a directory listing.
+ *  Tolerates null/undefined: a nil Go slice crosses the Wails bridge as JSON
+ *  `null`, so an empty directory used to arrive here as `null` (issue #875).
+ *  The backend now always returns `[]`; this stays as belt-and-braces, matching
+ *  the `?? []` treatment other bridge results get (search matches, recentDirs). */
+function entriesToNodes(entries: FileEntry[] | null | undefined): DataNode[] {
+  return (entries ?? []).map((e) => ({
     key:    e.path,
     title:  e.name,
     icon:   (props: { expanded?: boolean }) =>
@@ -337,6 +342,12 @@ export default function FileBrowser() {
   const [anchorKey,   setAnchorKey]   = useState<string | null>(null);
   const [loading,     setLoading]     = useState(false);
   const [loaded,      setLoaded]      = useState(false);
+  // Why the root listing failed (unreadable directory, deleted while open, …).
+  // Set on a failed loadRoot/refresh so the auto-load effect below stops
+  // retrying — without it a permanently failing root spun an endless
+  // ListDirectory loop (issue #875) and the panel stayed blank. Cleared on a
+  // successful load, on a workspace switch, and by the inline Retry button.
+  const [rootError,   setRootError]   = useState<string | null>(null);
   const treeWrapRef = useRef<HTMLDivElement>(null);
 
   // ── Internal file clipboard (cut/copy/paste) ────────────────────────────────
@@ -504,6 +515,7 @@ export default function FileBrowser() {
   // Reset tree when the working directory changes
   useEffect(() => {
     setLoaded(false);
+    setRootError(null);
     setTreeData([]);
     setLoadedKeys([]);
     setSelKeys([]);
@@ -527,7 +539,13 @@ export default function FileBrowser() {
     prevExpandedRef.current = expanded;
     if (!justExpanded || !exportDir || !loaded) return;
     ListDirectory(exportDir)
-      .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
+      .then((entries) => {
+        // Build the nodes here, not inside the updater: React runs an updater
+        // during the render phase, where a throw tears down the whole React
+        // tree instead of landing in .catch (issue #875).
+        const fresh = entriesToNodes(entries);
+        setTreeData((prev) => mergeNodes(prev, fresh));
+      })
       .catch(() => {});
   }, [exportDir, expanded, loaded]);
 
@@ -557,9 +575,10 @@ export default function FileBrowser() {
         // so expanded subtrees (children) are preserved.
         ListDirectory(exportDir)
           .then((entries) => {
-            const fresh = entriesToNodes(entries);
+            const list = entries ?? [];
+            const fresh = entriesToNodes(list);
             setTreeData((prev) => mergeNodes(prev, fresh));
-            pruneLoadedKeys(new Set(entries.map((e) => e.path)));
+            pruneLoadedKeys(new Set(list.map((e) => e.path)));
           })
           .catch(() => {});
         return;
@@ -568,8 +587,11 @@ export default function FileBrowser() {
       if (!loadedKeysRef.current.some((k) => String(k) === evt.dir)) return;
       ListDirectory(evt.dir)
         .then((entries) => {
-          setTreeData((prev) => updateNode(prev, evt.dir, entriesToNodes(entries), true));
-          pruneLoadedKeys(new Set(entries.map((e) => e.path)));
+          const list = entries ?? [];
+          // Nodes built outside the updater — see the collapse→expand refresh above.
+          const fresh = entriesToNodes(list);
+          setTreeData((prev) => updateNode(prev, evt.dir, fresh, true));
+          pruneLoadedKeys(new Set(list.map((e) => e.path)));
         })
         .catch(() => {});
     });
@@ -617,12 +639,15 @@ export default function FileBrowser() {
   const loadRoot = async () => {
     if (!exportDir || loading || loaded) return;
     setLoading(true);
+    setRootError(null);
     try {
       const entries = await ListDirectory(exportDir);
       setTreeData(entriesToNodes(entries));
       setLoaded(true);
-    } catch {
-      // non-fatal
+    } catch (e) {
+      // Non-fatal, but remember it: `loaded` stays false, so without this flag
+      // the auto-load effect below would call loadRoot() again on every render.
+      setRootError(String(e));
     } finally {
       setLoading(false);
     }
@@ -633,11 +658,12 @@ export default function FileBrowser() {
   // effect clears `loaded`, and toggleExpanded — the only other caller — doesn't
   // fire in that case, leaving the tree blank with no Reload button). loadRoot()
   // self-guards on loading/loaded, so this never double-lists alongside the
-  // toggleExpanded path.
+  // toggleExpanded path. `rootError` gates the retry: a root that keeps failing
+  // is surfaced with a Retry button instead of being re-listed forever.
   useEffect(() => {
-    if (exportDir && expanded && !loaded && !loading) loadRoot();
+    if (exportDir && expanded && !loaded && !loading && !rootError) loadRoot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exportDir, expanded, loaded, loading]);
+  }, [exportDir, expanded, loaded, loading, rootError]);
 
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu
@@ -654,21 +680,30 @@ export default function FileBrowser() {
       const loaded = loadedKeysRef.current.map(String);
       const [rootEntries, ...childResults] = await Promise.all([
         ListDirectory(exportDir),
+        // `entries: null` means the listing FAILED (the stale subtree is kept
+        // below); a directory that listed fine but is empty must come through
+        // as [] so its stale children are actually cleared.
         ...loaded.map(async (k) => {
-          try { return { key: k, entries: await ListDirectory(k) }; }
+          try { return { key: k, entries: (await ListDirectory(k)) ?? [] }; }
           catch { return { key: k, entries: null as FileEntry[] | null }; }
         }),
       ]);
+      // Nodes are built before the updater runs — an updater throws during the
+      // render phase, which would unmount the React root (issue #875).
+      const rootNodes = entriesToNodes(rootEntries);
+      const childNodes = childResults
+        .filter((r) => r.entries !== null)
+        .map((r) => ({ key: r.key, nodes: entriesToNodes(r.entries) }));
       setTreeData((prev) => {
-        let tree = mergeNodes(prev, entriesToNodes(rootEntries));
-        for (const r of childResults) {
-          if (r.entries) tree = updateNode(tree, r.key, entriesToNodes(r.entries), true);
-        }
+        let tree = mergeNodes(prev, rootNodes);
+        for (const c of childNodes) tree = updateNode(tree, c.key, c.nodes, true);
         return tree;
       });
       setLoaded(true);
-    } catch {
-      // non-fatal
+      setRootError(null);
+    } catch (e) {
+      // Non-fatal — see loadRoot: record it so the auto-load effect doesn't loop.
+      setRootError(String(e));
     } finally {
       setLoading(false);
     }
@@ -687,7 +722,10 @@ export default function FileBrowser() {
     const path = String(node.key);
     try {
       const entries = await ListDirectory(path);
-      setTreeData((prev) => updateNode(prev, path, entriesToNodes(entries)));
+      // Nodes built here, outside the updater — see refresh(). An empty folder
+      // (the #875 repro: create folder → expand) lands here as [].
+      const children = entriesToNodes(entries);
+      setTreeData((prev) => updateNode(prev, path, children));
     } catch {
       // non-fatal
     }
@@ -1021,7 +1059,8 @@ export default function FileBrowser() {
     // is gone (e.g. deleted between Cut and Paste), bail with one clear error rather
     // than letting every item fail with a confusing per-file toast.
     let names: Set<string>;
-    try { names = new Set((await ListDirectory(targetDir)).map((e) => e.name)); }
+    // `?? []` — an empty target directory is a perfectly valid paste target.
+    try { names = new Set(((await ListDirectory(targetDir)) ?? []).map((e) => e.name)); }
     catch { message.error("Paste target is not accessible"); return; }
     const failed: string[] = [];
     const skipped: string[] = []; // cut items already in the target folder (no-op)
@@ -1664,7 +1703,7 @@ export default function FileBrowser() {
               />
             </Tooltip>
           )}
-          {loaded && (
+          {(loaded || rootError) && (
             <Button
               size="small"
               type="text"
@@ -1842,6 +1881,19 @@ export default function FileBrowser() {
 
           {exportDir && !searchOpen && !loading && loaded && treeData.length === 0 && (
             <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Directory is empty.</Text>
+          )}
+
+          {/* Root listing failed (unreadable folder, deleted while open, …).
+              Shown instead of an empty panel that silently re-listed forever. */}
+          {exportDir && !searchOpen && !loading && !loaded && rootError && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+              <Text style={{ fontSize: 11, color: CLR_SECONDARY }} title={rootError}>
+                Could not read this folder.
+              </Text>
+              <Button size="small" onClick={() => setRootError(null)} style={{ fontSize: 11, height: 20 }}>
+                Retry
+              </Button>
+            </div>
           )}
 
           {!searchOpen && loaded && treeData.length > 0 && (

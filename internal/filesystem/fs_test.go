@@ -3,6 +3,7 @@
 package filesystem
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -787,6 +788,58 @@ func TestWriteFileAtomic(t *testing.T) {
 	for _, e := range entries {
 		if e.Name() != "f.txt" {
 			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}
+
+// ─── ListDir ────────────────────────────────────────────────────────────────
+
+// An empty directory must list as an empty, non-nil slice. A nil slice crosses
+// the Wails bridge as JSON `null`, which white-screened the file browser when
+// an empty folder was expanded (issue #875).
+func TestListDir_EmptyDirReturnsNonNilSlice(t *testing.T) {
+	entries, err := ListDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("ListDir: %v", err)
+	}
+	if entries == nil {
+		t.Fatal("ListDir on an empty dir returned a nil slice (serializes as JSON null)")
+	}
+	if len(entries) != 0 {
+		t.Fatalf("len(entries) = %d, want 0", len(entries))
+	}
+	if b, err := json.Marshal(entries); err != nil || string(b) != "[]" {
+		t.Fatalf("json.Marshal(entries) = %s (err %v), want []", b, err)
+	}
+}
+
+// Pre-allocating `dirs` must not disturb the documented ordering: directories
+// first, then files, each group alphabetical.
+func TestListDir_DirsFirstThenFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, n := range []string{"b.sql", "a.sql"} {
+		if err := os.WriteFile(filepath.Join(root, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ListDir(root)
+	if err != nil {
+		t.Fatalf("ListDir: %v", err)
+	}
+	got := make([]string, len(entries))
+	for i, e := range entries {
+		got[i] = e.Name
+	}
+	want := []string{"sub", "a.sql", "b.sql"}
+	if len(got) != len(want) {
+		t.Fatalf("entries = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("entries = %v, want %v (dirs first, then files, each alphabetical)", got, want)
 		}
 	}
 }
