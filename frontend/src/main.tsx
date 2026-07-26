@@ -3,6 +3,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import AppErrorBoundary from "./components/common/AppErrorBoundary";
 import "./styles/global.css";
 import "./utils/modalDragResize"; // global drag-to-move for all antd modals (#572)
 import { ClipboardGetText, ClipboardSetText } from "../wailsjs/runtime/runtime";
@@ -28,8 +29,13 @@ try {
   (navigator.clipboard as any).writeText = (text: string) => ClipboardSetText(text);
 } catch { /* ignore — DOM interception in SqlEditor is the primary fix */ }
 
+// AppErrorBoundary is outside <App /> so a render-phase throw anywhere in the
+// tree (including the theme provider) shows a recoverable message instead of
+// unmounting the root and leaving a blank window (issue #875).
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>
 );

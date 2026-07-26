@@ -115,13 +115,20 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // ListDir returns the direct children of dir, directories first then files,
 // both groups sorted alphabetically.
+//
+// An empty directory yields an empty, non-nil slice: a nil Go slice serializes
+// as JSON `null` over the Wails bridge, and the frontend's `entries.map(...)`
+// then throws inside a React state updater — a render-phase TypeError that
+// unmounts the whole React root (blank window, issue #875). Keep `dirs`
+// pre-allocated so the returned slice is never nil on success.
 func ListDir(dir string) ([]FileEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	var dirs, files []FileEntry
+	dirs := make([]FileEntry, 0, len(entries))
+	var files []FileEntry
 	for _, e := range entries {
 		info, _ := e.Info()
 		size := int64(0)
