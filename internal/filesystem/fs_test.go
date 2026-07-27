@@ -376,6 +376,49 @@ func TestMkDir_ExistingDirectory(t *testing.T) {
 	}
 }
 
+func TestMkDir_ExistingNestedDirectory(t *testing.T) {
+	// The parent chain already exists here, so this takes the plain os.Mkdir path
+	// rather than the MkdirAll-then-retry one — both must reject an existing target.
+	root := t.TempDir()
+	dir := filepath.Join(root, "a", "b", "c")
+	if err := MkDir(dir, root); err != nil {
+		t.Fatalf("first create should succeed, got: %v", err)
+	}
+	if err := MkDir(dir, root); err == nil {
+		t.Error("expected an error for an already-existing nested directory")
+	}
+}
+
+func TestMkDir_ConcurrentSameName(t *testing.T) {
+	// Two windows of the app can share one export directory ("Open Folder in New
+	// Window…"), so two New Folder creates of the same name can genuinely race.
+	// Exactly one must win: a check-then-act MkDir let both report success, which
+	// is the false "Created folder" this rejection exists to prevent.
+	root := t.TempDir()
+	dir := filepath.Join(root, "reports")
+	const racers = 8
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	for range racers {
+		go func() {
+			<-start
+			errs <- MkDir(dir, root)
+		}()
+	}
+	close(start)
+	created := 0
+	for range racers {
+		if err := <-errs; err == nil {
+			created++
+		} else if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("losers should report the target exists, got: %v", err)
+		}
+	}
+	if created != 1 {
+		t.Errorf("exactly one create should succeed, got %d", created)
+	}
+}
+
 func TestMkDir_ExistingFile(t *testing.T) {
 	// A file where the folder should go: MkdirAll would fail with a raw syscall
 	// error; the pre-check gives the same message as the directory case.

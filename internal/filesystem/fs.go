@@ -254,16 +254,35 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 // there" — the file browser's inline create reported success and added a second
 // tree node for a folder it hadn't created. Parents are still created freely;
 // it's only the target itself that must be new.
+//
+// The target always goes through os.Mkdir, which fails atomically with ErrExist
+// rather than check-then-act. That matters because "Open Folder in New Window…"
+// puts two live processes on one export directory: an Lstat-then-MkdirAll pair
+// lets two racing New Folder calls for the same name both pass the check and
+// both report success. Only the intermediate parents are created with MkdirAll,
+// whose idempotence is the point of "and any necessary parents".
 func MkDir(path, allowedRoot string) error {
 	if err := validateNewPath(path, allowedRoot); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(path); err == nil {
+	err := os.Mkdir(path, 0o755)
+	if os.IsNotExist(err) {
+		// A missing intermediate parent. Build the chain, then retry the target
+		// itself exclusively so the guarantee above still holds for it.
+		if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+			return mkErr
+		}
+		err = os.Mkdir(path, 0o755)
+	}
+	switch {
+	case err == nil:
+		return nil
+	case os.IsExist(err):
+		// Also covers a plain file sitting on the target path (EEXIST).
 		return fmt.Errorf("file or folder already exists: %s", filepath.Base(path))
-	} else if !os.IsNotExist(err) {
+	default:
 		return err
 	}
-	return os.MkdirAll(path, 0o755)
 }
 
 // WriteFileInRoot creates a new file at path with content.
