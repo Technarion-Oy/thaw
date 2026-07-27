@@ -74,6 +74,31 @@ export function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] 
   return kids;
 }
 
+/**
+ * Insert a child into a parent's children, maintaining dirs-first alphabetical
+ * order.
+ *
+ * **Silently no-ops when the parent has no `children` array yet** — a directory
+ * that has never been listed. That's deliberate: seeding `children` with just
+ * this one node would render the directory as if it contained nothing else, and
+ * `onLoadData` skips a node that already has children, so the missing siblings
+ * would never be fetched. The node appears naturally when the directory is
+ * expanded and listed instead.
+ *
+ * The caller therefore has to know whether the parent has been listed before
+ * reaching for this. `submitCreate` does: a create into a never-listed directory
+ * would otherwise be dropped here and stay invisible until a manual reload.
+ */
+export function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNode[] {
+  return nodes.map((n) => {
+    if (n.key === parentKey) {
+      if (!n.children) return n;
+      return { ...n, children: insertSorted(n.children, child) };
+    }
+    return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
+  });
+}
+
 /** Find a node by key anywhere in the tree (depth-first). */
 export function findNode(nodes: DataNode[], key: string): DataNode | null {
   for (const n of nodes) {

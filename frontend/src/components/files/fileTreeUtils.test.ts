@@ -7,6 +7,7 @@ import {
   newItemKey,
   isNewItemKey,
   insertSorted,
+  addChild,
   findNode,
   childrenOf,
   insertPlaceholder,
@@ -79,6 +80,48 @@ describe("insertSorted", () => {
     const siblings = [file("a.sql")];
     insertSorted(siblings, file("b.sql"));
     expect(siblings).toHaveLength(1);
+  });
+});
+
+describe("addChild", () => {
+  it("inserts into a listed parent in dirs-first alphabetical order", () => {
+    const tree = [dir("sub", [file("a.sql", "/root/sub"), file("z.sql", "/root/sub")])];
+    const out = addChild(tree, "/root/sub", file("m.sql", "/root/sub"));
+    expect(names(out[0].children!)).toEqual(["a.sql", "m.sql", "z.sql"]);
+  });
+
+  it("reaches a nested parent", () => {
+    const tree = [dir("sub", [{ ...dir("deep"), key: "/root/sub/deep", children: [] }])];
+    const out = addChild(tree, "/root/sub/deep", file("a.sql", "/root/sub/deep"));
+    expect(names(out[0].children![0].children!)).toEqual(["a.sql"]);
+  });
+
+  it("materializes an expanded-but-empty parent", () => {
+    const tree = [dir("sub", [])];
+    expect(names(addChild(tree, "/root/sub", file("a.sql", "/root/sub"))[0].children!)).toEqual(["a.sql"]);
+  });
+
+  it("DROPS the child when the parent has never been listed", () => {
+    // The silent-loss mechanism `submitCreate` has to work around: a create into
+    // a directory whose listing hasn't landed yet would vanish here, and nothing
+    // re-lists it afterwards (onLoadData skips a parent that has children, and
+    // the watcher echo is suppressed as a self-change). Seeding `children` with
+    // just this node instead would be worse — the directory would render as if
+    // it held nothing else, and onLoadData would then never fetch the rest.
+    const tree = [dir("sub")]; // no children array at all
+    const out = addChild(tree, "/root/sub", file("a.sql", "/root/sub"));
+    expect(out[0].children).toBeUndefined();
+  });
+
+  it("is a no-op for a parent that isn't in the tree", () => {
+    const tree = [dir("sub", [])];
+    expect(addChild(tree, "/root/gone", file("a.sql"))).toEqual(tree);
+  });
+
+  it("does not mutate the input tree", () => {
+    const kids = [file("a.sql", "/root/sub")];
+    addChild([dir("sub", kids)], "/root/sub", file("b.sql", "/root/sub"));
+    expect(kids).toHaveLength(1);
   });
 });
 

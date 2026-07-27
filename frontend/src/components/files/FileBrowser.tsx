@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Tree, Typography, Spin, Button, Input, Switch, Tooltip, Dropdown, App as AntApp } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -57,6 +58,7 @@ import {
   newItemKey,
   isNewItemKey,
   insertSorted,
+  addChild,
   findNode,
   childrenOf,
   insertPlaceholder,
@@ -73,6 +75,9 @@ type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
+/** Upper bound for the inline-validation box (~two wrapped lines) — only used to
+ *  decide whether it still fits below the field. See InlineNameInput. */
+const ERROR_BOX_MAX_H = 44;
 
 /** Extract the directory portion of a path, handling both / and \ separators. */
 function pathDir(p: string): string {
@@ -202,19 +207,6 @@ function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string):
     key: newPrefix + String(n.key).substring(oldPrefix.length),
     children: n.children ? reKeyChildren(n.children, oldPrefix, newPrefix) : undefined,
   }));
-}
-
-/** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
- *  If the parent hasn't been expanded yet (no children array), the node is not inserted
- *  — it will appear naturally when the user expands the directory. */
-function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNode[] {
-  return nodes.map((n) => {
-    if (n.key === parentKey) {
-      if (!n.children) return n;
-      return { ...n, children: insertSorted(n.children, child) };
-    }
-    return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
-  });
 }
 
 // Returns a context window around the match so long lines display usefully.
@@ -695,8 +687,8 @@ export default function FileBrowser() {
       // Re-fetch the root and every currently-loaded (expanded) directory in
       // parallel, then merge — this picks up external changes while PRESERVING the
       // expanded subtree. Replacing treeData with root-only nodes (the old
-      // behavior) desynced rc-tree's uncontrolled expand state: folders collapsed
-      // and could not be reopened.
+      // behavior) dropped every loaded child while `expandedKeys` still named
+      // them: folders collapsed and could not be reopened.
       const loaded = loadedKeysRef.current.map(String);
       const [rootEntries, ...childResults] = await Promise.all([
         ListDirectory(exportDir),
@@ -895,6 +887,11 @@ export default function FileBrowser() {
     event.preventDefault();
     const path = String(node.key);
     if (isNewItemKey(path)) return; // no context menu on the creation placeholder
+    // Nor on the row whose own rename editor is open: the menu's actions (Delete,
+    // Rename, Cut, …) all act on a node that is mid-edit. The input itself stops
+    // contextmenu propagation, so a right-click *inside* the field still gets the
+    // native menu for paste.
+    if (pendingRename && path === pendingRename.path) return;
     const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
     // Right-clicking a node outside the current multi-selection acts on just that
@@ -1329,6 +1326,20 @@ export default function FileBrowser() {
     }
   };
 
+  // Retire any inline editor whose subject is about to disappear: the node being
+  // renamed, or the directory a creation placeholder lives in (or an ancestor of
+  // either). Two things go wrong without it. The editor's row vanishes with the
+  // node while its session stays live, so a late blur fires `submitRename`
+  // against a path that no longer exists and toasts "Rename failed: …" instead
+  // of just closing. And the confirm modal stealing focus *is* that blur — it
+  // would submit the rename first, moving the file out from under the delete.
+  // Hence: called synchronously before the modal opens, not after the unlink.
+  const retireEditorsIn = (paths: string[]) => {
+    const within = (p: string) => paths.some((d) => p === d || p.startsWith(d + pathSep(d)));
+    if (pendingRename && within(pendingRename.path)) cancelRename();
+    if (pendingCreate && within(pendingCreate.parent)) cancelCreate();
+  };
+
   const handleDeleteConfirm = () => {
     if (!fileCtxMenu) return;
     // Deleting a folder removes its children, so drop any selected descendants —
@@ -1337,6 +1348,7 @@ export default function FileBrowser() {
     const multi = paths.length > 1;
     const { name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
+    retireEditorsIn(paths);
     modal.confirm({
       title: multi ? `Delete ${paths.length} items` : `Delete ${isDir ? "folder" : "file"}`,
       content: multi
@@ -1396,11 +1408,14 @@ export default function FileBrowser() {
   };
 
   // Siblings of the node being renamed — drives its inline duplicate check.
+  // Keyed on the path, not the whole `pendingRename`: the object identity
+  // changes on every keystroke, which would re-walk the tree per character.
+  const renamePath = pendingRename?.path ?? null;
   const renameSiblings = useMemo(() => {
-    if (!pendingRename) return [];
-    const dir = pathDir(pendingRename.path);
+    if (renamePath === null) return [];
+    const dir = pathDir(renamePath);
     return childrenOf(treeData, dir === rootDir ? null : dir);
-  }, [pendingRename, treeData, rootDir]);
+  }, [renamePath, treeData, rootDir]);
 
   // Same live validation the creation editor gets — the two share `InlineNameInput`,
   // so they share the rules too. Suppressed for an empty value: the field opens
@@ -1472,6 +1487,33 @@ export default function FileBrowser() {
   };
 
   // ── Inline creation (VS Code–style placeholder row) ────────────────────────
+  // List `dir` and merge the result into the tree, marking it loaded. Returns
+  // whether the directory's children are now materialized in `treeData` —
+  // `addChild` silently drops a node into a parent that has none (see its doc).
+  const listChildrenInto = async (dir: string): Promise<boolean> => {
+    try {
+      const entries = await ListDirectory(dir);
+      // Built outside the updater — a throw inside one unmounts the React tree.
+      const children = entriesToNodes(entries);
+      setTreeData((prev) => updateNode(prev, dir, children, true));
+      setLoadedKeys((prev) => (prev.some((k) => String(k) === dir) ? prev : [...prev, dir]));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // The eager listing `startNewItem` kicks off for a not-yet-listed parent.
+  // `submitCreate` orders itself behind it, because the two are otherwise
+  // independent async flows and *either* interleaving loses the new node: submit
+  // first and `addChild` no-ops on a parent that still has no children array;
+  // listing first — but resolving after the insert — merges a pre-creation
+  // snapshot over the node that was just added. Neither self-heals (`onLoadData`
+  // skips a parent that now has children, and the watcher echo is swallowed by
+  // the 500 ms self-change suppression), so the item would stay invisible until
+  // a manual Reload.
+  const createListingRef = useRef<Promise<boolean> | null>(null);
+
   // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
   // both the context menu (a node or the root) and the header toolbar buttons
   // can share this — the root is just exportDir.
@@ -1480,6 +1522,7 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     // At most one inline editor at a time — a pending rename is abandoned.
     cancelRename();
+    createListingRef.current = null;
     const parent = dir.replace(/[/\\]+$/, "");
     const session = newSession();
     createSessionRef.current = session;
@@ -1490,22 +1533,21 @@ export default function FileBrowser() {
     // user-driven expand, so a programmatic one has to list the directory here.
     setExpandedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
     if (loadedKeysRef.current.some((k) => String(k) === parent)) return;
-    try {
-      const entries = await ListDirectory(parent);
-      // Built outside the updater — a throw inside one unmounts the React tree.
-      const children = entriesToNodes(entries);
-      setTreeData((prev) => updateNode(prev, parent, children, true));
-      setLoadedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
-    } catch {
-      // Non-fatal: the placeholder still works, the inline duplicate check just
-      // has nothing to compare against and the backend's O_EXCL create catches it.
-    }
+    // A failed listing is non-fatal for the *editor*: the placeholder still
+    // works, the inline duplicate check just has nothing to compare against and
+    // the backend's O_EXCL create stays the safety net. It does matter to
+    // `submitCreate`, which is why the promise is parked rather than dropped.
+    createListingRef.current = listChildrenInto(parent);
+    await createListingRef.current;
   };
 
   // Siblings the pending item will join — drives the inline duplicate check.
+  // Keyed on the parent, not the whole `pendingCreate`: the object identity
+  // changes on every keystroke, which would re-walk the tree per character.
+  const createParent = pendingCreate?.parent ?? null;
   const pendingSiblings = useMemo(
-    () => (pendingCreate ? childrenOf(treeData, pendingCreate.parent === rootDir ? null : pendingCreate.parent) : []),
-    [pendingCreate, treeData, rootDir],
+    () => (createParent === null ? [] : childrenOf(treeData, createParent === rootDir ? null : createParent)),
+    [createParent, treeData, rootDir],
   );
 
   // Inline validation message, shown under the input while it's still open.
@@ -1540,12 +1582,22 @@ export default function FileBrowser() {
       if (kind === "newFolder") await CreateDirectory(fullPath);
       else await CreateFile(fullPath);
       markSelfChanged(parent);
+      // Order behind the eager listing before touching the tree — see
+      // `createListingRef`. A null ref means none was needed (the parent was
+      // already in `loadedKeys`, so it has children); `false` means it failed,
+      // leaving the parent with no children array for `addChild` to insert into.
+      const listing = createListingRef.current;
+      const listed = isRoot || listing === null || (await listing);
       // The item exists on disk by now and can't be un-created, so the tree gets
       // the node whether or not this session is still the live one — leaving a
       // real file invisible would be a worse lie, especially with the fs watcher
       // off.
       const node = makeNode(fullPath, name, kind === "newFolder");
-      setTreeData((prev) => (isRoot ? insertSorted(prev, node) : addChild(prev, parent, node)));
+      if (isRoot) setTreeData((prev) => insertSorted(prev, node));
+      else if (listed) setTreeData((prev) => addChild(prev, parent, node));
+      // Nothing to insert into: re-list the parent instead. The item is on disk,
+      // so the fresh listing carries it.
+      else await listChildrenInto(parent);
       // Escape landed while the IPC was in flight, or a newer editor has since
       // opened: skip everything the user was cancelling — the toast, the
       // selection move and (the disruptive one) the editor tab — and leave the
@@ -2235,8 +2287,47 @@ function InlineNameInput({
   // Per-instance: the editor unmounts when the edit ends, so the next one
   // re-runs its initial selection.
   const initRef = useRef(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  // The error box is portaled to <body> and positioned against the input's
+  // viewport rect. Absolute positioning inside the row can't work: the tree
+  // wrapper is `overflow: hidden` and auto-sizes to its rows, so a message under
+  // the LAST visible row would be clipped away entirely (z-index doesn't help —
+  // it's clipping, not stacking).
+  const [errBox, setErrBox] = useState<{ top: number; left: number; width: number; flip: boolean } | null>(null);
+  const measureErr = useCallback(() => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    // Flip above the field when the message would run off the bottom of the
+    // window. ERROR_BOX_MAX_H is only a fit test — the flipped box is pinned by
+    // its bottom edge (translateY(-100%)), so its real height never matters.
+    const flip = r.bottom + ERROR_BOX_MAX_H > window.innerHeight;
+    const next = { top: flip ? r.top : r.bottom, left: r.left, width: r.width, flip };
+    // Bail out when nothing moved: this runs on every render, and a fresh object
+    // each time would re-render forever.
+    setErrBox((prev) =>
+      prev && prev.top === next.top && prev.left === next.left
+        && prev.width === next.width && prev.flip === next.flip
+        ? prev
+        : next);
+  }, []);
+  // Re-anchor after every render — a watcher event can insert a sibling row above
+  // this one, or the panel can be resized, while the editor is open.
+  useLayoutEffect(() => {
+    if (error) measureErr(); else setErrBox(null);
+  });
+  useEffect(() => {
+    if (!error) return;
+    // Any ancestor scroll moves the anchor without re-rendering us — the capture
+    // phase catches them all without knowing which element actually scrolls.
+    window.addEventListener("scroll", measureErr, true);
+    window.addEventListener("resize", measureErr);
+    return () => {
+      window.removeEventListener("scroll", measureErr, true);
+      window.removeEventListener("resize", measureErr);
+    };
+  }, [error, measureErr]);
   return (
-    <span style={{ position: "relative", display: "block" }}>
+    <span ref={wrapRef} style={{ position: "relative", display: "block" }}>
       <Input
         size="small"
         autoFocus
@@ -2251,6 +2342,9 @@ function InlineNameInput({
         }}
         onBlur={onBlur}
         onClick={(e) => e.stopPropagation()} // prevent tree selection
+        // Keep the native menu (paste a name in) and keep the tree's own
+        // right-click handler off a row that is mid-edit.
+        onContextMenu={(e) => e.stopPropagation()}
         style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
         ref={(el) => {
           if (!el || initRef.current) return;
@@ -2264,18 +2358,25 @@ function InlineNameInput({
           }
         }}
       />
-      {error && (
+      {error && errBox && createPortal(
         <div
           role="alert"
           style={{
-            position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10,
-            background: "var(--bg-overlay)", border: "1px solid #f85149", borderTop: "none",
-            borderRadius: "0 0 4px 4px", color: "#f85149", fontSize: 11,
+            position: "fixed",
+            top: errBox.top, left: errBox.left, width: errBox.width, zIndex: 1050,
+            transform: errBox.flip ? "translateY(-100%)" : undefined,
+            background: "var(--bg-overlay)", border: "1px solid #f85149",
+            borderTop: errBox.flip ? undefined : "none",
+            borderBottom: errBox.flip ? "none" : undefined,
+            borderRadius: errBox.flip ? "4px 4px 0 0" : "0 0 4px 4px",
+            color: "#f85149", fontSize: 11,
             padding: "2px 6px", whiteSpace: "normal", userSelect: "none",
+            pointerEvents: "none", // never intercept a click aimed at the tree
           }}
         >
           {error}
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );
