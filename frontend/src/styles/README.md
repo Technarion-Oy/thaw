@@ -38,6 +38,7 @@ Contains a single stylesheet, `global.css`, that is loaded once at application s
 | App toolbar styles | `.thaw-tb-icon-btn`, `.thaw-tb-text-btn`, `.thaw-tb-primary-btn`, `.thaw-tb-group`, `.thaw-tb-sep`, vstack layout for notebook deploy action |
 | Sidebar column icons | `.thaw-col-icon[data-family]` — maps type families to `--col-*` tokens |
 | Kernel status dot | `.thaw-kernel-dot` with ready/error/starting states |
+| File browser header | `.fb-header-title` (the tree toggle — a real `<button>`, CSS hover + global focus ring), `.fb-header-actions` (hover/focus-revealed action strip, `.pinned` to force it visible), `.fb-git-pill` / `.fb-git-seg` / `.fb-git-accent` (the one segmented branch · ahead · changed git control) |
 | Debug breakpoint / current-line | `.thaw-debug-breakpoint`, `.thaw-debug-current-line`, `.thaw-debug-current-line-arrow` |
 | Task history row | `.task-row-failed td` — red tint on failed rows |
 

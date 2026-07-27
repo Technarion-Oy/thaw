@@ -1134,3 +1134,112 @@ body,
   border-color: var(--accent) !important;
   background: var(--bg-overlay);
 }
+
+/* ── File browser header (#880) ─────────────────────────────────────────────
+   Hierarchy: folder name first, git state second, actions on demand. The rules
+   live here (not as inline styles) so hover/focus have real CSS states — the
+   title is a <button>, so it also picks up the global :focus-visible ring.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Folder title — the tree's expand/collapse toggle. */
+.fb-header-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fb-header-title:hover { background: var(--bg-hover); }
+.fb-header-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  text-transform: uppercase;
+  /* 0.04em, not 0.08em: the default folder name is SCREAMING_SNAKE already, and
+     wide tracking on top of that reads as shouting and hits the ellipsis early
+     in a narrow sidebar. */
+  letter-spacing: 0.04em;
+}
+
+/* Action strip — mounted at all times (so it never changes width as
+   clipboard/load state flips and the neighbours never jump), revealed on
+   hover/focus of the header, VS Code style. `.pinned` keeps it visible while an
+   action is active (search open, reload spinning), which would otherwise be
+   invisible feedback.
+
+   It COLLAPSES at rest (display:none) rather than merely fading: four reserved
+   icons are ~100 px of a sidebar that is often only twice that, and the folder
+   name would ellipsize at rest to hold space for buttons nobody can see. The
+   title reflows when the strip appears — the same trade VS Code makes. */
+.fb-header-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.fb-header:hover .fb-header-actions,
+.fb-header:focus-within .fb-header-actions,
+.fb-header-actions.pinned {
+  display: flex;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-header-actions { transition: none; }
+}
+
+/* Git status — ONE segmented control (branch · ahead · changed), not three
+   pills: one hit target, one shape, and the branch name gets the leftover room
+   instead of being crushed by a fixed-width badge. Note the deliberate absence
+   of --warning here: uncommitted work is the normal state of an active day, so
+   amber stays reserved for states that actually need attention. */
+.fb-git-pill {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.fb-git-pill:hover { background: color-mix(in srgb, var(--text) 12%, transparent); }
+.fb-git-seg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  font-family: var(--editor-font, monospace);
+  font-size: 10px;
+}
+.fb-git-seg + .fb-git-seg {
+  border-left: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
+.fb-git-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Ahead count and changed total: accent, so they read as information rather
+   than as the muted chrome around them. */
+.fb-git-accent {
+  color: var(--accent);
+  font-weight: 600;
+}
