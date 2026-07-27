@@ -61,12 +61,13 @@ describe("activeEditSession", () => {
     // OWN listing. A component-level ref cannot do this — the next editor
     // resets the slot, and the stale completion would conclude the parent had
     // been listed when it hadn't, letting `addChild` drop the created node.
-    const s1: InlineEditSession = { id: 1, phase: "submitting", listing: Promise.resolve(false) };
+    const siblings = [file("existing.sql")];
+    const s1: InlineEditSession = { id: 1, phase: "submitting", listing: Promise.resolve(siblings) };
     const s2: InlineEditSession = { id: 2, phase: "editing" };
     const live = s2; // s1 cancelled, s2 opened while s1's IPC was in flight
     expect(activeEditSession(live, { id: 1 })).toBeNull(); // s1 no longer drives the UI
     expect(s1.listing).not.toBe(s2.listing);               // …but still owns its listing
-    return expect(s1.listing).resolves.toBe(false);
+    return expect(s1.listing).resolves.toBe(siblings);
   });
 });
 

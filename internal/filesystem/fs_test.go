@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -353,6 +354,38 @@ func TestMkDir_Success(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Error("created path should be a directory")
+	}
+}
+
+func TestMkDir_ExistingDirectory(t *testing.T) {
+	// os.MkdirAll on its own succeeds here, which left the caller unable to tell
+	// "created" from "was already there": the inline folder create in the file
+	// browser toasted success and inserted a duplicate tree node for a folder it
+	// had not created. This is MkDir's equivalent of WriteFileInRoot's O_EXCL.
+	root := t.TempDir()
+	dir := filepath.Join(root, "reports")
+	if err := MkDir(dir, root); err != nil {
+		t.Fatalf("first create should succeed, got: %v", err)
+	}
+	err := MkDir(dir, root)
+	if err == nil {
+		t.Fatal("expected an error for an already-existing directory")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should say the target already exists, got: %v", err)
+	}
+}
+
+func TestMkDir_ExistingFile(t *testing.T) {
+	// A file where the folder should go: MkdirAll would fail with a raw syscall
+	// error; the pre-check gives the same message as the directory case.
+	root := t.TempDir()
+	path := filepath.Join(root, "reports")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := MkDir(path, root); err == nil {
+		t.Error("expected an error when a file occupies the target path")
 	}
 }
 

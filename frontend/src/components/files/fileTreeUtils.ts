@@ -23,7 +23,15 @@ export type InlineEditSession = {
   phase: "editing" | "submitting";
   /**
    * Creation only: the eager `ListDirectory` of the target parent directory,
-   * resolving to whether its children ended up materialized in the tree.
+   * resolving to the children it revealed — or `null` if it failed or the
+   * directory has since been deleted, meaning nothing was materialized in the
+   * tree for `addChild` to insert into.
+   *
+   * The children come back rather than just a flag because the submit handler
+   * has to re-run the duplicate check against them: until this settles, the
+   * live sibling list is empty and the inline check has nothing to collide
+   * with. Returning them dodges React's update timing entirely — reading
+   * `treeData` back after the `await` races the render that applies it.
    *
    * It hangs off the session for the same reason `id` does. A component-level
    * ref is a single slot that the *next* editor resets, so a completion
@@ -33,7 +41,7 @@ export type InlineEditSession = {
    * the file stays invisible until a manual reload. Reached only through the
    * session object the entry guard already validated, that can't happen.
    */
-  listing?: Promise<boolean> | null;
+  listing?: Promise<DataNode[] | null> | null;
 };
 
 /**
@@ -162,6 +170,12 @@ export function insertPlaceholder(
  * Case-insensitive sibling name lookup. Case-insensitive because macOS and
  * Windows filesystems are: `Foo.sql` and `foo.sql` are the same file there, and
  * the backend would reject the create anyway — better to say so inline.
+ *
+ * On a case-sensitive filesystem (Linux, or a case-sensitive macOS volume) this
+ * refuses `Reports` next to an existing `reports`, which the OS itself would
+ * allow. Same deliberate trade-off as the Windows rules in `validateRawName`
+ * below: the repo may be checked out on a case-insensitive machine, where the
+ * two would collide.
  */
 export function hasSiblingNamed(siblings: DataNode[], name: string): boolean {
   const lower = name.toLowerCase();

@@ -247,8 +247,20 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 // MkDir creates a directory (and any necessary parents) at path.
 // The path must be inside allowedRoot. Since the target doesn't exist yet,
 // the parent directory is validated instead.
+//
+// Returns an error if the target already exists, mirroring WriteFileInRoot's
+// O_EXCL behavior. os.MkdirAll alone succeeds silently on an existing
+// directory, which left the caller unable to tell "created" from "was already
+// there" — the file browser's inline create reported success and added a second
+// tree node for a folder it hadn't created. Parents are still created freely;
+// it's only the target itself that must be new.
 func MkDir(path, allowedRoot string) error {
 	if err := validateNewPath(path, allowedRoot); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("file or folder already exists: %s", filepath.Base(path))
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 	return os.MkdirAll(path, 0o755)

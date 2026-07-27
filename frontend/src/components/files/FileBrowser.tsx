@@ -1490,9 +1490,10 @@ export default function FileBrowser() {
 
   // ── Inline creation (VS Code–style placeholder row) ────────────────────────
   // List `dir` and merge the result into the tree, marking it loaded. Returns
-  // whether the directory's children are now materialized in `treeData` —
-  // `addChild` silently drops a node into a parent that has none (see its doc).
-  const listChildrenInto = async (dir: string): Promise<boolean> => {
+  // the children it found, or `null` when nothing was materialized — `addChild`
+  // silently drops a node into a parent that has none (see its doc), and the
+  // caller also needs the entries themselves to re-check for duplicates.
+  const listChildrenInto = async (dir: string): Promise<DataNode[] | null> => {
     try {
       const entries = await ListDirectory(dir);
       // Built outside the updater — a throw inside one unmounts the React tree.
@@ -1503,12 +1504,12 @@ export default function FileBrowser() {
       // would write back the entry the delete just pruned — and a same-named
       // directory created later would then count as already loaded and render
       // empty. See the controlled-expansion gotcha.
-      if (!findNode(treeDataRef.current, dir)) return false;
+      if (!findNode(treeDataRef.current, dir)) return null;
       setTreeData((prev) => updateNode(prev, dir, children, true));
       setLoadedKeys((prev) => (prev.some((k) => String(k) === dir) ? prev : [...prev, dir]));
-      return true;
+      return children;
     } catch {
-      return false;
+      return null;
     }
   };
 
@@ -1586,15 +1587,30 @@ export default function FileBrowser() {
     const isRoot = parent === rootDir;
     session.phase = "submitting";
     try {
+      // Order behind this session's own eager listing before doing anything —
+      // see `startNewItem`. No listing means none was needed (the parent was
+      // already in `loadedKeys`, so it has children); `null` means it failed or
+      // its directory is gone, leaving nothing for `addChild` to insert into.
+      const listing = session.listing ?? null;
+      const revealed = listing === null ? null : await listing;
+      // Re-check for a collision against what that listing revealed. The check
+      // above ran against `pendingSiblings`, which is empty until the listing
+      // lands — so typing the name of an existing sibling and hitting Enter
+      // inside a never-expanded directory got here unchallenged. For a file the
+      // backend's O_EXCL catches it, but a folder create used to be MkdirAll,
+      // which succeeds silently on an existing directory: the user got a
+      // "Created folder" toast for something that was already there, and the
+      // tree gained a second node with the same key as the real one. MkDir now
+      // rejects an existing target too — this keeps the message inline rather
+      // than surfacing that as a failure toast.
+      if (revealed && validateNewName(value, kind, revealed)) {
+        session.phase = "editing"; // `createError` now renders it under the input
+        return;
+      }
       if (kind === "newFolder") await CreateDirectory(fullPath);
       else await CreateFile(fullPath);
       markSelfChanged(parent);
-      // Order behind this session's own eager listing before touching the tree
-      // — see `startNewItem`. No listing means none was needed (the parent was
-      // already in `loadedKeys`, so it has children); `false` means it failed or
-      // its directory is gone, leaving nothing for `addChild` to insert into.
-      const listing = session.listing ?? null;
-      const listed = isRoot || listing === null || (await listing);
+      const listed = isRoot || listing === null || revealed !== null;
       // The item exists on disk by now and can't be un-created, so the tree gets
       // the node whether or not this session is still the live one — leaving a
       // real file invisible would be a worse lie, especially with the fs watcher
