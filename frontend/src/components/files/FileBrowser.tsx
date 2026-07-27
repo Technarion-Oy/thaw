@@ -78,7 +78,8 @@ type SearchMatch  = filesystem.SearchMatch;
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
 /** id of the collapsible tree region, referenced by the header toggle's
- *  `aria-controls` so screen readers can tie the two together. */
+ *  `aria-controls` (only while expanded — the region is unmounted otherwise)
+ *  so screen readers can tie the two together. */
 const FILE_TREE_CONTENT_ID = "file-browser-content";
 /** Upper bound for the inline-validation box (~two wrapped lines) — only used to
  *  decide whether it still fits below the field. See InlineNameInput. */
@@ -1903,7 +1904,11 @@ export default function FileBrowser() {
             onContextMenu={onRootContextMenu}
             title={exportDir || "No folder open"}
             aria-expanded={expanded}
-            aria-controls={FILE_TREE_CONTENT_ID}
+            // Only while the region actually exists: the content is unmounted
+            // when collapsed, and aria-controls pointing at an absent id is an
+            // audit failure (axe `aria-valid-attr-value`) that also sends a
+            // screen reader nowhere when it tries to jump to the region.
+            aria-controls={expanded ? FILE_TREE_CONTENT_ID : undefined}
           >
             {expanded
               ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
@@ -2010,7 +2015,7 @@ export default function FileBrowser() {
                 className="fb-git-pill"
                 onClick={(e) => { e.stopPropagation(); openGitOps(); }}
               >
-                <span className="fb-git-seg">
+                <span className="fb-git-seg fb-git-branch-seg">
                   <BranchesOutlined style={{ fontSize: 10, flexShrink: 0 }} />
                   <span className="fb-git-branch">{gitBranch}</span>
                 </span>

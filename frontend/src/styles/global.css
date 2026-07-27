@@ -1181,22 +1181,21 @@ body,
    It COLLAPSES at rest (display:none) rather than merely fading: four reserved
    icons are ~100 px of a sidebar that is often only twice that, and the folder
    name would ellipsize at rest to hold space for buttons nobody can see. The
-   title reflows when the strip appears — the same trade VS Code makes. */
+   title reflows when the strip appears — the same trade VS Code makes.
+
+   The reveal is deliberately un-animated: opacity cannot interpolate across a
+   display:none boundary (there is no previous rendered frame) without
+   transition-behavior: allow-discrete, so a transition here would be dead code
+   that reads as an intent the browser never honours. */
 .fb-header-actions {
   display: none;
   align-items: center;
   gap: 2px;
-  opacity: 0;
-  transition: opacity 0.1s ease;
 }
 .fb-header:hover .fb-header-actions,
 .fb-header:focus-within .fb-header-actions,
 .fb-header-actions.pinned {
   display: flex;
-  opacity: 1;
-}
-@media (prefers-reduced-motion: reduce) {
-  .fb-header-actions { transition: none; }
 }
 
 /* Git status — ONE segmented control (branch · ahead · changed), not three
@@ -1223,13 +1222,21 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  /* The numeric segments hold their size and never wrap — they are two or three
+     glyphs with no sensible truncation. All shrinkage lands on the branch
+     segment below, which is the one thing here that CAN ellipsize. */
+  flex: none;
+  white-space: nowrap;
   padding: 0 6px;
   font-family: var(--editor-font, monospace);
   font-size: 10px;
 }
 .fb-git-seg + .fb-git-seg {
   border-left: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
+.fb-git-branch-seg {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .fb-git-branch {
   min-width: 0;
