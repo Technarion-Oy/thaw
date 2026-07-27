@@ -215,6 +215,12 @@ export function isReservedDeviceName(name: string): boolean {
  * The Windows-specific rules are applied on every platform on purpose: these
  * files live in a git repo that may well be checked out on Windows, and the
  * character blacklist has always been enforced that way here.
+ *
+ * `isReservedDeviceName` is the one rule this editor added rather than
+ * inherited, and it follows the same policy by explicit decision — a folder
+ * named `aux` or `con` is refused on macOS and Linux too, where the OS itself
+ * would allow it, because it would break the moment a collaborator checked the
+ * repo out on Windows. Reviewed and kept deliberately; not an oversight.
  */
 export function validateRawName(raw: string, what?: "file" | "folder"): string | null {
   const trimmed = raw.trim();
