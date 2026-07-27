@@ -14,6 +14,21 @@ import (
 func buildMenu(app *App) *menu.Menu {
 	appMenu := menu.NewMenu()
 
+	// Items fronting features that need a live Snowflake connection. They start
+	// disabled (the app always launches disconnected) and are toggled by
+	// app.setMenuConnected, wired at the bottom of this function and called from
+	// Connect/Disconnect. Everything else works offline and stays enabled.
+	var connectionItems []*menu.MenuItem
+
+	// addConnectionItem adds a text item that is greyed out while disconnected.
+	addConnectionItem := func(m *menu.Menu, label string, accelerator *keys.Accelerator, event string) {
+		item := m.AddText(label, accelerator, func(_ *menu.CallbackData) {
+			wailsruntime.EventsEmit(app.ctx, event)
+		})
+		item.Disabled = true
+		connectionItems = append(connectionItems, item)
+	}
+
 	// Standard macOS application menu (About, Services, Hide, Quit, …).
 	// This must come first so that macOS renders subsequent submenus correctly.
 	appMenu.Append(menu.AppMenu())
@@ -112,23 +127,15 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Tag Management…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:tag-management")
-	})
+	addConnectionItem(toolsMenu, "Tag Management…", nil, "menu:tag-management")
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Export Database DDL…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:export-ddl")
-	})
+	addConnectionItem(toolsMenu, "Export Database DDL…", nil, "menu:export-ddl")
 	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Schema Migration…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:migration")
-	})
-	toolsMenu.AddText("Create dbt Project…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:dbt-create")
-	})
+	addConnectionItem(toolsMenu, "Schema Migration…", nil, "menu:migration")
+	addConnectionItem(toolsMenu, "Create dbt Project…", nil, "menu:dbt-create")
 	toolsMenu.AddSeparator()
 	toolsMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")
@@ -141,9 +148,7 @@ func buildMenu(app *App) *menu.Menu {
 	toolsMenu.AddText("Configure AI Inline Completions…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
 	})
-	toolsMenu.AddText("MCP Sessions…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:mcp-sessions")
-	})
+	addConnectionItem(toolsMenu, "MCP Sessions…", nil, "menu:mcp-sessions")
 
 	toolsMenu.AddSeparator()
 
@@ -192,12 +197,8 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-setup")
 	})
 	snowparkMenu.AddSeparator()
-	snowparkMenu.AddText("New Notebook…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-new-notebook")
-	})
-	snowparkMenu.AddText("Open Notebook…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-open-notebook")
-	})
+	addConnectionItem(snowparkMenu, "New Notebook…", nil, "menu:snowpark-new-notebook")
+	addConnectionItem(snowparkMenu, "Open Notebook…", nil, "menu:snowpark-open-notebook")
 	snowparkMenu.AddSeparator()
 	snowparkMenu.AddText("Notebook Preferences…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:notebook-preferences")
@@ -225,6 +226,18 @@ func buildMenu(app *App) *menu.Menu {
 			wailsruntime.LogErrorf(app.ctx, "reveal log file failed: %v", err)
 		}
 	})
+
+	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only
+	// items. The ctx guard keeps buildMenu usable from tests, which construct an
+	// App without a Wails runtime.
+	app.setMenuConnected = func(connected bool) {
+		for _, item := range connectionItems {
+			item.Disabled = !connected
+		}
+		if app.ctx != nil {
+			wailsruntime.MenuUpdateApplicationMenu(app.ctx)
+		}
+	}
 
 	return appMenu
 }

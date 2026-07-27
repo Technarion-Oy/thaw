@@ -140,6 +140,13 @@ type App struct {
 	queryLog             *querylog.Log
 	setQueryLogMenuCheck func(bool) // set by buildMenu; updates the native menu checkbox
 
+	// setMenuConnected is set by buildMenu; it enables/disables the native menu
+	// items that need a live Snowflake connection (Tag Management, Export
+	// Database DDL, Schema Migration, Create dbt Project, MCP Sessions, the two
+	// Snowpark notebook items). Called by Connect/Disconnect. Nil in tests, which
+	// construct App without a menu.
+	setMenuConnected func(bool)
+
 	// Effective file-logging preferences (with IT-admin policy applied),
 	// consulted by the OnQuery hook to decide whether to write SQL to thaw.log.
 	logPrefsMu sync.RWMutex
@@ -644,6 +651,12 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	a.connMu.Unlock()
 	a.applyFeatureFlagExclusions()
 
+	// Ungrey the connection-dependent native menu items. Deliberately after the
+	// error/cancel returns above, so a failed or canceled connect enables nothing.
+	if a.setMenuConnected != nil {
+		a.setMenuConnected(true)
+	}
+
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 
 	// Refresh the function metadata cache in the background.
@@ -733,6 +746,12 @@ func (a *App) Disconnect() error {
 	a.client = nil
 	a.connectParams = nil
 	a.connMu.Unlock()
+
+	// Grey out the connection-dependent native menu items again.
+	if a.setMenuConnected != nil {
+		a.setMenuConnected(false)
+	}
+
 	if client == nil {
 		return nil
 	}
