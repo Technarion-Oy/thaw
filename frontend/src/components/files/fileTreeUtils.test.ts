@@ -53,6 +53,21 @@ describe("activeEditSession", () => {
     // the first one's stray blur fires with the old pendingCreate in hand.
     expect(activeEditSession(session(2), { id: 1 })).toBeNull();
   });
+
+  it("keeps per-session async state reachable after the session is retired", () => {
+    // `submitCreate` hangs its eager directory listing off the session and reads
+    // it back after `await CreateFile(...)`. By then the session may have been
+    // cancelled and a second create started; the handler still has to see its
+    // OWN listing. A component-level ref cannot do this — the next editor
+    // resets the slot, and the stale completion would conclude the parent had
+    // been listed when it hadn't, letting `addChild` drop the created node.
+    const s1: InlineEditSession = { id: 1, phase: "submitting", listing: Promise.resolve(false) };
+    const s2: InlineEditSession = { id: 2, phase: "editing" };
+    const live = s2; // s1 cancelled, s2 opened while s1's IPC was in flight
+    expect(activeEditSession(live, { id: 1 })).toBeNull(); // s1 no longer drives the UI
+    expect(s1.listing).not.toBe(s2.listing);               // …but still owns its listing
+    return expect(s1.listing).resolves.toBe(false);
+  });
 });
 
 describe("reserved placeholder key", () => {

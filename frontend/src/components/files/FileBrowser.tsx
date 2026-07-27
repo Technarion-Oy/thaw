@@ -447,6 +447,8 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
+  const treeDataRef = useRef(treeData);
+  treeDataRef.current = treeData;
 
   // Coalesce the redundant file opens a click/double-click gesture would otherwise
   // fire. rc-tree runs onSelect on *every* click (including both clicks of a
@@ -1495,6 +1497,13 @@ export default function FileBrowser() {
       const entries = await ListDirectory(dir);
       // Built outside the updater — a throw inside one unmounts the React tree.
       const children = entriesToNodes(entries);
+      // The directory can be deleted while this listing is in flight (it takes a
+      // confirm dialog and a second IPC, so this lands well after the removal).
+      // `updateNode` already no-ops for a key that's gone, but `setLoadedKeys`
+      // would write back the entry the delete just pruned — and a same-named
+      // directory created later would then count as already loaded and render
+      // empty. See the controlled-expansion gotcha.
+      if (!findNode(treeDataRef.current, dir)) return false;
       setTreeData((prev) => updateNode(prev, dir, children, true));
       setLoadedKeys((prev) => (prev.some((k) => String(k) === dir) ? prev : [...prev, dir]));
       return true;
@@ -1502,17 +1511,6 @@ export default function FileBrowser() {
       return false;
     }
   };
-
-  // The eager listing `startNewItem` kicks off for a not-yet-listed parent.
-  // `submitCreate` orders itself behind it, because the two are otherwise
-  // independent async flows and *either* interleaving loses the new node: submit
-  // first and `addChild` no-ops on a parent that still has no children array;
-  // listing first — but resolving after the insert — merges a pre-creation
-  // snapshot over the node that was just added. Neither self-heals (`onLoadData`
-  // skips a parent that now has children, and the watcher echo is swallowed by
-  // the 500 ms self-change suppression), so the item would stay invisible until
-  // a manual Reload.
-  const createListingRef = useRef<Promise<boolean> | null>(null);
 
   // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
   // both the context menu (a node or the root) and the header toolbar buttons
@@ -1522,7 +1520,6 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     // At most one inline editor at a time — a pending rename is abandoned.
     cancelRename();
-    createListingRef.current = null;
     const parent = dir.replace(/[/\\]+$/, "");
     const session = newSession();
     createSessionRef.current = session;
@@ -1533,12 +1530,22 @@ export default function FileBrowser() {
     // user-driven expand, so a programmatic one has to list the directory here.
     setExpandedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
     if (loadedKeysRef.current.some((k) => String(k) === parent)) return;
-    // A failed listing is non-fatal for the *editor*: the placeholder still
-    // works, the inline duplicate check just has nothing to compare against and
-    // the backend's O_EXCL create stays the safety net. It does matter to
-    // `submitCreate`, which is why the promise is parked rather than dropped.
-    createListingRef.current = listChildrenInto(parent);
-    await createListingRef.current;
+    // `submitCreate` orders itself behind this listing, because the two are
+    // otherwise independent async flows and *either* interleaving loses the new
+    // node: submit first and `addChild` no-ops on a parent that still has no
+    // children array; list first — but resolve after the insert — and
+    // `updateNode`'s merge maps over a pre-creation snapshot, dropping what was
+    // just added. Neither self-heals (`onLoadData` skips a parent that now has
+    // children, and the watcher echo is swallowed by the 500 ms self-change
+    // suppression), so the item would stay invisible until a manual Reload.
+    //
+    // A *failed* listing is non-fatal for the editor itself: the placeholder
+    // still works, the inline duplicate check just has nothing to compare
+    // against and the backend's O_EXCL create stays the safety net. It matters
+    // only to `submitCreate`, which is why the promise is kept rather than
+    // dropped — on the session, so a completion can't read a newer editor's.
+    session.listing = listChildrenInto(parent);
+    await session.listing;
   };
 
   // Siblings the pending item will join — drives the inline duplicate check.
@@ -1582,11 +1589,11 @@ export default function FileBrowser() {
       if (kind === "newFolder") await CreateDirectory(fullPath);
       else await CreateFile(fullPath);
       markSelfChanged(parent);
-      // Order behind the eager listing before touching the tree — see
-      // `createListingRef`. A null ref means none was needed (the parent was
-      // already in `loadedKeys`, so it has children); `false` means it failed,
-      // leaving the parent with no children array for `addChild` to insert into.
-      const listing = createListingRef.current;
+      // Order behind this session's own eager listing before touching the tree
+      // — see `startNewItem`. No listing means none was needed (the parent was
+      // already in `loadedKeys`, so it has children); `false` means it failed or
+      // its directory is gone, leaving nothing for `addChild` to insert into.
+      const listing = session.listing ?? null;
       const listed = isRoot || listing === null || (await listing);
       // The item exists on disk by now and can't be un-created, so the tree gets
       // the node whether or not this session is still the live one — leaving a

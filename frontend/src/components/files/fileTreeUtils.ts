@@ -18,7 +18,23 @@ export type NewItemKind = "newFolder" | "newFile";
  * makes both "cancelled" (`null`) and "superseded" (a different object) read
  * correctly, whatever the ref has been set to since.
  */
-export type InlineEditSession = { id: number; phase: "editing" | "submitting" };
+export type InlineEditSession = {
+  id: number;
+  phase: "editing" | "submitting";
+  /**
+   * Creation only: the eager `ListDirectory` of the target parent directory,
+   * resolving to whether its children ended up materialized in the tree.
+   *
+   * It hangs off the session for the same reason `id` does. A component-level
+   * ref is a single slot that the *next* editor resets, so a completion
+   * resuming after its own session was cancelled and another one opened would
+   * read someone else's listing — and conclude the parent was listed when it
+   * wasn't. `addChild` then silently drops the created node (see its doc) and
+   * the file stays invisible until a manual reload. Reached only through the
+   * session object the entry guard already validated, that can't happen.
+   */
+  listing?: Promise<boolean> | null;
+};
 
 /**
  * The live session, if the state a handler captured still belongs to it and it
