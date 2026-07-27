@@ -255,6 +255,11 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 // tree node for a folder it hadn't created. Parents are still created freely;
 // it's only the target itself that must be new.
 //
+// Callers that genuinely want "make sure this path exists" should call
+// os.MkdirAll themselves rather than loosening this: the sole caller today
+// (App.CreateDirectory, behind the file browser's inline create) depends on
+// being told when it created nothing.
+//
 // The target always goes through os.Mkdir, which fails atomically with ErrExist
 // rather than check-then-act. That matters because "Open Folder in New Window…"
 // puts two live processes on one export directory: an Lstat-then-MkdirAll pair

@@ -42,6 +42,22 @@ export type InlineEditSession = {
    * session object the entry guard already validated, that can't happen.
    */
   listing?: Promise<DataNode[] | null> | null;
+  /**
+   * Why the session stopped being the live one, recorded when it is retired so
+   * an IPC still in flight can tell — after the fact — whether a failure it
+   * lands on still needs reporting.
+   *
+   * `"cancelled"` — the user backed out (Escape, blur), or asked for something
+   * that makes the failure expected (deleting the directory being created in).
+   * A toast would be noise about something they deliberately abandoned.
+   *
+   * `"superseded"` — another editor merely opened on top. The user never
+   * withdrew this create; they typed a name and pressed Enter. If it then fails
+   * (the parent was renamed out from under it, permissions, disk full), staying
+   * quiet means nothing happens and nothing explains why — so it is reported,
+   * without touching whatever editor is live now.
+   */
+  retiredAs?: "cancelled" | "superseded";
 };
 
 /**

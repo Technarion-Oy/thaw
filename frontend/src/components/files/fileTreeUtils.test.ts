@@ -70,6 +70,20 @@ describe("activeEditSession", () => {
     expect(s1.listing).not.toBe(s2.listing);               // …but still owns its listing
     return expect(s1.listing).resolves.toBe(siblings);
   });
+
+  it("records why a session was retired, so a late failure knows whether to report", () => {
+    // A cancel and a supersession both make `activeEditSession` reject the
+    // session, but they mean opposite things to an IPC that fails afterwards.
+    // Escape means the user withdrew the create — stay quiet. Opening another
+    // editor does not: they typed a name and pressed Enter, so a failure has to
+    // surface or the typed name just evaporates with nothing to explain it.
+    const cancelled: InlineEditSession = { id: 1, phase: "submitting", retiredAs: "cancelled" };
+    const superseded: InlineEditSession = { id: 2, phase: "submitting", retiredAs: "superseded" };
+    expect(activeEditSession(null, { id: 1 })).toBeNull();
+    expect(activeEditSession(null, { id: 2 })).toBeNull();
+    expect(cancelled.retiredAs === "cancelled").toBe(true);
+    expect(superseded.retiredAs === "cancelled").toBe(false);
+  });
 });
 
 describe("reserved placeholder key", () => {

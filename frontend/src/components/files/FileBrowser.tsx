@@ -358,18 +358,32 @@ export default function FileBrowser() {
   // the live editor before touching anything. A plain enum ref couldn't: opening
   // the next editor resets it, re-arming every stale closure from the last one.
   // At most one session is live at a time; starting either cancels the other.
+  type RetireReason = NonNullable<InlineEditSession["retiredAs"]>;
   const sessionCounterRef = useRef(0);
   const newSession = (): InlineEditSession => ({ id: ++sessionCounterRef.current, phase: "editing" });
 
-  const [pendingRename, setPendingRename] = useState<{ id: number; path: string; value: string } | null>(null);
+  const [pendingRename, setPendingRename] = useState<{ id: number; path: string; value: string; busy?: boolean } | null>(null);
   const renameSessionRef = useRef<InlineEditSession | null>(null);
 
   // Creation, VS Code style: an editable placeholder row is injected into the
   // tree under `parent` instead of opening a modal. It lives in the render-time
   // tree only (see `treeForRender`), so `treeData` stays a pure mirror of the
   // filesystem and refreshes/watcher events can't disturb the edit in progress.
-  const [pendingCreate, setPendingCreate] = useState<{ id: number; kind: NewItemKind; parent: string; value: string } | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<{ id: number; kind: NewItemKind; parent: string; value: string; busy?: boolean } | null>(null);
   const createSessionRef = useRef<InlineEditSession | null>(null);
+
+  // `phase` lives on the session (a ref, so an awaited handler sees it the instant
+  // it changes); `busy` is the same fact in state, because only state re-renders.
+  // Flipping both here keeps them from drifting. The id guard stops a superseded
+  // session from writing `busy` over whatever editor is live now.
+  const setBusy = <T extends { id: number; busy?: boolean }>(
+    set: React.Dispatch<React.SetStateAction<T | null>>,
+    session: InlineEditSession,
+    busy: boolean,
+  ) => {
+    session.phase = busy ? "submitting" : "editing";
+    set((p) => (p && p.id === session.id ? { ...p, busy } : p));
+  };
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -1408,7 +1422,7 @@ export default function FileBrowser() {
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
     // At most one inline editor at a time — a pending create is abandoned.
-    cancelCreate();
+    cancelCreate("superseded");
     const session = newSession();
     renameSessionRef.current = session;
     setPendingRename({ id: session.id, path: fileCtxMenu.path, value: fileCtxMenu.name });
@@ -1433,7 +1447,11 @@ export default function FileBrowser() {
     return validateRenameName(pendingRename.value, renameSiblings, pathBase(pendingRename.path));
   }, [pendingRename, renameSiblings]);
 
-  const cancelRename = () => {
+  // `as` records *why* the session stopped being live, for a submit still in
+  // flight to consult when it lands on a failure. Defaults to a user cancel —
+  // only the two supersession sites pass anything else. See InlineEditSession.
+  const cancelRename = (as: RetireReason = "cancelled") => {
+    if (renameSessionRef.current) renameSessionRef.current.retiredAs = as;
     renameSessionRef.current = null;
     setPendingRename(null);
   };
@@ -1451,7 +1469,7 @@ export default function FileBrowser() {
     const dir = pathDir(path);
     const sep = pathSep(path);
     const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
-    session.phase = "submitting";
+    setBusy(setPendingRename, session, true);
     try {
       await RenameFile(path, newPath);
       markSelfChanged(dir);
@@ -1480,8 +1498,15 @@ export default function FileBrowser() {
       cancelRename();
       message.success(`Renamed to ${sanitized}`);
     } catch (e) {
-      if (renameSessionRef.current !== session) return;
-      session.phase = "editing"; // allow retry
+      // Retired mid-flight. A user cancel earns silence; a session that was only
+      // superseded does not — the rename was asked for and failed, and swallowing
+      // that leaves nothing happening with nothing to explain it. Either way the
+      // live editor (whoever it is now) is left alone. See InlineEditSession.
+      if (renameSessionRef.current !== session) {
+        if (session.retiredAs !== "cancelled") message.error(`Rename failed: ${String(e)}`);
+        return;
+      }
+      setBusy(setPendingRename, session, false); // allow retry
       message.error(`Rename failed: ${String(e)}`);
     }
   };
@@ -1526,7 +1551,7 @@ export default function FileBrowser() {
     if (!dir) return;
     setFileCtxMenu(null);
     // At most one inline editor at a time — a pending rename is abandoned.
-    cancelRename();
+    cancelRename("superseded");
     const parent = dir.replace(/[/\\]+$/, "");
     const session = newSession();
     createSessionRef.current = session;
@@ -1571,7 +1596,8 @@ export default function FileBrowser() {
     return validateNewName(pendingCreate.value, pendingCreate.kind, pendingSiblings);
   }, [pendingCreate, pendingSiblings]);
 
-  const cancelCreate = () => {
+  const cancelCreate = (as: RetireReason = "cancelled") => {
+    if (createSessionRef.current) createSessionRef.current.retiredAs = as;
     createSessionRef.current = null;
     setPendingCreate(null);
   };
@@ -1591,7 +1617,7 @@ export default function FileBrowser() {
     // A root-level create inserts into the top-level list rather than via
     // addChild, which only matches an existing parent node.
     const isRoot = parent === rootDir;
-    session.phase = "submitting";
+    setBusy(setPendingCreate, session, true);
     try {
       // Order behind this session's own eager listing before doing anything —
       // see `startNewItem`. No listing means none was needed (the parent was
@@ -1610,7 +1636,7 @@ export default function FileBrowser() {
       // rejects an existing target too — this keeps the message inline rather
       // than surfacing that as a failure toast.
       if (revealed && validateNewName(value, kind, revealed)) {
-        session.phase = "editing"; // `createError` now renders it under the input
+        setBusy(setPendingCreate, session, false); // `createError` renders it under the input
         return;
       }
       if (kind === "newFolder") await CreateDirectory(fullPath);
@@ -1644,11 +1670,19 @@ export default function FileBrowser() {
         setAnchorKey(fullPath);
       }
     } catch (e) {
-      // Cancelled or superseded, and nothing was created — say nothing, and
-      // leave the live session (whoever it is now) untouched.
-      if (createSessionRef.current !== session) return;
-      session.phase = "editing"; // allow retry — mirrors the rename editor
       const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
+      // Retired mid-flight, and nothing was created. A user cancel (or a delete
+      // of the target directory, which makes the ENOENT expected) earns silence.
+      // A session that was only superseded does not: starting another editor is
+      // not withdrawing this create, so a failure here — an ancestor renamed out
+      // from under it, permissions, disk full — has to be reported or the user
+      // sees their typed name simply evaporate. The live editor is left alone
+      // either way. See InlineEditSession.
+      if (createSessionRef.current !== session) {
+        if (session.retiredAs !== "cancelled") message.error(`${prefix}: ${String(e)}`);
+        return;
+      }
+      setBusy(setPendingCreate, session, false); // allow retry — mirrors the rename editor
       message.error(`${prefix}: ${String(e)}`);
     }
   };
@@ -1678,6 +1712,7 @@ export default function FileBrowser() {
         <InlineNameInput
           value={pendingCreate.value}
           error={createError}
+          busy={pendingCreate.busy}
           placeholder={pendingCreate.kind === "newFolder" ? "Folder name" : "File name"}
           onChange={(v) => setPendingCreate((p) => (p ? { ...p, value: v } : p))}
           onSubmit={submitCreate}
@@ -1694,6 +1729,7 @@ export default function FileBrowser() {
           <InlineNameInput
             value={pendingRename.value}
             error={renameError}
+            busy={pendingRename.busy}
             selectStem
             onChange={(v) => setPendingRename((p) => (p ? { ...p, value: v } : p))}
             onSubmit={submitRename}
@@ -2301,11 +2337,15 @@ export default function FileBrowser() {
  * `submitRename` and `submitCreate` no-op while a submit is in flight).
  */
 function InlineNameInput({
-  value, error, placeholder, selectStem, onChange, onSubmit, onCancel, onBlur,
+  value, error, placeholder, selectStem, busy, onChange, onSubmit, onCancel, onBlur,
 }: {
   value: string;
   error?: string | null;
   placeholder?: string;
+  /** The submit's IPC is in flight — see `setBusy`. Read-only rather than
+   *  disabled: disabling a focused input drops focus, so a failed submit would
+   *  hand back a field the user has to click into again before retrying. */
+  busy?: boolean;
   /** Preselect the name up to the extension dot (rename starts with a value). */
   selectStem?: boolean;
   onChange: (v: string) => void;
@@ -2363,6 +2403,7 @@ function InlineNameInput({
         value={value}
         placeholder={placeholder}
         status={error ? "error" : undefined}
+        readOnly={busy}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation(); // prevent tree keyboard navigation
@@ -2374,7 +2415,7 @@ function InlineNameInput({
         // Keep the native menu (paste a name in) and keep the tree's own
         // right-click handler off a row that is mid-edit.
         onContextMenu={(e) => e.stopPropagation()}
-        style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
+        style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text", opacity: busy ? 0.6 : 1 }}
         ref={(el) => {
           if (!el || initRef.current) return;
           initRef.current = true;
