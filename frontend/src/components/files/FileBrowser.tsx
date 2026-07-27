@@ -77,6 +77,10 @@ type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
+/** id of the collapsible tree region, referenced by the header toggle's
+ *  `aria-controls` (only while expanded — the region is unmounted otherwise)
+ *  so screen readers can tie the two together. */
+const FILE_TREE_CONTENT_ID = "file-browser-content";
 /** Upper bound for the inline-validation box (~two wrapped lines) — only used to
  *  decide whether it still fits below the field. See InlineNameInput. */
 const ERROR_BOX_MAX_H = 44;
@@ -1886,120 +1890,155 @@ export default function FileBrowser() {
     <div style={{ padding: "4px 4px" }}>
       {/* Header — two rows: (1) title + actions always fit; (2) a dedicated git
           status row (repo only) so the branch name has room instead of being
-          crushed into the action strip. */}
+          crushed into the action strip. Styling lives in global.css
+          (`.fb-header*`, `.fb-git-*`) so hover/focus are real CSS states. */}
       <div style={{ padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0 }}>
         {/* Row 1: folder title + primary actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
+        <div className="fb-header" style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <button
+            type="button"
+            className="fb-header-title"
             onClick={toggleExpanded}
             // Right-click the header title area to create at the workspace root
             // (New Folder… / New File…) — no toolbar buttons needed.
             onContextMenu={onRootContextMenu}
             title={exportDir || "No folder open"}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            aria-expanded={expanded}
+            // Only while the region actually exists: the content is unmounted
+            // when collapsed, and aria-controls pointing at an absent id is an
+            // audit failure (axe `aria-valid-attr-value`) that also sends a
+            // screen reader nowhere when it tries to jump to the region.
+            aria-controls={expanded ? FILE_TREE_CONTENT_ID : undefined}
           >
             {expanded
               ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
               : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
             }
             <FolderOutlined style={{ color: "var(--text)", fontSize: 13, flexShrink: 0 }} />
-            <Text
-              ellipsis
-              style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em", minWidth: 0 }}
-            >
+            <span className="fb-header-title-text">
               {pathBase(exportDir) || "Files"}
-            </Text>
+            </span>
+          </button>
+          {/* Every action stays mounted — a conditionally rendered icon resized the
+              strip and made its neighbours jump as state changed. They're hidden at
+              rest and revealed on header hover/focus (see `.fb-header-actions`);
+              `pinned` overrides that while an action is visibly active. */}
+          <div className={`fb-header-actions${searchOpen || loading ? " pinned" : ""}`}>
+            <Tooltip
+              placement="bottom"
+              title={clipboard
+                ? `Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`
+                : "Nothing to paste"}
+            >
+              {/* A disabled antd Button swallows pointer events, so the Tooltip needs
+                  a wrapper element of its own to hang the hover listener on. */}
+              <span>
+                <Button
+                  size="small"
+                  type="text"
+                  disabled={!clipboard || !exportDir}
+                  icon={<BlockOutlined style={{ fontSize: 12, color: clipboard && exportDir ? "var(--link)" : undefined }} />}
+                  onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
+                  style={{ height: 22, padding: "0 5px", minWidth: 0 }}
+                />
+              </span>
+            </Tooltip>
+            <Dropdown
+              menu={{ items: folderMenu, onClick: onFolderMenuClick }}
+              trigger={["click"]}
+            >
+              <Tooltip placement="bottom" title="Open / change working folder">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<FolderOpenOutlined style={{ fontSize: 12, color: CLR_SECONDARY }} />}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ height: 22, padding: "0 5px", minWidth: 0 }}
+                />
+              </Tooltip>
+            </Dropdown>
+            <Tooltip placement="bottom" title={searchOpen ? "Close search" : "Search in files"}>
+              <Button
+                size="small"
+                type="text"
+                icon={<SearchOutlined style={{ fontSize: 12, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
+                onClick={toggleSearch}
+                style={{ height: 22, padding: "0 5px", minWidth: 0 }}
+              />
+            </Tooltip>
+            {/* Git Operations button only when the folder isn't a repo — a repo's
+                entry point is the git status pill on row 2 below. */}
+            {gitEnabled && exportDir && !gitRepo && (
+              <Tooltip placement="bottom" title="Git Operations…">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<BranchesOutlined style={{ fontSize: 12 }} />}
+                  onClick={(e) => { e.stopPropagation(); openGitOps(); }}
+                  style={{ height: 22, padding: "0 5px", minWidth: 0 }}
+                />
+              </Tooltip>
+            )}
+            <Tooltip placement="bottom" title="Reload">
+              <span>
+                <Button
+                  size="small"
+                  type="text"
+                  disabled={!exportDir}
+                  icon={<ReloadOutlined style={{ fontSize: 12 }} />}
+                  loading={loading}
+                  onClick={(e) => { e.stopPropagation(); refresh(); }}
+                  style={{ height: 22, padding: "0 5px", minWidth: 0 }}
+                />
+              </span>
+            </Tooltip>
           </div>
-          {clipboard && exportDir && (
-            <Tooltip title={`Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? "s" : ""} into ${pathBase(toolbarPasteTarget)}`}>
-              <Button
-                size="small"
-                type="text"
-                icon={<BlockOutlined style={{ fontSize: 11, color: "var(--link)" }} />}
-                onClick={(e) => { e.stopPropagation(); handlePaste(toolbarPasteTarget); }}
-                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-              />
-            </Tooltip>
-          )}
-          <Dropdown
-            menu={{ items: folderMenu, onClick: onFolderMenuClick }}
-            trigger={["click"]}
-          >
-            <Tooltip title="Open / change working folder">
-              <Button
-                size="small"
-                type="text"
-                icon={<FolderOpenOutlined style={{ fontSize: 11, color: CLR_SECONDARY }} />}
-                onClick={(e) => e.stopPropagation()}
-                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-              />
-            </Tooltip>
-          </Dropdown>
-          <Button
-            size="small"
-            type="text"
-            icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
-            onClick={toggleSearch}
-            style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-          />
-          {/* Git Operations button only when the folder isn't a repo — a repo's
-              entry point is the branch/changes pills on row 2 below. */}
-          {gitEnabled && exportDir && !gitRepo && (
-            <Tooltip title="Git Operations…">
-              <Button
-                size="small"
-                type="text"
-                icon={<BranchesOutlined style={{ fontSize: 11 }} />}
-                onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-                style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-              />
-            </Tooltip>
-          )}
-          {(loaded || rootError) && (
-            <Button
-              size="small"
-              type="text"
-              icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-              loading={loading}
-              onClick={(e) => { e.stopPropagation(); refresh(); }}
-              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
-            />
-          )}
         </div>
 
-        {/* Row 2: git status — branch + changed-file count, each opens Git Operations */}
+        {/* Row 2: git status — one segmented pill (branch · ahead · changed) that
+            opens Git Operations. The two pills it replaces were two hit targets
+            for one destination, and the fixed-width changed badge stole room from
+            the branch name. */}
         {gitRepo && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px 1px", minWidth: 0 }}>
-            <div
-              onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-              title={`On branch ${gitBranch}${gitAhead > 0 ? ` · ${gitAhead} to push` : ""} — open Git Operations`}
-              style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, flexShrink: 1, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--text) 6%, transparent)" }}
+          <div style={{ display: "flex", alignItems: "center", padding: "2px 2px 1px", minWidth: 0 }}>
+            <Tooltip
+              placement="bottomLeft"
+              title={[
+                `On branch ${gitBranch}`,
+                gitAhead > 0 ? `${gitAhead} commit${gitAhead > 1 ? "s" : ""} to push` : "",
+                gitChanged > 0 ? `${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""}` : "",
+                "open Git Operations",
+              ].filter(Boolean).join(" — ")}
             >
-              <BranchesOutlined style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }} />
-              <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {gitBranch}{gitAhead > 0 ? ` ↑${gitAhead}` : ""}
-              </span>
-            </div>
-            {gitChanged > 0 && (
-              <div
+              <button
+                type="button"
+                className="fb-git-pill"
                 onClick={(e) => { e.stopPropagation(); openGitOps(); }}
-                title={`${gitChanged} changed${gitStagedTot > 0 ? `, ${gitStagedTot} staged` : ""} — open Git Operations`}
-                style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0, cursor: "pointer", padding: "1px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--warning) 16%, transparent)" }}
               >
-                <span style={{ fontFamily: 'var(--editor-font, monospace)', fontSize: 10, fontWeight: 600, color: "var(--warning)" }}>
-                  {gitChanged}{gitStagedTot > 0 ? `·${gitStagedTot}` : ""} changed
+                <span className="fb-git-seg fb-git-branch-seg">
+                  <BranchesOutlined style={{ fontSize: 10, flexShrink: 0 }} />
+                  <span className="fb-git-branch">{gitBranch}</span>
                 </span>
-              </div>
-            )}
+                {gitAhead > 0 && (
+                  <span className="fb-git-seg fb-git-accent">↑{gitAhead}</span>
+                )}
+                {gitChanged > 0 && (
+                  <span className="fb-git-seg">
+                    {/* Total only — the staged breakdown lives in the tooltip; the
+                        old `65·3 changed` middot was opaque until you found it. */}
+                    <span className="fb-git-accent">{gitChanged}</span>
+                    <span>changed</span>
+                  </span>
+                )}
+              </button>
+            </Tooltip>
           </div>
         )}
       </div>
 
       {/* Content */}
       {expanded && (
-        <div style={{ padding: "0 4px", minHeight: 40 }} onContextMenu={onRootContextMenu}>
+        <div id={FILE_TREE_CONTENT_ID} style={{ padding: "0 4px", minHeight: 40 }} onContextMenu={onRootContextMenu}>
           {!exportDir && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0 6px" }}>
               <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No working directory selected.</Text>
