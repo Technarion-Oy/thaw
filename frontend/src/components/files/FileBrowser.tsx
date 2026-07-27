@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, Modal, Tooltip, Dropdown, App as AntApp } from "antd";
+import { createPortal } from "react-dom";
+import { Tree, Typography, Spin, Button, Input, Switch, Tooltip, Dropdown, App as AntApp } from "antd";
 import type { MenuProps } from "antd";
 import {
   FolderOutlined,
@@ -52,6 +53,23 @@ import { useDiffStore } from "../../store/diffStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
+import {
+  type NewItemKind,
+  newItemKey,
+  isNewItemKey,
+  insertSorted,
+  addChild,
+  pathSep,
+  isPathWithin,
+  findNode,
+  childrenOf,
+  insertPlaceholder,
+  finalNewName,
+  validateNewName,
+  validateRenameName,
+  activeEditSession,
+  type InlineEditSession,
+} from "./fileTreeUtils";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -59,6 +77,9 @@ type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
+/** Upper bound for the inline-validation box (~two wrapped lines) — only used to
+ *  decide whether it still fits below the field. See InlineNameInput. */
+const ERROR_BOX_MAX_H = 44;
 
 /** Extract the directory portion of a path, handling both / and \ separators. */
 function pathDir(p: string): string {
@@ -79,11 +100,6 @@ function pathDir(p: string): string {
  */
 function suppressKey(dir: string): string {
   return dir.replace(/^\/private(?=\/(?:tmp|var|etc)(?:\/|$))/, "");
-}
-
-/** Detect the path separator used in a path (backslash on Windows, forward slash otherwise). */
-function pathSep(p: string): string {
-  return p.includes("\\") ? "\\" : "/";
 }
 
 /** Extract the filename from a path, handling both / and \ separators.
@@ -150,18 +166,6 @@ function makeNode(path: string, name: string, isDir: boolean): DataNode {
   };
 }
 
-/** Find a node by key anywhere in the tree (depth-first). */
-function findNode(nodes: DataNode[], key: string): DataNode | null {
-  for (const n of nodes) {
-    if (n.key === key) return n;
-    if (n.children) {
-      const f = findNode(n.children, key);
-      if (f) return f;
-    }
-  }
-  return null;
-}
-
 /** Remove a node by key from the tree. */
 function removeNode(nodes: DataNode[], key: string): DataNode[] {
   return nodes
@@ -200,35 +204,6 @@ function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string):
     key: newPrefix + String(n.key).substring(oldPrefix.length),
     children: n.children ? reKeyChildren(n.children, oldPrefix, newPrefix) : undefined,
   }));
-}
-
-/** Insert a node into a sibling list, maintaining dirs-first alphabetical order. */
-function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] {
-  const kids = [...siblings];
-  const isDir = !child.isLeaf;
-  const name = String(child.title ?? "");
-  let i = 0;
-  if (isDir) {
-    while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-  } else {
-    while (i < kids.length && !kids[i].isLeaf) i++;
-    while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
-  }
-  kids.splice(i, 0, child);
-  return kids;
-}
-
-/** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
- *  If the parent hasn't been expanded yet (no children array), the node is not inserted
- *  — it will appear naturally when the user expands the directory. */
-function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNode[] {
-  return nodes.map((n) => {
-    if (n.key === parentKey) {
-      if (!n.children) return n;
-      return { ...n, children: insertSorted(n.children, child) };
-    }
-    return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
-  });
 }
 
 // Returns a context window around the match so long lines display usefully.
@@ -336,6 +311,12 @@ export default function FileBrowser() {
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
   const [loadedKeys,  setLoadedKeys]  = useState<Key[]>([]);
+  // Expansion is CONTROLLED (rather than rc-tree's default uncontrolled, lazy
+  // expansion) so `startNewItem` can programmatically open the directory the
+  // inline "new item" placeholder is being created in. rc-tree only fires
+  // `loadData` from a user-driven expand, so `startNewItem` also lists the
+  // directory itself when it isn't in `loadedKeys` yet.
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   // Multi-selection: the set of selected node keys (drives highlight + bulk ops).
   // `anchorKey` is the pivot for Shift+click range selection.
   const [selKeys,     setSelKeys]     = useState<string[]>([]);
@@ -369,18 +350,48 @@ export default function FileBrowser() {
   const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean; isRoot?: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
-  // ── Inline rename state (VS Code–style editing in the tree) ────────────
-  const [editingKey, setEditingKey] = useState<Key | null>(null);
-  const [editingValue, setEditingValue] = useState("");
-  const editActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
-  const editInitRef = useRef(false);
+  // ── Inline editors (VS Code–style editing in the tree) ─────────────────────
+  // Rename and creation are the same machine over different state. Each open
+  // editor is a *session* (see InlineEditSession): the id is stamped into the
+  // state the editor owns, so a handler that captured that state — an awaited
+  // IPC resuming, a stray blur from an unmounted input — can prove it is still
+  // the live editor before touching anything. A plain enum ref couldn't: opening
+  // the next editor resets it, re-arming every stale closure from the last one.
+  // At most one session is live at a time; starting either cancels the other.
+  type RetireReason = NonNullable<InlineEditSession["retiredAs"]>;
+  const sessionCounterRef = useRef(0);
+  const newSession = (): InlineEditSession => ({ id: ++sessionCounterRef.current, phase: "editing" });
 
-  // ── Modal state (new folder / new file) ─────────────────────────────────
-  const [inlineInput, setInlineInput] = useState<{ kind: "newFolder" | "newFile"; path: string; value: string } | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingRename, setPendingRename] = useState<{ id: number; path: string; value: string; busy?: boolean } | null>(null);
+  const renameSessionRef = useRef<InlineEditSession | null>(null);
+
+  // Creation, VS Code style: an editable placeholder row is injected into the
+  // tree under `parent` instead of opening a modal. It lives in the render-time
+  // tree only (see `treeForRender`), so `treeData` stays a pure mirror of the
+  // filesystem and refreshes/watcher events can't disturb the edit in progress.
+  const [pendingCreate, setPendingCreate] = useState<{ id: number; kind: NewItemKind; parent: string; value: string; busy?: boolean } | null>(null);
+  const createSessionRef = useRef<InlineEditSession | null>(null);
+
+  // `phase` lives on the session (a ref, so an awaited handler sees it the instant
+  // it changes); `busy` is the same fact in state, because only state re-renders.
+  // Flipping both here keeps them from drifting. The id guard stops a superseded
+  // session from writing `busy` over whatever editor is live now.
+  const setBusy = <T extends { id: number; busy?: boolean }>(
+    set: React.Dispatch<React.SetStateAction<T | null>>,
+    session: InlineEditSession,
+    busy: boolean,
+  ) => {
+    session.phase = busy ? "submitting" : "editing";
+    set((p) => (p && p.id === session.id ? { ...p, busy } : p));
+  };
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
+
+  // The workspace root is not itself a tree node (treeData holds its children
+  // directly), so root-level inserts and sibling lookups pass `null` as the
+  // parent key. `exportDir` may carry a trailing separator — strip it once here.
+  const rootDir = exportDir.replace(/[/\\]+$/, "");
 
   // ── Platform detection for labels ─────────────────────────────────────────
   const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
@@ -447,6 +458,8 @@ export default function FileBrowser() {
   loadedKeysRef.current = loadedKeys;
   const selKeysRef = useRef(selKeys);
   selKeysRef.current = selKeys;
+  const treeDataRef = useRef(treeData);
+  treeDataRef.current = treeData;
 
   // Coalesce the redundant file opens a click/double-click gesture would otherwise
   // fire. rc-tree runs onSelect on *every* click (including both clicks of a
@@ -518,9 +531,15 @@ export default function FileBrowser() {
     setRootError(null);
     setTreeData([]);
     setLoadedKeys([]);
+    setExpandedKeys([]);
     setSelKeys([]);
     setAnchorKey(null);
     setClipboard(null);
+    // Close any open inline editor and retire its session, so an IPC still in
+    // flight against the old workspace can't come back and touch the new one.
+    cancelCreate();
+    cancelRename();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel* only touch refs/setState
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
@@ -558,16 +577,22 @@ export default function FileBrowser() {
       scheduleGitRefresh();
       if (selfChangedDirs.current.has(suppressKey(evt.dir))) return;
 
-      // After refreshing a directory, prune loadedKeys entries that reference
-      // children which no longer exist (prevents unbounded stale-key growth).
-      const pruneLoadedKeys = (freshKeys: Set<string>) => {
-        setLoadedKeys((prev) => prev.filter((k) => {
+      // After refreshing a directory, prune key entries that reference children
+      // which no longer exist (prevents unbounded stale-key growth). Both key
+      // sets are pruned: expansion is controlled, so a stale expandedKeys entry
+      // would render a same-named directory that reappears later (branch switch,
+      // restore) as already-expanded but unloaded — and programmatic expansion
+      // doesn't trigger loadData, so it would look empty until manually toggled.
+      const pruneStaleKeys = (freshKeys: Set<string>) => {
+        const keep = (k: Key) => {
           const ks = String(k);
           const parent = ks.substring(0, ks.lastIndexOf("/")) || ks.substring(0, ks.lastIndexOf("\\"));
           // Only prune keys whose parent is the refreshed directory.
           if (parent !== evt.dir) return true;
           return freshKeys.has(ks);
-        }));
+        };
+        setLoadedKeys((prev) => prev.filter(keep));
+        setExpandedKeys((prev) => prev.filter(keep));
       };
 
       if (evt.dir === exportDir) {
@@ -578,7 +603,7 @@ export default function FileBrowser() {
             const list = entries ?? [];
             const fresh = entriesToNodes(list);
             setTreeData((prev) => mergeNodes(prev, fresh));
-            pruneLoadedKeys(new Set(list.map((e) => e.path)));
+            pruneStaleKeys(new Set(list.map((e) => e.path)));
           })
           .catch(() => {});
         return;
@@ -591,7 +616,7 @@ export default function FileBrowser() {
           // Nodes built outside the updater — see the collapse→expand refresh above.
           const fresh = entriesToNodes(list);
           setTreeData((prev) => updateNode(prev, evt.dir, fresh, true));
-          pruneLoadedKeys(new Set(list.map((e) => e.path)));
+          pruneStaleKeys(new Set(list.map((e) => e.path)));
         })
         .catch(() => {});
     });
@@ -675,8 +700,8 @@ export default function FileBrowser() {
       // Re-fetch the root and every currently-loaded (expanded) directory in
       // parallel, then merge — this picks up external changes while PRESERVING the
       // expanded subtree. Replacing treeData with root-only nodes (the old
-      // behavior) desynced rc-tree's uncontrolled expand state: folders collapsed
-      // and could not be reopened.
+      // behavior) dropped every loaded child while `expandedKeys` still named
+      // them: folders collapsed and could not be reopened.
       const loaded = loadedKeysRef.current.map(String);
       const [rootEntries, ...childResults] = await Promise.all([
         ListDirectory(exportDir),
@@ -733,13 +758,13 @@ export default function FileBrowser() {
 
   // Keys of currently-rendered tree nodes in visual (top-to-bottom) order. Read
   // from the DOM (each title carries a data-fbkey attribute, set in titleRender)
-  // so it honors expand/collapse without us controlling rc-tree's expandedKeys —
-  // this tree uses uncontrolled, lazy expansion, so there's no in-memory expanded
-  // set to walk (unlike the object-store sidebar's flattenVisibleNodes).
+  // rather than walked from expandedKeys + treeData (as the object-store sidebar's
+  // flattenVisibleNodes does): the DOM is the one source that already reflects
+  // expand/collapse, and it skips the inline-creation placeholder for free — that
+  // row deliberately carries no data-fbkey.
   // ponytail: correct as long as the tree isn't virtualized. If the rc-tree
   // `height` prop is ever set, only viewport rows render, so an off-screen anchor
-  // would drop from the range — switch to controlled expandedKeys + a treeData
-  // walk at that point.
+  // would drop from the range — switch to an expandedKeys + treeData walk then.
   const visibleKeysInOrder = (): string[] => {
     const root = treeWrapRef.current;
     if (!root) return [];
@@ -753,6 +778,7 @@ export default function FileBrowser() {
   const onSelect = async (_keys: Key[], info: { node: DataNode; nativeEvent: MouseEvent }) => {
     const node = info.node;
     const path = String(node.key);
+    if (isNewItemKey(path)) return; // the inline creation placeholder isn't a real node
     const isDir = (node as any).isLeaf === false;
     const ne = info.nativeEvent;
 
@@ -873,6 +899,12 @@ export default function FileBrowser() {
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
     const path = String(node.key);
+    if (isNewItemKey(path)) return; // no context menu on the creation placeholder
+    // Nor on the row whose own rename editor is open: the menu's actions (Delete,
+    // Rename, Cut, …) all act on a node that is mid-edit. The input itself stops
+    // contextmenu propagation, so a right-click *inside* the field still gets the
+    // native menu for paste.
+    if (pendingRename && path === pendingRename.path) return;
     const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
     // Right-clicking a node outside the current multi-selection acts on just that
@@ -926,7 +958,7 @@ export default function FileBrowser() {
   // duplicate files on copy). Git staging deliberately does NOT dedup — it
   // operates per file and excludes dirs (see opFilePaths).
   const dropDescendants = (paths: string[]): string[] =>
-    paths.filter((p) => !paths.some((o) => o !== p && p.startsWith(o + pathSep(o))));
+    paths.filter((p) => !paths.some((o) => o !== p && isPathWithin(p, o)));
 
   // Files-only subset of the operation set — git staging operates per file; passing a
   // directory to `git add` would recursively stage everything under it.
@@ -1049,6 +1081,12 @@ export default function FileBrowser() {
     // entry nested under another — otherwise the descendant would be processed
     // twice (a duplicate file at the target on copy, an ENOENT on move).
     const paths = dropDescendants(clipboard.paths);
+    // A cut-move relocates these paths, so an editor whose subject lives under
+    // one of them would submit against a location that no longer exists — a
+    // "Rename failed: …" toast naming a path the user never touched. No confirm
+    // dialog here, so nothing forces a premature blur; the editor just goes
+    // stale silently. A copy leaves the sources alone and needs no retiring.
+    if (mode === "cut") retireEditorsIn(paths);
     // Strip any trailing separator (exportDir may be stored with one) so the
     // same-folder no-op guard below matches pathDir(src), which always strips it.
     const targetDir = rawTarget.replace(/[/\\]+$/, "");
@@ -1158,6 +1196,8 @@ export default function FileBrowser() {
     const newNames = paths
       .filter((p) => { const rel = gitOverlay.relOf(p); return rel != null && gitOverlay.newFilesRel.has(rel); })
       .map(pathBase);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    retireEditorsIn(paths);
     modal.confirm({
       title: `Discard changes to ${paths.length} file${paths.length > 1 ? "s" : ""}?`,
       content: newNames.length
@@ -1255,6 +1295,8 @@ export default function FileBrowser() {
     // changes loses its staged part too — warn about that. From the uncapped set
     // so it's correct beyond the 500-file cap.
     const partiallyStaged = rel != null && gitOverlay.partialRel.has(rel);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    retireEditorsIn([path]);
     modal.confirm({
       title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
       content: isNew
@@ -1278,6 +1320,9 @@ export default function FileBrowser() {
   const handleDiscardAll = () => {
     if (gitBusy()) return; // don't open the modal mid-op
     setFileCtxMenu(null);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    // reset --hard covers the whole working tree, so every editor is in scope.
+    retireEditorsIn([rootDir]);
     modal.confirm({
       title: "Discard all changes?",
       content: "Resets the entire working tree to the last commit (git reset --hard HEAD). Every staged and unstaged change across all files is permanently lost. This cannot be undone.",
@@ -1307,6 +1352,20 @@ export default function FileBrowser() {
     }
   };
 
+  // Retire any inline editor whose subject is about to disappear: the node being
+  // renamed, or the directory a creation placeholder lives in (or an ancestor of
+  // either). Two things go wrong without it. The editor's row vanishes with the
+  // node while its session stays live, so a late blur fires `submitRename`
+  // against a path that no longer exists and toasts "Rename failed: …" instead
+  // of just closing. And the confirm modal stealing focus *is* that blur — it
+  // would submit the rename first, moving the file out from under the delete.
+  // Hence: called synchronously before the modal opens, not after the unlink.
+  const retireEditorsIn = (paths: string[]) => {
+    const within = (p: string) => paths.some((d) => isPathWithin(p, d));
+    if (pendingRename && within(pendingRename.path)) cancelRename();
+    if (pendingCreate && within(pendingCreate.parent)) cancelCreate();
+  };
+
   const handleDeleteConfirm = () => {
     if (!fileCtxMenu) return;
     // Deleting a folder removes its children, so drop any selected descendants —
@@ -1315,6 +1374,7 @@ export default function FileBrowser() {
     const multi = paths.length > 1;
     const { name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
+    retireEditorsIn(paths);
     modal.confirm({
       title: multi ? `Delete ${paths.length} items` : `Delete ${isDir ? "folder" : "file"}`,
       content: multi
@@ -1335,18 +1395,16 @@ export default function FileBrowser() {
             if (dir) await DeleteDirectory(path); else await DeleteFile(path);
             done.add(path);
             markSelfChanged(pathDir(path));
-            const sep = pathSep(path);
             // Read fresh tabs from the store (not the stale closure captured at render time).
             for (const tab of useQueryStore.getState().tabs) {
-              if (tab.path === path || (dir && tab.path?.startsWith(path + sep))) orphanTab(tab.id);
+              if (tab.path && isPathWithin(tab.path, path)) orphanTab(tab.id);
             }
             // Update tree in-place instead of full refresh.
             setTreeData((prev) => removeNode(prev, path));
-            setLoadedKeys((prev) => prev.filter((k) => {
-              const ks = String(k);
-              return ks !== path && !ks.startsWith(path + sep);
-            }));
-            setSelKeys((prev) => prev.filter((k) => k !== path && !k.startsWith(path + sep)));
+            const keepKey = (k: Key) => !isPathWithin(String(k), path);
+            setLoadedKeys((prev) => prev.filter(keepKey));
+            setExpandedKeys((prev) => prev.filter(keepKey));
+            setSelKeys((prev) => prev.filter((k) => !isPathWithin(k, path)));
           } catch (e) {
             failed.push(`${pathBase(path)}: ${String(e)}`);
           }
@@ -1363,122 +1421,288 @@ export default function FileBrowser() {
 
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
-    editActionRef.current = "idle";
-    editInitRef.current = false;
-    setEditingKey(fileCtxMenu.path);
-    setEditingValue(fileCtxMenu.name);
+    retireOpenEditors("superseded"); // including another rename — see the helper
+    const session = newSession();
+    renameSessionRef.current = session;
+    setPendingRename({ id: session.id, path: fileCtxMenu.path, value: fileCtxMenu.name });
     setFileCtxMenu(null);
   };
 
+  // Siblings of the node being renamed — drives its inline duplicate check.
+  // Keyed on the path, not the whole `pendingRename`: the object identity
+  // changes on every keystroke, which would re-walk the tree per character.
+  const renamePath = pendingRename?.path ?? null;
+  const renameSiblings = useMemo(() => {
+    if (renamePath === null) return [];
+    const dir = pathDir(renamePath);
+    return childrenOf(treeData, dir === rootDir ? null : dir);
+  }, [renamePath, treeData, rootDir]);
+
+  // Same live validation the creation editor gets — the two share `InlineNameInput`,
+  // so they share the rules too. Suppressed for an empty value: the field opens
+  // pre-filled, and clearing it is how you back out.
+  const renameError = useMemo(() => {
+    if (!pendingRename || !pendingRename.value.trim()) return null;
+    return validateRenameName(pendingRename.value, renameSiblings, pathBase(pendingRename.path));
+  }, [pendingRename, renameSiblings]);
+
+  // `as` records *why* the session stopped being live, for a submit still in
+  // flight to consult when it lands on a failure. Defaults to a user cancel —
+  // only the two supersession sites pass anything else. See InlineEditSession.
+  const cancelRename = (as: RetireReason = "cancelled") => {
+    if (renameSessionRef.current) renameSessionRef.current.retiredAs = as;
+    renameSessionRef.current = null;
+    setPendingRename(null);
+  };
+
   const submitRename = async () => {
-    if (editActionRef.current !== "idle" || editingKey === null) return;
-    const path = String(editingKey);
-    const sanitized = editingValue.trim().replace(/[/\\]/g, "");
-    if (!sanitized || sanitized === pathBase(path)) {
-      editActionRef.current = "cancelled";
-      setEditingKey(null);
-      return;
-    }
-    if (/[:"*?<>|]/.test(sanitized)) {
-      message.error("Name contains invalid characters (: \" * ? < > |)");
-      editActionRef.current = "cancelled";
-      setEditingKey(null);
-      return;
-    }
+    const session = activeEditSession(renameSessionRef.current, pendingRename);
+    if (!session || !pendingRename) return;
+    const { path, value } = pendingRename;
+    const sanitized = value.trim();
+    if (!sanitized || sanitized === pathBase(path)) { cancelRename(); return; }
+    // Keep the editor open for correction — `renameError` already shows the
+    // message inline. This used to silently strip path separators and cancel
+    // outright on an invalid character, which threw the typed name away.
+    if (validateRenameName(value, renameSiblings, pathBase(path))) return;
     const dir = pathDir(path);
     const sep = pathSep(path);
     const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
-    editActionRef.current = "submitting";
+    setBusy(setPendingRename, session, true);
     try {
       await RenameFile(path, newPath);
       markSelfChanged(dir);
+      // The file has moved on disk, so the tree, key sets and open tabs must be
+      // re-pointed whether or not this session is still the live one.
       const prefix = path + sep;
       remapTabsForMove(path, newPath, isDirKey(path));
       setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
-      setLoadedKeys(prev => prev.map(k => {
+      const remapKey = (k: Key) => {
         const ks = String(k);
         if (ks === path) return newPath;
         if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
         return k;
-      }));
+      };
+      setLoadedKeys(prev => prev.map(remapKey));
+      setExpandedKeys(prev => prev.map(remapKey));
       setSelKeys(prev => prev.map(k => {
         if (k === path) return newPath;
         if (k.startsWith(prefix)) return newPath + k.substring(path.length);
         return k;
       }));
-      setEditingKey(null);
+      // Cancelled mid-flight, or superseded by a newer editor: don't close what
+      // is now someone else's editor, and don't toast a result the user backed
+      // out of. Identity compare — see InlineEditSession.
+      if (renameSessionRef.current !== session) return;
+      cancelRename();
       message.success(`Renamed to ${sanitized}`);
     } catch (e) {
+      // Retired mid-flight. A user cancel earns silence; a session that was only
+      // superseded does not — the rename was asked for and failed, and swallowing
+      // that leaves nothing happening with nothing to explain it. Either way the
+      // live editor (whoever it is now) is left alone. See InlineEditSession.
+      if (renameSessionRef.current !== session) {
+        if (session.retiredAs !== "cancelled") message.error(`Rename failed: ${String(e)}`);
+        return;
+      }
+      setBusy(setPendingRename, session, false); // allow retry
       message.error(`Rename failed: ${String(e)}`);
-      editActionRef.current = "idle"; // allow retry
     }
   };
 
-  const cancelRename = () => {
-    editActionRef.current = "cancelled";
-    setEditingKey(null);
+  // Blur drops the editor when what's typed can't be used, rather than leaving an
+  // unfocused row stuck open on an error. Same contract as `blurCreate`.
+  const blurRename = () => {
+    if (!activeEditSession(renameSessionRef.current, pendingRename)) return;
+    if (renameError) cancelRename();
+    else submitRename();
+  };
+
+  // ── Inline creation (VS Code–style placeholder row) ────────────────────────
+  // List `dir` and merge the result into the tree, marking it loaded. Returns
+  // the children it found, or `null` when nothing was materialized — `addChild`
+  // silently drops a node into a parent that has none (see its doc), and the
+  // caller also needs the entries themselves to re-check for duplicates.
+  const listChildrenInto = async (dir: string): Promise<DataNode[] | null> => {
+    try {
+      const entries = await ListDirectory(dir);
+      // Built outside the updater — a throw inside one unmounts the React tree.
+      const children = entriesToNodes(entries);
+      // The directory can be deleted while this listing is in flight (it takes a
+      // confirm dialog and a second IPC, so this lands well after the removal).
+      // `updateNode` already no-ops for a key that's gone, but `setLoadedKeys`
+      // would write back the entry the delete just pruned — and a same-named
+      // directory created later would then count as already loaded and render
+      // empty. See the controlled-expansion gotcha.
+      if (!findNode(treeDataRef.current, dir)) return null;
+      setTreeData((prev) => updateNode(prev, dir, children, true));
+      setLoadedKeys((prev) => (prev.some((k) => String(k) === dir) ? prev : [...prev, dir]));
+      return children;
+    } catch {
+      return null;
+    }
   };
 
   // Start creating a new folder/file under `dir`. `dir` is passed explicitly so
   // both the context menu (a node or the root) and the header toolbar buttons
   // can share this — the root is just exportDir.
-  const startNewItem = (kind: "newFolder" | "newFile", dir: string) => {
+  const startNewItem = async (kind: NewItemKind, dir: string) => {
     if (!dir) return;
-    setInlineInput({ kind, path: dir, value: "" });
     setFileCtxMenu(null);
+    retireOpenEditors("superseded"); // including another create — see the helper
+    const parent = dir.replace(/[/\\]+$/, "");
+    const session = newSession();
+    createSessionRef.current = session;
+    setPendingCreate({ id: session.id, kind, parent, value: "" });
+    if (parent === rootDir) return; // the root is always "expanded"
+    // Expand first so the placeholder is on screen immediately, then make sure
+    // the real siblings are present: rc-tree only runs `loadData` for a
+    // user-driven expand, so a programmatic one has to list the directory here.
+    setExpandedKeys((prev) => (prev.some((k) => String(k) === parent) ? prev : [...prev, parent]));
+    if (loadedKeysRef.current.some((k) => String(k) === parent)) return;
+    // `submitCreate` orders itself behind this listing, because the two are
+    // otherwise independent async flows and *either* interleaving loses the new
+    // node: submit first and `addChild` no-ops on a parent that still has no
+    // children array; list first — but resolve after the insert — and
+    // `updateNode`'s merge maps over a pre-creation snapshot, dropping what was
+    // just added. Neither self-heals (`onLoadData` skips a parent that now has
+    // children, and the watcher echo is swallowed by the 500 ms self-change
+    // suppression), so the item would stay invisible until a manual Reload.
+    //
+    // A *failed* listing is non-fatal for the editor itself: the placeholder
+    // still works, the inline duplicate check just has nothing to compare
+    // against and the backend's O_EXCL create stays the safety net. It matters
+    // only to `submitCreate`, which is why the promise is kept rather than
+    // dropped — on the session, so a completion can't read a newer editor's.
+    session.listing = listChildrenInto(parent);
+    await session.listing;
   };
 
-  const submitInlineInput = async () => {
-    if (isSubmitting) return;
-    if (!inlineInput || !inlineInput.value.trim()) {
-      setInlineInput(null);
-      return;
-    }
-    const { kind, value } = inlineInput;
-    // The target may be exportDir, which can be stored with a trailing separator —
-    // strip it so we don't build a `root//child` path.
-    const path = inlineInput.path.replace(/[/\\]+$/, "");
-    const sanitized = value.trim().replace(/[/\\]/g, "");
-    if (!sanitized) {
-      message.error("Name cannot be empty or contain path separators");
-      return;
-    }
-    // Reject characters invalid on Windows (and generally problematic).
-    if (/[:"*?<>|]/.test(sanitized)) {
-      message.error("Name contains invalid characters (: \" * ? < > |)");
-      return;
-    }
-    // The workspace root isn't itself a tree node (treeData holds its children
-    // directly), so a root-level create inserts into the top-level list rather
-    // than via addChild, which only matches an existing parent node.
-    const isRoot = path === exportDir.replace(/[/\\]+$/, "");
-    const insert = (node: DataNode) =>
-      setTreeData(prev => (isRoot ? insertSorted(prev, node) : addChild(prev, path, node)));
-    setIsSubmitting(true);
+  // Siblings the pending item will join — drives the inline duplicate check.
+  // Keyed on the parent, not the whole `pendingCreate`: the object identity
+  // changes on every keystroke, which would re-walk the tree per character.
+  const createParent = pendingCreate?.parent ?? null;
+  const pendingSiblings = useMemo(
+    () => (createParent === null ? [] : childrenOf(treeData, createParent === rootDir ? null : createParent)),
+    [createParent, treeData, rootDir],
+  );
+
+  // Inline validation message, shown under the input while it's still open.
+  // Suppressed for the untouched empty value so the row doesn't open nagging.
+  const createError = useMemo(() => {
+    if (!pendingCreate || !pendingCreate.value.trim()) return null;
+    return validateNewName(pendingCreate.value, pendingCreate.kind, pendingSiblings);
+  }, [pendingCreate, pendingSiblings]);
+
+  const cancelCreate = (as: RetireReason = "cancelled") => {
+    if (createSessionRef.current) createSessionRef.current.retiredAs = as;
+    createSessionRef.current = null;
+    setPendingCreate(null);
+  };
+
+  // Retire whatever inline editor is open, of *either* kind — the one call that
+  // enforces "at most one editor at a time", so a starter can't half-apply it.
+  // Each starter used to retire only the other kind, leaving a second create (or
+  // a second rename) to overwrite `pendingCreate`/`createSessionRef` directly:
+  // the previous session was orphaned rather than retired, so the typed value
+  // vanished with no cancel path and `retiredAs` was never set — its failure
+  // reporting then worked only by accident, on `undefined !== "cancelled"`.
+  const retireOpenEditors = (as: RetireReason) => {
+    cancelRename(as);
+    cancelCreate(as);
+  };
+
+  const submitCreate = async () => {
+    const session = activeEditSession(createSessionRef.current, pendingCreate);
+    if (!session || !pendingCreate) return;
+    const { kind, parent, value } = pendingCreate;
+    // Nothing typed — treat like the rename editor does and just drop the row.
+    if (!value.trim()) { cancelCreate(); return; }
+    // Keep the input open for correction — `createError` is already showing the
+    // same message inline, so a toast on top of it would just be noise.
+    if (validateNewName(value, kind, pendingSiblings)) return;
+    const name = finalNewName(value, kind);
+    const sep = pathSep(parent);
+    const fullPath = `${parent}${sep}${name}`;
+    // A root-level create inserts into the top-level list rather than via
+    // addChild, which only matches an existing parent node.
+    const isRoot = parent === rootDir;
+    setBusy(setPendingCreate, session, true);
     try {
-      if (kind === "newFolder") {
-        const sep = pathSep(path);
-        const folderPath = `${path}${sep}${sanitized}`;
-        await CreateDirectory(folderPath);
-        markSelfChanged(path);
-        insert(makeNode(folderPath, sanitized, true));
-        message.success(`Created folder ${sanitized}`);
-      } else {
-        const sep = pathSep(path);
-        const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
-        const filePath = `${path}${sep}${name}`;
-        await CreateFile(filePath);
-        markSelfChanged(path);
-        insert(makeNode(filePath, name, false));
-        message.success(`Created ${name}`);
+      // Order behind this session's own eager listing before doing anything —
+      // see `startNewItem`. No listing means none was needed (the parent was
+      // already in `loadedKeys`, so it has children); `null` means it failed or
+      // its directory is gone, leaving nothing for `addChild` to insert into.
+      const listing = session.listing ?? null;
+      const revealed = listing === null ? null : await listing;
+      // Re-check for a collision against what that listing revealed. The check
+      // above ran against `pendingSiblings`, which is empty until the listing
+      // lands — so typing the name of an existing sibling and hitting Enter
+      // inside a never-expanded directory got here unchallenged. For a file the
+      // backend's O_EXCL catches it, but a folder create used to be MkdirAll,
+      // which succeeds silently on an existing directory: the user got a
+      // "Created folder" toast for something that was already there, and the
+      // tree gained a second node with the same key as the real one. MkDir now
+      // rejects an existing target too — this keeps the message inline rather
+      // than surfacing that as a failure toast.
+      if (revealed && validateNewName(value, kind, revealed)) {
+        setBusy(setPendingCreate, session, false); // `createError` renders it under the input
+        return;
       }
-      setInlineInput(null);
+      if (kind === "newFolder") await CreateDirectory(fullPath);
+      else await CreateFile(fullPath);
+      markSelfChanged(parent);
+      const listed = isRoot || listing === null || revealed !== null;
+      // The item exists on disk by now and can't be un-created, so the tree gets
+      // the node whether or not this session is still the live one — leaving a
+      // real file invisible would be a worse lie, especially with the fs watcher
+      // off.
+      const node = makeNode(fullPath, name, kind === "newFolder");
+      if (isRoot) setTreeData((prev) => insertSorted(prev, node));
+      else if (listed) setTreeData((prev) => addChild(prev, parent, node));
+      // Nothing to insert into: re-list the parent instead. The item is on disk,
+      // so the fresh listing carries it.
+      else await listChildrenInto(parent);
+      // Escape landed while the IPC was in flight, or a newer editor has since
+      // opened: skip everything the user was cancelling — the toast, the
+      // selection move and (the disruptive one) the editor tab — and leave the
+      // newer editor's state alone. Identity compare, see InlineEditSession.
+      if (createSessionRef.current !== session) return;
+      cancelCreate();
+      message.success(kind === "newFolder" ? `Created folder ${name}` : `Created ${name}`);
+      if (kind === "newFile") {
+        // Open the new file like a single click would (preview-tab aware, #849).
+        // The tab-sync effect then moves the tree selection onto it.
+        const openErr = await openFileInTab(fullPath, previewTabsEnabled);
+        if (openErr) message.error(`Could not open file: ${openErr}`);
+      } else {
+        setSelKeys([fullPath]);
+        setAnchorKey(fullPath);
+      }
     } catch (e) {
       const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
+      // Retired mid-flight, and nothing was created. A user cancel (or a delete
+      // of the target directory, which makes the ENOENT expected) earns silence.
+      // A session that was only superseded does not: starting another editor is
+      // not withdrawing this create, so a failure here — an ancestor renamed out
+      // from under it, permissions, disk full — has to be reported or the user
+      // sees their typed name simply evaporate. The live editor is left alone
+      // either way. See InlineEditSession.
+      if (createSessionRef.current !== session) {
+        if (session.retiredAs !== "cancelled") message.error(`${prefix}: ${String(e)}`);
+        return;
+      }
+      setBusy(setPendingCreate, session, false); // allow retry — mirrors the rename editor
       message.error(`${prefix}: ${String(e)}`);
-    } finally {
-      setIsSubmitting(false);
     }
+  };
+
+  // Blur mirrors the rename editor: submit what was typed, drop the row when
+  // there's nothing usable (empty or failing validation) rather than nagging.
+  const blurCreate = () => {
+    if (!activeEditSession(createSessionRef.current, pendingCreate)) return;
+    if (!pendingCreate?.value.trim() || createError) cancelCreate();
+    else submitCreate();
   };
 
   // Set of cut paths, derived once per clipboard change — titleRender runs for
@@ -1490,35 +1714,38 @@ export default function FileBrowser() {
   );
 
   const titleRender = (nodeData: DataNode) => {
-    if (editingKey !== null && nodeData.key === editingKey) {
+    // The synthetic "new item" placeholder row — its file/folder icon comes from
+    // the node's own `icon`, so the title is just the editor. Deliberately no
+    // data-fbkey: it must stay invisible to visibleKeysInOrder() / Shift+range.
+    if (pendingCreate && nodeData.key === newItemKey(pendingCreate.parent)) {
+      return (
+        <InlineNameInput
+          value={pendingCreate.value}
+          error={createError}
+          busy={pendingCreate.busy}
+          placeholder={pendingCreate.kind === "newFolder" ? "Folder name" : "File name"}
+          onChange={(v) => setPendingCreate((p) => (p ? { ...p, value: v } : p))}
+          onSubmit={submitCreate}
+          onCancel={cancelCreate}
+          onBlur={blurCreate}
+        />
+      );
+    }
+    if (pendingRename && String(nodeData.key) === pendingRename.path) {
       // Keep the data-fbkey wrapper even while editing so the renaming node stays
       // visible to visibleKeysInOrder() (it may be the Shift+range anchor).
       return (
         <span data-fbkey={String(nodeData.key)}>
-        <Input
-          size="small"
-          autoFocus
-          value={editingValue}
-          onChange={(e) => setEditingValue(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation(); // prevent tree keyboard navigation
-            if (e.key === "Enter") submitRename();
-            else if (e.key === "Escape") cancelRename();
-          }}
-          onBlur={submitRename}
-          onClick={(e) => e.stopPropagation()} // prevent tree selection
-          style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text" }}
-          ref={(el) => {
-            if (!el || editInitRef.current) return;
-            editInitRef.current = true;
-            const input = (el as any).input ?? el;
-            if (input?.setSelectionRange) {
-              const dot = editingValue.lastIndexOf(".");
-              const end = dot > 0 ? dot : editingValue.length;
-              requestAnimationFrame(() => input.setSelectionRange(0, end));
-            }
-          }}
-        />
+          <InlineNameInput
+            value={pendingRename.value}
+            error={renameError}
+            busy={pendingRename.busy}
+            selectStem
+            onChange={(v) => setPendingRename((p) => (p ? { ...p, value: v } : p))}
+            onSubmit={submitRename}
+            onCancel={cancelRename}
+            onBlur={blurRename}
+          />
         </span>
       );
     }
@@ -1554,6 +1781,28 @@ export default function FileBrowser() {
 
   const grouped = groupByPath(searchResults);
 
+  // The inline-creation placeholder is a render-only node: injecting it here
+  // rather than into `treeData` keeps `treeData` a pure mirror of the filesystem,
+  // so mergeNodes / refresh() / the fs:changed watcher need no knowledge of it and
+  // can never wipe or duplicate it mid-edit. Rebuilt only when the target or kind
+  // changes — the typed value lives in `pendingCreate` and reaches the input
+  // through titleRender, so keystrokes don't re-clone the tree.
+  const placeholderNode = useMemo<DataNode | null>(() => {
+    if (!pendingCreate) return null;
+    const isDir = pendingCreate.kind === "newFolder";
+    return {
+      key: newItemKey(pendingCreate.parent),
+      // Empty title: insertSorted puts the row first among its own kind, giving it
+      // a stable position instead of one that jumps around while the user types.
+      title: "",
+      // isLeaf even for a folder — a switcher on a path that doesn't exist yet
+      // would offer to expand (and lazily list) it.
+      isLeaf: true,
+      selectable: false,
+      icon: isDir ? <FolderOutlined /> : <FileOutlined style={{ color: CLR_SECONDARY }} />,
+    };
+  }, [pendingCreate?.kind, pendingCreate?.parent]);
+
   // rc-tree memoizes its flattened node list by treeData identity, so a status
   // change alone won't re-run titleRender. Hand it a fresh top-level array
   // reference whenever the git overlay changes so the status colors repaint.
@@ -1561,7 +1810,12 @@ export default function FileBrowser() {
   // deps are intentional: not read in the body, they exist to force rc-tree to
   // re-run titleRender on status change / cut-dimming. cutSet (not clipboard) so a
   // Copy — which changes no node opacity — doesn't trigger a full re-sweep.
-  const treeForRender = useMemo(() => [...treeData], [treeData, gitOverlay, cutSet]);
+  const treeForRender = useMemo(() => {
+    const base = [...treeData];
+    if (!placeholderNode || !pendingCreate) return base;
+    const parentKey = pendingCreate.parent === rootDir ? null : pendingCreate.parent;
+    return insertPlaceholder(base, parentKey, placeholderNode);
+  }, [treeData, gitOverlay, cutSet, placeholderNode, pendingCreate?.parent, rootDir]);
 
   // Git status of the right-clicked file (drives the Stage/Unstage/Discard menu items).
   // ctxChanged: the file is changed at all. When we don't have a precise
@@ -1640,7 +1894,7 @@ export default function FileBrowser() {
             style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, minWidth: 0, padding: "2px 4px", borderRadius: 4 }}
             onClick={toggleExpanded}
             // Right-click the header title area to create at the workspace root
-            // (New Folder… / New SQL File…) — no toolbar buttons needed.
+            // (New Folder… / New File…) — no toolbar buttons needed.
             onContextMenu={onRootContextMenu}
             title={exportDir || "No folder open"}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
@@ -1879,7 +2133,9 @@ export default function FileBrowser() {
             <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
           )}
 
-          {exportDir && !searchOpen && !loading && loaded && treeData.length === 0 && (
+          {/* treeForRender, not treeData: a root-level create in an empty folder
+              renders nothing but the placeholder row. */}
+          {exportDir && !searchOpen && !loading && loaded && treeForRender.length === 0 && (
             <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Directory is empty.</Text>
           )}
 
@@ -1896,7 +2152,7 @@ export default function FileBrowser() {
             </div>
           )}
 
-          {!searchOpen && loaded && treeData.length > 0 && (
+          {!searchOpen && loaded && treeForRender.length > 0 && (
             <div
               style={{ overflow: "hidden", userSelect: "none" }}
               ref={treeWrapRef}
@@ -1909,8 +2165,10 @@ export default function FileBrowser() {
               <Tree
                 treeData={treeForRender}
                 loadedKeys={loadedKeys}
+                expandedKeys={expandedKeys}
                 selectedKeys={selKeys}
                 multiple
+                onExpand={(keys) => setExpandedKeys(keys)}
                 onLoad={(keys) => setLoadedKeys(keys)}
                 loadData={onLoadData as any}
                 onSelect={onSelect as any}
@@ -1923,30 +2181,6 @@ export default function FileBrowser() {
             </div>
           )}
         </div>
-      )}
-
-      {/* Modal for new folder / new file */}
-      {inlineInput && (
-        <Modal
-          open
-          title={inlineInput.kind === "newFolder" ? "New Folder" : "New SQL File"}
-          okText="Create"
-          confirmLoading={isSubmitting}
-          onOk={submitInlineInput}
-          onCancel={() => setInlineInput(null)}
-          width={360}
-          destroyOnClose
-        >
-          <Input
-            autoFocus
-            size="small"
-            value={inlineInput.value}
-            onChange={(e) => setInlineInput({ ...inlineInput, value: e.target.value })}
-            onPressEnter={() => { if (!isSubmitting) submitInlineInput(); }}
-            placeholder={inlineInput.kind === "newFolder" ? "Folder name" : "File name (.sql)"}
-            style={{ marginTop: 8 }}
-          />
-        </Modal>
       )}
 
       {/* Context menu */}
@@ -2002,7 +2236,7 @@ export default function FileBrowser() {
           {fileCtxMenu.isRoot ? (
             <>
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
               {clipboard && (
                 <CtxItem
                   icon={<BlockOutlined />}
@@ -2076,7 +2310,7 @@ export default function FileBrowser() {
             <>
               <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={() => startNewItem("newFolder", fileCtxMenu.path)} />
-              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
+              <CtxItem icon={<FileAddOutlined />} label="New File…" onClick={() => startNewItem("newFile", fileCtxMenu.path)} />
             </>
           )}
 
@@ -2099,6 +2333,132 @@ export default function FileBrowser() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The in-tree name editor, shared by inline rename and inline creation so the two
+ * can't drift apart. Handles the fiddly parts once: Enter/Escape, keydown
+ * `stopPropagation` (so tree keyboard navigation doesn't eat the keystrokes),
+ * click `stopPropagation` (so clicking into the field doesn't select the node),
+ * one-shot focus + name-part selection, and the inline validation message.
+ *
+ * The Enter→blur double-submit race is guarded by the caller's action ref (both
+ * `submitRename` and `submitCreate` no-op while a submit is in flight).
+ */
+function InlineNameInput({
+  value, error, placeholder, selectStem, busy, onChange, onSubmit, onCancel, onBlur,
+}: {
+  value: string;
+  error?: string | null;
+  placeholder?: string;
+  /** The submit's IPC is in flight — see `setBusy`. Read-only rather than
+   *  disabled: disabling a focused input drops focus, so a failed submit would
+   *  hand back a field the user has to click into again before retrying. */
+  busy?: boolean;
+  /** Preselect the name up to the extension dot (rename starts with a value). */
+  selectStem?: boolean;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  onBlur: () => void;
+}) {
+  // Per-instance: the editor unmounts when the edit ends, so the next one
+  // re-runs its initial selection.
+  const initRef = useRef(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  // The error box is portaled to <body> and positioned against the input's
+  // viewport rect. Absolute positioning inside the row can't work: the tree
+  // wrapper is `overflow: hidden` and auto-sizes to its rows, so a message under
+  // the LAST visible row would be clipped away entirely (z-index doesn't help —
+  // it's clipping, not stacking).
+  const [errBox, setErrBox] = useState<{ top: number; left: number; width: number; flip: boolean } | null>(null);
+  const measureErr = useCallback(() => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    // Flip above the field when the message would run off the bottom of the
+    // window. ERROR_BOX_MAX_H is only a fit test — the flipped box is pinned by
+    // its bottom edge (translateY(-100%)), so its real height never matters.
+    const flip = r.bottom + ERROR_BOX_MAX_H > window.innerHeight;
+    const next = { top: flip ? r.top : r.bottom, left: r.left, width: r.width, flip };
+    // Bail out when nothing moved: this runs on every render, and a fresh object
+    // each time would re-render forever.
+    setErrBox((prev) =>
+      prev && prev.top === next.top && prev.left === next.left
+        && prev.width === next.width && prev.flip === next.flip
+        ? prev
+        : next);
+  }, []);
+  // Re-anchor after every render — a watcher event can insert a sibling row above
+  // this one, or the panel can be resized, while the editor is open.
+  useLayoutEffect(() => {
+    if (error) measureErr(); else setErrBox(null);
+  });
+  useEffect(() => {
+    if (!error) return;
+    // Any ancestor scroll moves the anchor without re-rendering us — the capture
+    // phase catches them all without knowing which element actually scrolls.
+    window.addEventListener("scroll", measureErr, true);
+    window.addEventListener("resize", measureErr);
+    return () => {
+      window.removeEventListener("scroll", measureErr, true);
+      window.removeEventListener("resize", measureErr);
+    };
+  }, [error, measureErr]);
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "block" }}>
+      <Input
+        size="small"
+        autoFocus
+        value={value}
+        placeholder={placeholder}
+        status={error ? "error" : undefined}
+        readOnly={busy}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation(); // prevent tree keyboard navigation
+          if (e.key === "Enter") onSubmit();
+          else if (e.key === "Escape") onCancel();
+        }}
+        onBlur={onBlur}
+        onClick={(e) => e.stopPropagation()} // prevent tree selection
+        // Keep the native menu (paste a name in) and keep the tree's own
+        // right-click handler off a row that is mid-edit.
+        onContextMenu={(e) => e.stopPropagation()}
+        style={{ fontSize: 12, height: 22, padding: "0 4px", userSelect: "text", opacity: busy ? 0.6 : 1 }}
+        ref={(el) => {
+          if (!el || initRef.current) return;
+          initRef.current = true;
+          if (!selectStem) return;
+          const input = (el as any).input ?? el;
+          if (input?.setSelectionRange) {
+            const dot = value.lastIndexOf(".");
+            const end = dot > 0 ? dot : value.length;
+            requestAnimationFrame(() => input.setSelectionRange(0, end));
+          }
+        }}
+      />
+      {error && errBox && createPortal(
+        <div
+          role="alert"
+          style={{
+            position: "fixed",
+            top: errBox.top, left: errBox.left, width: errBox.width, zIndex: 1050,
+            transform: errBox.flip ? "translateY(-100%)" : undefined,
+            background: "var(--bg-overlay)", border: "1px solid #f85149",
+            borderTop: errBox.flip ? undefined : "none",
+            borderBottom: errBox.flip ? "none" : undefined,
+            borderRadius: errBox.flip ? "4px 4px 0 0" : "0 0 4px 4px",
+            color: "#f85149", fontSize: 11,
+            padding: "2px 6px", whiteSpace: "normal", userSelect: "none",
+            pointerEvents: "none", // never intercept a click aimed at the tree
+          }}
+        >
+          {error}
+        </div>,
+        document.body,
+      )}
+    </span>
   );
 }
 
