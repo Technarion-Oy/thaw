@@ -8,6 +8,7 @@ import {
   isNewItemKey,
   insertSorted,
   addChild,
+  isPathWithin,
   findNode,
   childrenOf,
   insertPlaceholder,
@@ -82,6 +83,32 @@ describe("reserved placeholder key", () => {
     expect(isNewItemKey("C:\\work\\a.sql")).toBe(false);
     expect(isNewItemKey(undefined)).toBe(false);
     expect(isNewItemKey(123)).toBe(false);
+  });
+});
+
+describe("isPathWithin", () => {
+  it("matches the root itself and anything beneath it", () => {
+    expect(isPathWithin("/w/reports", "/w/reports")).toBe(true);
+    expect(isPathWithin("/w/reports/q1.sql", "/w/reports")).toBe(true);
+    expect(isPathWithin("/w/reports/2024/q1.sql", "/w/reports")).toBe(true);
+  });
+
+  it("does not match a sibling that merely shares a name prefix", () => {
+    // The reason the separator is part of the comparison: without it, deleting
+    // or moving `/w/reports` would retire an editor open on `/w/reports-old`
+    // and prune its keys.
+    expect(isPathWithin("/w/reports-old", "/w/reports")).toBe(false);
+    expect(isPathWithin("/w/reports-old/q1.sql", "/w/reports")).toBe(false);
+    expect(isPathWithin("/w/other", "/w/reports")).toBe(false);
+  });
+
+  it("does not match an ancestor", () => {
+    expect(isPathWithin("/w", "/w/reports")).toBe(false);
+  });
+
+  it("handles Windows paths", () => {
+    expect(isPathWithin("C:\\w\\reports\\q1.sql", "C:\\w\\reports")).toBe(true);
+    expect(isPathWithin("C:\\w\\reports-old", "C:\\w\\reports")).toBe(false);
   });
 });
 

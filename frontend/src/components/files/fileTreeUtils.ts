@@ -82,6 +82,25 @@ export function isNewItemKey(key: unknown): boolean {
   return typeof key === "string" && key.startsWith(NEW_ITEM_KEY_PREFIX);
 }
 
+/** The separator a path is written with. Paths here come from the OS, so they
+ *  are consistently one or the other. */
+export function pathSep(p: string): string {
+  return p.includes("\\") ? "\\" : "/";
+}
+
+/**
+ * Is `path` `root` itself, or somewhere beneath it?
+ *
+ * The `+ sep` matters: a bare `startsWith` would report `/w/reports-old` as
+ * living inside `/w/reports`, so a delete or move of the latter would retire an
+ * editor open on the former. Every "did this operation's scope cover that path?"
+ * check — retiring editors, pruning `loadedKeys`/`expandedKeys`/`selKeys`,
+ * re-pointing tabs — should go through this rather than open-coding the prefix.
+ */
+export function isPathWithin(path: string, root: string): boolean {
+  return path === root || path.startsWith(root + pathSep(root));
+}
+
 /** Insert a node into a sibling list, maintaining dirs-first alphabetical order. */
 export function insertSorted(siblings: DataNode[], child: DataNode): DataNode[] {
   const kids = [...siblings];

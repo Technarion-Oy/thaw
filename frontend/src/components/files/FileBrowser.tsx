@@ -59,6 +59,8 @@ import {
   isNewItemKey,
   insertSorted,
   addChild,
+  pathSep,
+  isPathWithin,
   findNode,
   childrenOf,
   insertPlaceholder,
@@ -98,11 +100,6 @@ function pathDir(p: string): string {
  */
 function suppressKey(dir: string): string {
   return dir.replace(/^\/private(?=\/(?:tmp|var|etc)(?:\/|$))/, "");
-}
-
-/** Detect the path separator used in a path (backslash on Windows, forward slash otherwise). */
-function pathSep(p: string): string {
-  return p.includes("\\") ? "\\" : "/";
 }
 
 /** Extract the filename from a path, handling both / and \ separators.
@@ -947,7 +944,7 @@ export default function FileBrowser() {
   // duplicate files on copy). Git staging deliberately does NOT dedup — it
   // operates per file and excludes dirs (see opFilePaths).
   const dropDescendants = (paths: string[]): string[] =>
-    paths.filter((p) => !paths.some((o) => o !== p && p.startsWith(o + pathSep(o))));
+    paths.filter((p) => !paths.some((o) => o !== p && isPathWithin(p, o)));
 
   // Files-only subset of the operation set — git staging operates per file; passing a
   // directory to `git add` would recursively stage everything under it.
@@ -1070,6 +1067,12 @@ export default function FileBrowser() {
     // entry nested under another — otherwise the descendant would be processed
     // twice (a duplicate file at the target on copy, an ENOENT on move).
     const paths = dropDescendants(clipboard.paths);
+    // A cut-move relocates these paths, so an editor whose subject lives under
+    // one of them would submit against a location that no longer exists — a
+    // "Rename failed: …" toast naming a path the user never touched. No confirm
+    // dialog here, so nothing forces a premature blur; the editor just goes
+    // stale silently. A copy leaves the sources alone and needs no retiring.
+    if (mode === "cut") retireEditorsIn(paths);
     // Strip any trailing separator (exportDir may be stored with one) so the
     // same-folder no-op guard below matches pathDir(src), which always strips it.
     const targetDir = rawTarget.replace(/[/\\]+$/, "");
@@ -1179,6 +1182,8 @@ export default function FileBrowser() {
     const newNames = paths
       .filter((p) => { const rel = gitOverlay.relOf(p); return rel != null && gitOverlay.newFilesRel.has(rel); })
       .map(pathBase);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    retireEditorsIn(paths);
     modal.confirm({
       title: `Discard changes to ${paths.length} file${paths.length > 1 ? "s" : ""}?`,
       content: newNames.length
@@ -1276,6 +1281,8 @@ export default function FileBrowser() {
     // changes loses its staged part too — warn about that. From the uncapped set
     // so it's correct beyond the 500-file cap.
     const partiallyStaged = rel != null && gitOverlay.partialRel.has(rel);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    retireEditorsIn([path]);
     modal.confirm({
       title: isNew ? `Delete ${name}?` : `Discard changes to ${name}?`,
       content: isNew
@@ -1299,6 +1306,9 @@ export default function FileBrowser() {
   const handleDiscardAll = () => {
     if (gitBusy()) return; // don't open the modal mid-op
     setFileCtxMenu(null);
+    // Same focus-steal hazard as Delete — see retireEditorsIn.
+    // reset --hard covers the whole working tree, so every editor is in scope.
+    retireEditorsIn([rootDir]);
     modal.confirm({
       title: "Discard all changes?",
       content: "Resets the entire working tree to the last commit (git reset --hard HEAD). Every staged and unstaged change across all files is permanently lost. This cannot be undone.",
@@ -1337,7 +1347,7 @@ export default function FileBrowser() {
   // would submit the rename first, moving the file out from under the delete.
   // Hence: called synchronously before the modal opens, not after the unlink.
   const retireEditorsIn = (paths: string[]) => {
-    const within = (p: string) => paths.some((d) => p === d || p.startsWith(d + pathSep(d)));
+    const within = (p: string) => paths.some((d) => isPathWithin(p, d));
     if (pendingRename && within(pendingRename.path)) cancelRename();
     if (pendingCreate && within(pendingCreate.parent)) cancelCreate();
   };
@@ -1371,20 +1381,16 @@ export default function FileBrowser() {
             if (dir) await DeleteDirectory(path); else await DeleteFile(path);
             done.add(path);
             markSelfChanged(pathDir(path));
-            const sep = pathSep(path);
             // Read fresh tabs from the store (not the stale closure captured at render time).
             for (const tab of useQueryStore.getState().tabs) {
-              if (tab.path === path || (dir && tab.path?.startsWith(path + sep))) orphanTab(tab.id);
+              if (tab.path && isPathWithin(tab.path, path)) orphanTab(tab.id);
             }
             // Update tree in-place instead of full refresh.
             setTreeData((prev) => removeNode(prev, path));
-            const keepKey = (k: Key) => {
-              const ks = String(k);
-              return ks !== path && !ks.startsWith(path + sep);
-            };
+            const keepKey = (k: Key) => !isPathWithin(String(k), path);
             setLoadedKeys((prev) => prev.filter(keepKey));
             setExpandedKeys((prev) => prev.filter(keepKey));
-            setSelKeys((prev) => prev.filter((k) => k !== path && !k.startsWith(path + sep)));
+            setSelKeys((prev) => prev.filter((k) => !isPathWithin(k, path)));
           } catch (e) {
             failed.push(`${pathBase(path)}: ${String(e)}`);
           }
