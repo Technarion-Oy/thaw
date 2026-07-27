@@ -1421,8 +1421,7 @@ export default function FileBrowser() {
 
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
-    // At most one inline editor at a time — a pending create is abandoned.
-    cancelCreate("superseded");
+    retireOpenEditors("superseded"); // including another rename — see the helper
     const session = newSession();
     renameSessionRef.current = session;
     setPendingRename({ id: session.id, path: fileCtxMenu.path, value: fileCtxMenu.name });
@@ -1550,8 +1549,7 @@ export default function FileBrowser() {
   const startNewItem = async (kind: NewItemKind, dir: string) => {
     if (!dir) return;
     setFileCtxMenu(null);
-    // At most one inline editor at a time — a pending rename is abandoned.
-    cancelRename("superseded");
+    retireOpenEditors("superseded"); // including another create — see the helper
     const parent = dir.replace(/[/\\]+$/, "");
     const session = newSession();
     createSessionRef.current = session;
@@ -1600,6 +1598,18 @@ export default function FileBrowser() {
     if (createSessionRef.current) createSessionRef.current.retiredAs = as;
     createSessionRef.current = null;
     setPendingCreate(null);
+  };
+
+  // Retire whatever inline editor is open, of *either* kind — the one call that
+  // enforces "at most one editor at a time", so a starter can't half-apply it.
+  // Each starter used to retire only the other kind, leaving a second create (or
+  // a second rename) to overwrite `pendingCreate`/`createSessionRef` directly:
+  // the previous session was orphaned rather than retired, so the typed value
+  // vanished with no cancel path and `retiredAs` was never set — its failure
+  // reporting then worked only by accident, on `undefined !== "cancelled"`.
+  const retireOpenEditors = (as: RetireReason) => {
+    cancelRename(as);
+    cancelCreate(as);
   };
 
   const submitCreate = async () => {

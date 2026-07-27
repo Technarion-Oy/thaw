@@ -419,6 +419,37 @@ func TestMkDir_ConcurrentSameName(t *testing.T) {
 	}
 }
 
+func TestMkDir_ConcurrentSameNameNested(t *testing.T) {
+	// Same race as above but down the other branch: the parents don't exist, so
+	// every racer takes ENOENT -> MkdirAll(parent) -> retry. MkdirAll is
+	// deliberately idempotent for the intermediate directories (they may be
+	// created by whoever gets there first), so exclusivity has to come from the
+	// retry's os.Mkdir on the final component — exactly one racer may win.
+	root := t.TempDir()
+	dir := filepath.Join(root, "a", "b", "reports")
+	const racers = 8
+	errs := make(chan error, racers)
+	start := make(chan struct{})
+	for range racers {
+		go func() {
+			<-start
+			errs <- MkDir(dir, root)
+		}()
+	}
+	close(start)
+	created := 0
+	for range racers {
+		if err := <-errs; err == nil {
+			created++
+		} else if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("losers should report the target exists, got: %v", err)
+		}
+	}
+	if created != 1 {
+		t.Errorf("exactly one create should succeed, got %d", created)
+	}
+}
+
 func TestMkDir_ExistingFile(t *testing.T) {
 	// A file where the folder should go: MkdirAll would fail with a raw syscall
 	// error; the pre-check gives the same message as the directory case.
