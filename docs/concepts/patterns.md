@@ -39,6 +39,16 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 // call cleanup() on unmount
 ```
 
+## Adding a native menu item
+
+Every item lives in `buildMenu` (`internal/app/menu.go`) and only emits a `menu:*` event — the frontend listener (usually in `QueryPage.tsx`) does the work.
+
+**If the item's feature needs a live Snowflake connection**, add it with the local `addConnectionItem(menu, label, accelerator, event)` helper instead of `AddText`. That starts the item `Disabled` (the app always launches disconnected) and enrolls it in the `app.setMenuConnected` callback, which `Connect`/`Disconnect` (`internal/app/app.go`) call to grey it out or restore it. Offline-capable items (local files, preferences, git, terminal, help) keep plain `AddText`.
+
+Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `wailsruntime.MenuUpdateApplicationMenu(app.ctx)`. Call sites must nil-guard the field — tests construct `App` without a menu.
+
+Backend `ErrNotConnected` guards stay in place regardless: greying out is UX, not enforcement.
+
 ## Zustand stores
 
 - `connectionStore` — active connection, role, warehouse, database
