@@ -102,7 +102,7 @@ export interface Tab {
                          // file from the browser replaces its content. Promoted to a
                          // permanent tab (flag cleared) on double-click or first edit.
                          // Session-only — never persisted (restored tabs are permanent).
-  isDefaultTitle?: boolean; // true while the title is the auto-generated "SQL (n)";
+  isDefaultTitle?: boolean; // true while the title is the auto-generated "SQL n";
                             // cleared by renameTab. Drives the "untitled.sql" save default.
 }
 
@@ -138,17 +138,22 @@ function patchTab(tabs: Tab[], id: string, patch: Partial<Tab>): Tab[] {
   return tabs.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }
 
-/** Next scratch-tab title "SQL (n)", where n is one past the highest existing. */
+/**
+ * Next scratch-tab title "SQL n", where n is one past the highest existing.
+ * The parentheses went away in #881 — one digit between an identical prefix and
+ * a closing paren is hard to pick out of a strip of five — but titles persisted
+ * by older versions still parse, so numbering doesn't restart after an upgrade.
+ */
 function nextScratchTitle(tabs: Tab[]): string {
   let max = 0;
   for (const t of tabs) {
-    const m = /^SQL \((\d+)\)$/.exec(t.title);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+    const m = /^SQL (?:\((\d+)\)|(\d+))$/.exec(t.title);
+    if (m) max = Math.max(max, parseInt(m[1] ?? m[2], 10));
   }
-  return `SQL (${max + 1})`;
+  return `SQL ${max + 1}`;
 }
 
-/** A scratch tab with the next auto-generated "SQL (n)" title, flagged as default. */
+/** A scratch tab with the next auto-generated "SQL n" title, flagged as default. */
 function makeScratchTab(tabs: Tab[], overrides?: Partial<Tab>): Tab {
   return makeTab({ title: nextScratchTitle(tabs), isDefaultTitle: true, ...overrides });
 }
@@ -514,7 +519,7 @@ export const useQueryStore = create<QueryState>()(
       const newTabs = state.tabs.filter((t) => t.id !== id);
 
       // Closing the last tab — replace it with a fresh scratch tab so the
-      // editor is never left empty. Pass newTabs (empty) so the "SQL (n)"
+      // editor is never left empty. Pass newTabs (empty) so the "SQL n"
       // number resets to 1 instead of climbing on every close (#595).
       if (newTabs.length === 0) {
         const freshTab = makeScratchTab(newTabs);

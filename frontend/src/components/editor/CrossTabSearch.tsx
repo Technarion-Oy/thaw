@@ -14,6 +14,9 @@ import {
 } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 import { getEditorInstance } from "./editorRef";
+// Result rows name tabs the same way the tab strip does — an unnamed scratch
+// tab shows its derived title, never the "SQL 3" nothing in the UI displays.
+import { tabDisplayTitle } from "./tabTitle";
 
 const { Text } = Typography;
 
@@ -235,7 +238,7 @@ export default function CrossTabSearch({ onClose }: Props) {
             searchText(cell.source, regex, (line, column, length) => {
               results.push({
                 tabId: tab.id,
-                tabTitle: tab.title,
+                tabTitle: tabDisplayTitle(tab),
                 isNotebook: true,
                 line,
                 column,
@@ -248,7 +251,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           searchText(tab.sql, regex, (line, column, length) => {
             results.push({
               tabId: tab.id,
-              tabTitle: tab.title,
+              tabTitle: tabDisplayTitle(tab),
               isNotebook: false,
               line,
               column,

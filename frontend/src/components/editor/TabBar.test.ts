@@ -7,7 +7,7 @@ import type { Tab } from "../../store/queryStore";
 // A baseline scratch tab; helpers below clone it with one field changed.
 const base: Tab = {
   id: "t1",
-  title: "SQL (1)",
+  title: "SQL 1",
   path: null,
   sql: "SELECT 1",
   savedSql: "SELECT 1",
@@ -48,8 +48,26 @@ describe("tabStripSignature", () => {
     ["mcpOrigin", { mcpOrigin: true }],
     ["orphaned", { orphaned: true }],
     ["preview", { preview: true }],
+    // Gates the derived title: with it set, the strip shows "SELECT", not "SQL 1".
+    ["isDefaultTitle", { isDefaultTitle: true }],
   ])("changes when the rendered field %s changes", (_field, patch) => {
     expect(sig(patch)).not.toBe(sig({}));
+  });
+
+  // The derived title (#881) is the one signature field that reads `sql`, so it
+  // needs the same treatment as the dirty flag: it must repaint the strip when
+  // the *label* changes, and only then.
+  describe("derived title of an unnamed scratch tab", () => {
+    const scratch = { isDefaultTitle: true, sql: "SELECT * FROM orders", savedSql: "" };
+
+    it("changes when the derived label changes", () => {
+      expect(sig({ ...scratch, sql: "SELECT * FROM customers" })).not.toBe(sig(scratch));
+    });
+
+    it("is stable while typing does not change the label", () => {
+      // The strip shows "SELECT · ORDERS" throughout — no repaint is owed.
+      expect(sig({ ...scratch, sql: "SELECT * FROM orders WHERE id = 1" })).toBe(sig(scratch));
+    });
   });
 
   it("does not alias distinct states when title/path contain spaces", () => {
