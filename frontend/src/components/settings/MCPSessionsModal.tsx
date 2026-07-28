@@ -39,7 +39,15 @@ interface Props {
 // Execution modes. Values must match internal/mcp.ExecutionMode* constants.
 const EXECUTION_MODES = [
   { value: "metadata", label: "Metadata Only", description: "Schema browsing and diagnostics only. No SQL execution." },
-  { value: "readonly", label: "Read-Only SQL", description: "Read-only SQL execution with EXPLAIN gate, LIMIT injection, and row cap." },
+  {
+    value: "readonly",
+    label: "Read-Only SQL",
+    // Named for what it does to your data, not for what it forbids outright:
+    // deploy_streamlit creates an object. Say so here — this dropdown is where
+    // the choice is actually made.
+    description:
+      "Read-only SQL execution with EXPLAIN gate, LIMIT injection, and row cap. Also lets the client deploy a local Streamlit app, which creates a STREAMLIT object — only when an export folder is configured.",
+  },
   { value: "explain_only", label: "Explain Only", description: "Returns the EXPLAIN verdict without executing. AI can check query safety but never sees data." },
 ];
 

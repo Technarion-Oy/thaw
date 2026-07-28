@@ -33,14 +33,20 @@ single chosen folder locally — never a full clone of the 30+ demos.
 - `Template{Name, Description}` — one deployable app folder.
 - `Catalog{Templates, Degraded, Note}` — the list result; `Degraded` signals the
   built-in fallback is being shown.
-- `RepoURL` — the source repo URL, reused by the IPC layer / UI attribution.
+- `Repo`, `RepoURL`, `License` — the `owner/name` slug, source URL, and SPDX
+  license of the upstream repo. Every attribution surface reads these rather than
+  restating the strings: the `NOTICE` written into a scaffolded folder, the UI
+  credit line, and the `source` block on the MCP `list_streamlit_templates` /
+  `create_streamlit_from_template` results.
 
 ## Gotchas
 
 - **Attribution is required** (Apache-2.0). The scaffolded folder always gets a
   `LICENSE` + `NOTICE`, and the picker UI shows a visible credit line — the repo
   won't appear in `THIRD_PARTY_NOTICES.md` (that is generated from Go module
-  deps), so the in-UI credit is the attribution surface.
+  deps), so the in-UI credit is the attribution surface. The MCP tools are a
+  second such surface and carry the same credit in their results (see
+  `internal/mcp/streamlit_tools.go`).
 - **Path safety**: `validTemplateName` rejects traversal/hidden/excluded names,
   and `safeJoin` rejects any tree entry that would escape `destDir`.
 - Base URLs (`githubAPIBase`, `rawBase`) are package vars so tests can point them
@@ -54,3 +60,8 @@ single chosen folder locally — never a full clone of the 30+ demos.
 Exposed via `internal/app/streamlit.go`: `App.ListStreamlitTemplates` and
 `App.CreateStreamlitFromTemplate(templateName, destDir)`. Neither needs a
 Snowflake connection — scaffolding is local; deployment is a separate step.
+
+The same two entry points are exposed to external AI clients as the MCP tools
+`list_streamlit_templates` and `create_streamlit_from_template`
+(`internal/mcp/streamlit_tools.go`); the scaffolder is workspace-gated there, so
+`destDir` must resolve inside the session's workspace root.

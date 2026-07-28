@@ -28,15 +28,22 @@ CREATE [OR REPLACE] STREAMLIT [IF NOT EXISTS] <fqn>
 
 ## Local-app deploy
 
-`DeployStreamlit(ctx, client, DeployStreamlitParams)` (`deploy.go`) stands a local
-app folder up as a `STREAMLIT` object: `CREATE TEMPORARY STAGE` → recursive upload
-via `stage.UploadDirToStage` → `CREATE [OR REPLACE] STREAMLIT … FROM @stage
-MAIN_FILE = …` via `BuildCreateStreamlitSql` → deferred `DROP STAGE`. A temporary
-stage suffices because Streamlit copies files once at creation time. It lives here
-(not in `internal/snowflake`) so it can reuse both `internal/stage` and the CREATE
-builder — `streamlit → stage → snowflake`, no import cycle. The `deployConfig`
-mapping (params + temp-stage location → `StreamlitConfig`) is unit-tested; live
-coverage is `internal/integration` `TestDeployStreamlit` (`-tags integration`).
+`DeployStreamlit(ctx, client, DeployStreamlitParams) (string, error)` (`deploy.go`)
+stands a local app folder up as a `STREAMLIT` object: `CREATE TEMPORARY STAGE` →
+recursive upload via `stage.UploadDirToStage` → `CREATE [OR REPLACE] STREAMLIT …
+FROM @stage MAIN_FILE = …` via `BuildCreateStreamlitSql` → deferred `DROP STAGE`.
+A temporary stage suffices because Streamlit copies files once at creation time.
+It lives here (not in `internal/snowflake`) so it can reuse both `internal/stage`
+and the CREATE builder — `streamlit → stage → snowflake`, no import cycle. The
+`deployConfig` mapping (params + temp-stage location → `StreamlitConfig`) is
+unit-tested; live coverage is `internal/integration` `TestDeployStreamlit`
+(`-tags integration`).
+
+The returned string is the `CREATE STREAMLIT` statement that was executed (empty
+if the deploy failed before it was built). The temp-stage name is generated
+inside the function, so a caller cannot reconstruct the statement — the MCP
+`deploy_streamlit` tool returns it to the AI client, which has no preview of the
+SQL the way the deploy modal does. `App.DeployStreamlit` discards it.
 
 - `DetectStreamlitMainFile(dir) (MainFileResult, error)` — inspects the **root**
   of a local app folder and picks the entrypoint, preferring `streamlit_app.py`
