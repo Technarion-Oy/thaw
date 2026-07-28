@@ -130,6 +130,8 @@ The server exposes 60 tools in the baseline metadata mode (no workspace, no emit
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
+`list_objects` covers every kind in the canonical `objectkind` registry — including `STREAMLIT`, which `Client.ListExtendedObjects` picks up from its own `SHOW STREAMLITS` — so no per-kind listing tool is needed. `get_ddl` accepts `STREAMLIT` in `allowedDDLKinds` (`GET_DDL('STREAMLIT', …)` takes a three-part name directly), so Streamlit apps need no dedicated DDL tool either.
+
 **Extended schema discovery tools** (always registered, `schema_tools.go`):
 
 | Tool | Description |

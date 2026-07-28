@@ -440,7 +440,7 @@ func TestAuthenticatedSSERoundTrip(t *testing.T) {
 // TestAllowedDDLKinds verifies the kind whitelist accepts standard Snowflake
 // object kinds and rejects unknown/malicious strings.
 func TestAllowedDDLKinds(t *testing.T) {
-	for _, kind := range []string{"TABLE", "VIEW", "FUNCTION", "PROCEDURE", "STAGE"} {
+	for _, kind := range []string{"TABLE", "VIEW", "FUNCTION", "PROCEDURE", "STAGE", "STREAMLIT"} {
 		if !allowedDDLKinds[kind] {
 			t.Errorf("expected %q to be allowed", kind)
 		}
