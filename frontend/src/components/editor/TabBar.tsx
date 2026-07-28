@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } fro
 import { Button, Modal, Tooltip, Input, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
-  FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined,
+  FileOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined,
   RobotOutlined, CaretDownOutlined, SearchOutlined, EditOutlined, CloseSquareOutlined,
   DoubleRightOutlined, SaveOutlined, ClearOutlined, SplitCellsOutlined, MergeCellsOutlined,
 } from "@ant-design/icons";
@@ -13,9 +13,9 @@ import { useQueryStore } from "../../store/queryStore";
 import { GetTabSessionID } from "../../../wailsjs/go/app/App";
 import { useConnectionStore } from "../../store/connectionStore";
 import { getEditorInstance } from "./editorRef";
+import { tabDisplayTitle } from "./tabTitle";
 
 const CLR_BORDER       = "var(--border)";
-const CLR_BG           = "var(--bg)";
 const CLR_BG_ACTIVE    = "var(--bg-raised)";
 const CLR_TEXT         = "var(--text-muted)";
 const CLR_TEXT_ACTIVE  = "var(--text)";
@@ -27,26 +27,39 @@ const CLR_ACCENT       = "var(--accent)";
 // environment on Node <21, which has no global navigator) doesn't throw at load.
 const isMac = typeof navigator !== "undefined" && /Macintosh/i.test(navigator.userAgent);
 
-// Icon for a tab, matching the tab-strip logic (diff → mcp → notebook → file → scratch).
+// Icon for a tab (diff → mcp → notebook → file). A plain scratch tab gets NO
+// icon: when every tab in the strip is a scratch query, an identical glyph on
+// each one carries no information and eats ~16px of a 220px cap. Drawing icons
+// only for the distinctive kinds is what makes those kinds visible. (#881)
 function tabIcon(tab: Tab, size = 11) {
   const style = { fontSize: size, flexShrink: 0 };
   if (tab.diff)       return <DiffOutlined style={style} />;
   if (tab.mcpOrigin)  return <RobotOutlined style={{ ...style, color: "var(--accent)" }} />;
   if (tab.kind === "notebook") return <ExperimentOutlined style={style} />;
   if (tab.path)       return <FileOutlined style={style} />;
-  return <CodeOutlined style={style} />;
-}
-
-// Title prefix matching the tab strip: orphan ↺ (warning) or dirty • (accent),
-// colored separately so the two states are distinguishable at a glance.
-function tabPrefix(tab: Tab) {
-  if (tab.orphaned) return <span style={{ color: "var(--warning)" }}>↺ </span>;
-  if (tab.path && tab.sql !== tab.savedSql) return <span style={{ color: "var(--accent)" }}>• </span>;
   return null;
 }
 
-// Signature of exactly the fields the tab strip renders (id/title/path/kind, the
-// three icon flags, and the dirty flag). TabBar subscribes to the joined signature
+// Dirty/orphan marker: orphan ↺ (warning) wins over dirty • (accent), colored
+// separately so the two states are distinguishable at a glance. Only file-backed
+// tabs can be dirty — a scratch tab has nowhere to save to.
+function tabMark(tab: Tab): { glyph: string; cls: string; title: string } | null {
+  if (tab.orphaned) return { glyph: "↺", cls: "qtab-mark-orphan", title: "Backing file is gone" };
+  if (tab.path && tab.sql !== tab.savedSql) return { glyph: "•", cls: "qtab-mark-dirty", title: "Unsaved changes" };
+  return null;
+}
+
+// Same marker as a leading title prefix, for the Active Files rows — a
+// full-width list has no layout-shift problem, so the marker stays where the
+// eye scans for it.
+function tabPrefix(tab: Tab) {
+  const mark = tabMark(tab);
+  return mark ? <span className={mark.cls}>{mark.glyph} </span> : null;
+}
+
+// Signature of exactly the fields the tab strip renders (id/title/derived
+// title/path/kind, the three icon flags, the dirty flag and the preview flag).
+// TabBar subscribes to the joined signature
 // of all tabs so per-keystroke SQL edits — which change none of these once the
 // dirty flag has flipped — don't re-render the strip. (#762)
 //
@@ -57,7 +70,7 @@ function tabPrefix(tab: Tab) {
 // file tabs (so several files from the same directory are distinguishable),
 // otherwise the tab title. (issue #829)
 function tabFullLabel(t: Tab): string {
-  return t.path ?? t.title;
+  return t.path ?? tabDisplayTitle(t);
 }
 
 // A single-line, ellipsis-truncated label that shows an AntD Tooltip with the
@@ -103,7 +116,13 @@ function OverflowTooltip({
 
 export function tabStripSignature(t: Tab): string {
   return [
-    t.id, t.title, t.path ?? "", t.kind ?? "",
+    t.id, t.title,
+    // The rendered title, which for a still-unnamed scratch tab is derived from
+    // its SQL (#881). This is the one signature field that can change while
+    // typing — but only when the *derived* label changes (a handful of times
+    // while the first statement is written), not once per keystroke.
+    tabDisplayTitle(t),
+    t.path ?? "", t.kind ?? "",
     `${t.diff ? 1 : 0}${t.mcpOrigin ? 1 : 0}${t.orphaned ? 1 : 0}${t.sql !== t.savedSql ? 1 : 0}${t.preview ? 1 : 0}`,
   ].join("\u0000");
 }
@@ -145,9 +164,15 @@ export default function TabBar() {
   // Files dropdown can scroll its (possibly overflowed) tab into view.
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Track which tab the pointer is hovering over so the close button
-  // only appears on hover (less cluttered when many tabs are open).
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // Hover styling (tab tint, close-button reveal, "+"/caret tint) is pure CSS —
+  // see `.qtab:hover` in global.css. It used to be a `hoveredId` React state,
+  // which re-rendered the whole strip on every pointer move across it, undoing
+  // the very thing #762's signature work bought. (#881)
+
+  // Which edges of the scroll region have tabs hidden past them, so the strip
+  // can show that it continues instead of just ending at the panel edge.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState({ left: false, right: false });
 
   // Id of the strip tab whose title span is currently overflowing its 220px cap,
   // measured on hover. When set, that tab's tooltip (which otherwise shows only the
@@ -162,12 +187,15 @@ export default function TabBar() {
   // re-running the rename — and lets Escape cancel without committing.
   const renameDoneRef = useRef(false);
   const startRename = (tab: Tab) => {
-    // Orphaned tabs (lost their backing file, ↺ prefix) are pending a save/discard
+    // Orphaned tabs (lost their backing file, ↺ marker) are pending a save/discard
     // decision, not a free-form scratch tab — don't allow renaming them.
     if (tab.path || tab.diff || tab.orphaned) return;
     renameDoneRef.current = false;
     setRenamingId(tab.id);
-    setRenameValue(tab.title);
+    // Seed with what the strip actually shows — which for an unnamed scratch tab
+    // is the derived title, not "SQL 3". The input selects it on focus, so the
+    // common case (type a real name) is unaffected.
+    setRenameValue(tabDisplayTitle(tab));
   };
   const commitRename = () => {
     if (renamingId && !renameDoneRef.current) {
@@ -188,6 +216,44 @@ export default function TabBar() {
     startRename(tab);
     requestAnimationFrame(() =>
       tabRefs.current[tab.id]?.scrollIntoView({ inline: "nearest", block: "nearest" }));
+  };
+
+  // Track the clipped edges. Scroll position, container width and the tab set
+  // are the only three things that can move them — pointer movement can't, so
+  // this never runs on the hover path.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const next = { left: el.scrollLeft > 1, right: el.scrollLeft < maxScroll - 1 };
+      setClipped((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
+  }, [tabsSig]);
+
+  // Arrow-key navigation over the tablist (WAI-ARIA tabs pattern with automatic
+  // activation: moving focus activates the tab, so focus and content never
+  // disagree). Bound on the tablist, which holds only tabs — the "+" button is a
+  // sibling, so Arrow keys there don't hijack anything. The rename input stops
+  // its own keydowns from bubbling, so renaming is unaffected.
+  const onTabListKeyDown = (e: React.KeyboardEvent) => {
+    if (tabs.length === 0) return;
+    const idx = Math.max(0, tabs.findIndex((t) => t.id === activeTabId));
+    const next =
+      e.key === "ArrowRight" ? (idx + 1) % tabs.length
+      : e.key === "ArrowLeft" ? (idx - 1 + tabs.length) % tabs.length
+      : e.key === "Home" ? 0
+      : e.key === "End" ? tabs.length - 1
+      : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    activateTab(tabs[next].id);
+    tabRefs.current[tabs[next].id]?.focus(); // also scrolls it into view
   };
 
   // Active Files dropdown — searchable list of all open tabs (issue #468).
@@ -288,6 +354,10 @@ export default function TabBar() {
   // buildTabMenuItems.
   const savedTabs = tabs.filter((t) => t.sql === t.savedSql);
 
+  // Whether the strip is hiding tabs in either direction — drives the caret's
+  // count badge and its tooltip.
+  const anyClipped = clipped.left || clipped.right;
+
   // Right-click tab menu — shared visual language with the Active Files dropdown
   // and (as far as Monaco's API allows) the editor's own context menu: icons,
   // dividers, danger styling on destructive actions, keybinding hints via `extra`.
@@ -336,7 +406,7 @@ export default function TabBar() {
         icon: <SplitCellsOutlined />,
         label: "Split with",
         disabled: splitCandidates.length === 0,
-        children: splitCandidates.map((t) => ({ key: `split-${t.id}`, label: t.title, onClick: () => setSplitTab(t.id) })),
+        children: splitCandidates.map((t) => ({ key: `split-${t.id}`, label: tabDisplayTitle(t), onClick: () => setSplitTab(t.id) })),
       });
     }
 
@@ -348,26 +418,21 @@ export default function TabBar() {
       style={{
         display: "flex",
         alignItems: "stretch",
-        background: CLR_BG,
+        background: "var(--bg)",
         borderBottom: `1px solid ${CLR_BORDER}`,
         flexShrink: 0,
       }}
     >
       {/* Scrolling region: tabs + the "+" button. The Active Files arrow lives
-          outside this so it stays pinned when tabs overflow the bar. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "stretch",
-          overflowX: "auto",
-          flex: 1,
-          minWidth: 0,
-          scrollbarWidth: "none",
-        }}
-      >
+          outside this so it stays pinned when tabs overflow the bar. The
+          wrapper is the positioning context for the edge fades. */}
+      <div style={{ position: "relative", display: "flex", flex: 1, minWidth: 0 }}>
+      <div ref={scrollRef} className="qtab-scroll">
+      <div className="qtab-list" role="tablist" aria-label="Open editor tabs" onKeyDown={onTabListKeyDown}>
       {tabs.map((tab) => {
         const active  = tab.id === activeTabId;
-        const hovered = tab.id === hoveredId;
+        const mark    = tabMark(tab);
+        const title   = tabDisplayTitle(tab);
 
         const isDropBefore = dropTarget?.id === tab.id && dropTarget.before;
         const isDropAfter  = dropTarget?.id === tab.id && !dropTarget.before;
@@ -399,14 +464,19 @@ export default function TabBar() {
           >
           <div
             ref={(el) => { tabRefs.current[tab.id] = el; }}
+            className={`qtab${active ? " qtab-active" : ""}${mark ? " qtab-marked" : ""}`}
+            role="tab"
+            aria-selected={active}
+            // Roving tabindex: one stop for the whole strip, arrows move within it.
+            tabIndex={active ? 0 : -1}
             draggable={renamingId !== tab.id}
             onClick={() => activateTab(tab.id)}
             // Double-click a preview tab (italic) to pin it, mirroring VS Code and the
             // file browser's double-click-to-promote. Non-preview tabs are unaffected;
             // renameable (non-file) tabs stop the span's own dbl-click before it bubbles.
             onDoubleClick={() => { if (tab.preview) promoteTab(tab.id); }}
-            onMouseEnter={() => { setHoveredId(tab.id); fetchTab(tab.id); }}
-            onMouseLeave={() => setHoveredId(null)}
+            // Hover is styled in CSS; this only warms the session-ID cache.
+            onMouseEnter={() => fetchTab(tab.id)}
             onDragStart={(e) => {
               draggingId.current = tab.id;
               e.dataTransfer.effectAllowed = "move";
@@ -428,30 +498,17 @@ export default function TabBar() {
               draggingId.current = null;
               setDropTarget(null);
             }}
-            style={{ position: "relative",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "0 10px",
-              height: 32,
-              cursor: "pointer",
-              borderRight: `1px solid ${CLR_BORDER}`,
-              borderBottom: active ? `2px solid ${CLR_ACCENT}` : "2px solid transparent",
-              background: active ? CLR_BG_ACTIVE : hovered ? "color-mix(in srgb, var(--text) 5%, transparent)" : CLR_BG,
-              color: active ? CLR_TEXT_ACTIVE : CLR_TEXT,
-              fontSize: 12,
-              userSelect: "none",
-              flexShrink: 0,
-              maxWidth: 220,
-              boxSizing: "border-box",
-            }}
           >
             {tabIcon(tab)}
 
             {renamingId === tab.id ? (
               <input
                 autoFocus
+                className="qtab-rename"
                 value={renameValue}
+                // The seed is the *rendered* title (possibly derived from the SQL),
+                // so select it — typing replaces, editing refines.
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
                 onBlur={commitRename}
@@ -460,20 +517,10 @@ export default function TabBar() {
                   if (e.key === "Enter") commitRename();
                   else if (e.key === "Escape") cancelRename();
                 }}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  background: "var(--bg)",
-                  color: CLR_TEXT_ACTIVE,
-                  border: `1px solid ${CLR_ACCENT}`,
-                  borderRadius: 3,
-                  fontSize: 12,
-                  padding: "0 4px",
-                  outline: "none",
-                }}
               />
             ) : (
               <span
+                className={`qtab-title${tab.preview ? " qtab-preview" : ""}`}
                 // File/diff/orphan tabs aren't renameable — let their double-click
                 // bubble to the tab div's promote handler. Only renameable (non-file)
                 // tabs consume it to start an inline rename.
@@ -484,38 +531,34 @@ export default function TabBar() {
                 }}
                 onMouseEnter={(e) =>
                   setTruncatedTabId(e.currentTarget.scrollWidth > e.currentTarget.clientWidth ? tab.id : null)}
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  fontStyle: tab.preview ? "italic" : undefined,
-                  flex: 1,
-                }}>
-                {tabPrefix(tab)}{tab.title}
+              >
+                {title}
               </span>
             )}
 
-            {/* Close button — always reserve space so layout doesn't shift,
-                but only show the icon on hover or when this is the active tab
-                (and there is more than one tab). */}
-            <span
-              style={{
-                width: 16,
-                height: 16,
-                flexShrink: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+            {/* The reserved trailing slot: dirty/orphan marker at rest, ✕ on
+                hover (VS Code's convention). One 16px slot for both means a tab
+                going dirty shifts nothing, and the marker survives while the
+                pointer is elsewhere in the strip. Which of the two shows is
+                decided in CSS — see `.qtab-slot` in global.css. */}
+            <button
+              type="button"
+              className="qtab-slot"
+              aria-label={`Close ${title}`}
+              // Not a tab stop: the tablist owns arrow-key navigation, and ⌘W
+              // closes the focused tab. A stop per tab would double the strip's
+              // Tab-key cost for no gain.
+              tabIndex={-1}
               onClick={(e) => {
                 e.stopPropagation();
                 window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: tab.id } }));
               }}
             >
-              {(active || hovered) && (
-                <CloseOutlined style={{ fontSize: 10, opacity: 0.7 }} />
-              )}
-            </span>
+              {mark && <span className={`qtab-mark ${mark.cls}`} title={mark.title}>{mark.glyph}</span>}
+              {/* Wrapper span, not a className on the icon: antd's own `.anticon`
+                  display rule is injected after this stylesheet and would win. */}
+              <span className="qtab-close"><CloseOutlined style={{ fontSize: 10 }} /></span>
+            </button>
 
             {/* Drop indicators */}
             {isDropBefore && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
@@ -526,47 +569,45 @@ export default function TabBar() {
         );
       })}
 
-      {/* New scratch tab */}
-      <div
-        onClick={openScratch}
-        onMouseEnter={() => setHoveredId("__plus__")}
-        onMouseLeave={() => setHoveredId(null)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          cursor: "pointer",
-          color: CLR_TEXT,
-          fontSize: 12,
-          flexShrink: 0,
-          background: hoveredId === "__plus__" ? "color-mix(in srgb, var(--text) 5%, transparent)" : "transparent",
-        }}
-      >
-        <PlusOutlined style={{ fontSize: 11 }} />
       </div>
+
+      {/* New scratch tab — a sibling of the tablist, not a member of it. */}
+      <Tooltip title="New query tab" mouseEnterDelay={0.6} placement="bottom">
+        <button type="button" className="qtab-btn" aria-label="New query tab" onClick={openScratch}>
+          <PlusOutlined style={{ fontSize: 11 }} />
+        </button>
+      </Tooltip>
+      </div>
+
+      {/* Overflow cues: a fade on whichever edge still has tabs behind it. The
+          scrollbar is hidden, so without these the strip just stops mid-tab
+          with nothing to say that it continues. */}
+      {clipped.left  && <div className="qtab-fade qtab-fade-left" />}
+      {clipped.right && <div className="qtab-fade qtab-fade-right" />}
       </div>
 
       {/* Active Files dropdown — searchable list of every open tab (issue #468).
           Pinned to the right, outside the scroll region, so it's always visible. */}
       <div ref={activeFilesBtnRef} style={{ display: "flex", flexShrink: 0, borderLeft: `1px solid ${CLR_BORDER}` }}>
-        <Tooltip title="Active files (⌘⇧E)" mouseEnterDelay={0.6} placement="bottom">
-          <div
+        <Tooltip
+          title={anyClipped ? `Active files — ${tabs.length} open, some hidden (⌘⇧E)` : "Active files (⌘⇧E)"}
+          mouseEnterDelay={0.6}
+          placement="bottom"
+        >
+          <button
+            type="button"
+            className={`qtab-btn${activeFilesOpen ? " open" : ""}`}
+            style={{ height: "100%", fontSize: 11 }}
+            aria-label="Active files"
+            aria-haspopup="menu"
+            aria-expanded={activeFilesOpen}
             onClick={openActiveFiles}
-            onMouseEnter={() => setHoveredId("__active__")}
-            onMouseLeave={() => setHoveredId(null)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              height: "100%",
-              padding: "0 10px",
-              cursor: "pointer",
-              color: activeFilesOpen ? CLR_TEXT_ACTIVE : CLR_TEXT,
-              fontSize: 11,
-              background: (activeFilesOpen || hoveredId === "__active__") ? "color-mix(in srgb, var(--text) 5%, transparent)" : "transparent",
-            }}
           >
             <CaretDownOutlined />
-          </div>
+            {/* Tab count, but only while tabs are clipped — this dropdown is the
+                escape hatch for the ones the strip can't show. */}
+            {anyClipped && <span className="qtab-count">{tabs.length}</span>}
+          </button>
         </Tooltip>
 
         {activeFilesOpen && (
@@ -598,7 +639,9 @@ export default function TabBar() {
             <div style={{ maxHeight: 360, overflowY: "auto", padding: "2px 0" }}>
               {(() => {
                 const f = activeFilesFilter.trim().toLowerCase();
-                const matches = tabs.filter((t) => !f || t.title.toLowerCase().includes(f));
+                // Filter on the rendered title — matching a "SQL 3" the user
+                // can't see anywhere would be baffling.
+                const matches = tabs.filter((t) => !f || tabDisplayTitle(t).toLowerCase().includes(f));
                 if (matches.length === 0) {
                   return <div style={{ padding: "8px 12px", color: "var(--text-faint)", fontSize: 12 }}>No matching tabs</div>;
                 }
@@ -624,12 +667,14 @@ export default function TabBar() {
                       color: t.id === activeTabId ? CLR_TEXT_ACTIVE : undefined,
                     }}
                   >
-                    {tabIcon(t)}
+                    {/* Fixed-width icon column: scratch tabs draw no icon (#881),
+                        and rows still have to line up. */}
+                    <span className="qtab-panel-icon">{tabIcon(t)}</span>
                     {/* Tooltip with the full title/path, shown only when the row
                         is truncated. overlayStyle lifts the portal above the panel
                         (z-index 9999), same reason the context menu needs it. (#829) */}
                     <OverflowTooltip fullText={tabFullLabel(t)} overlayStyle={{ zIndex: 10000 }}>
-                      <span style={{ fontStyle: t.preview ? "italic" : undefined }}>{tabPrefix(t)}{t.title}</span>
+                      <span style={{ fontStyle: t.preview ? "italic" : undefined }}>{tabPrefix(t)}{tabDisplayTitle(t)}</span>
                     </OverflowTooltip>
                     {/* Close button — revealed on row hover (see .ctx-item-close).
                         Routes through the same request-close-tab flow as the strip

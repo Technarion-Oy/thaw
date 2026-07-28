@@ -55,6 +55,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/editor/CrossTabSearch.tsx",
         "frontend/src/components/editor/SqlEditor.tsx",
         "frontend/src/components/editor/sqlEditorUtils.ts",
+        "frontend/src/components/editor/tabTitle.ts",
         "frontend/src/components/export/ExcelExportModal.tsx",
         "frontend/src/components/results/CellDetailPanel.tsx",
         "frontend/src/components/results/ColumnFilterDropdown.tsx",

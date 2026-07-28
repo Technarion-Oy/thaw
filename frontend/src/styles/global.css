@@ -1250,3 +1250,176 @@ body,
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ── Query tab strip (#881) ────────────────────────────────────────────────
+   Goal: five open queries should look like five different things, and a state
+   change (dirty, hover) must never nudge the title sideways.
+
+   These rules are CSS rather than inline styles for two reasons: hover is a
+   :hover rule instead of a React `hoveredId` state, so moving the pointer
+   across the strip costs zero renders (the perf property #762 established); and
+   the dirty-dot/close swap in the reserved slot is expressible in one place.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Scroll region. The scrollbar is hidden (the fades below are the overflow
+   cue instead — a 10px bar under a 32px strip is mostly noise). */
+.qtab-scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.qtab-scroll::-webkit-scrollbar { display: none; }
+
+/* The tablist itself holds only tabs (the "+" button is a sibling), so
+   role="tablist" stays honest and arrow-key navigation has one clear owner. */
+.qtab-list {
+  display: flex;
+  align-items: stretch;
+}
+
+/* Edge fades, mounted only for the direction that actually has hidden tabs, so
+   the strip shows *that* it continues rather than just ending at the panel
+   edge. pointer-events:none — they sit over the tabs. */
+.qtab-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+}
+.qtab-fade-left  { left: 0;  background: linear-gradient(to right, var(--bg), transparent); }
+.qtab-fade-right { right: 0; background: linear-gradient(to left,  var(--bg), transparent); }
+
+.qtab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 12px;
+  user-select: none;
+  cursor: pointer;
+}
+.qtab:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.qtab-active {
+  background: var(--bg-raised);
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+/* Separators: a vertically inset hairline between neighbours, not a full-height
+   border on every tab. A full-height grid of equal cells reads as a table
+   header and competes with the active tab's underline + raised background —
+   which is the one distinction in the strip that has to win. The hairline is
+   dropped around the active and hovered tabs so their surfaces stay clean. */
+.qtab + .qtab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--border);
+}
+.qtab-active::before,
+.qtab-active + .qtab::before,
+.qtab:hover::before,
+.qtab:hover + .qtab::before { display: none; }
+
+.qtab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qtab-preview { font-style: italic; }
+
+/* Rename input, sized to sit inside the tab without changing its height. */
+.qtab-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+/* The one reserved 16px slot at the tab's trailing edge, holding EITHER the
+   dirty/orphan marker or the close button — VS Code's convention. Both live in
+   the same slot, so a tab going dirty adds no width and shifts no text (the
+   marker used to be a "• " prefix on the title), and dirty state stays readable
+   while the pointer is somewhere else in the strip. */
+.qtab-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.qtab-close { display: none; opacity: 0.7; }
+.qtab-close:hover { opacity: 1; }
+.qtab-mark { display: block; font-size: 11px; line-height: 1; }
+/* Hovering the tab always offers the ✕ — including over a marker, which is how
+   you close a dirty tab. */
+.qtab:hover .qtab-mark { display: none; }
+.qtab:hover .qtab-close,
+.qtab-slot:focus-visible .qtab-close { display: block; }
+/* The active tab keeps its ✕ at rest (quick exit from the tab you are in) —
+   unless it has a marker to show instead. */
+.qtab-active:not(.qtab-marked) .qtab-close { display: block; }
+
+.qtab-mark-dirty  { color: var(--accent); }
+.qtab-mark-orphan { color: var(--warning); }
+
+/* Strip-level buttons: "+" and the Active Files caret. */
+.qtab-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.qtab-btn:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.qtab-btn.open {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+}
+/* Tab count on the caret, shown only while tabs are clipped — the dropdown is
+   the escape hatch for the ones you cannot see. */
+.qtab-count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Icon column in the Active Files rows. Scratch tabs draw no icon (see
+   `tabIcon`), so the slot keeps every row's title on the same left edge. */
+.qtab-panel-icon {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 12px;
+}
