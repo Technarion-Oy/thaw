@@ -23,9 +23,17 @@ const (
 	repoRef   = "main"
 	userAgent = "Thaw-StreamlitTemplates"
 
+	// Repo is the "owner/name" slug of the upstream template repository.
+	Repo = repoOwner + "/" + repoName
+
 	// RepoURL is the human-facing source URL, surfaced in the UI attribution line
 	// and the scaffolded NOTICE file.
-	RepoURL = "https://github.com/" + repoOwner + "/" + repoName
+	RepoURL = "https://github.com/" + Repo
+
+	// License is the SPDX identifier of the upstream repository's license. Every
+	// surface that offers these templates — the picker, the scaffolded NOTICE, the
+	// MCP list_streamlit_templates result — must carry it.
+	License = "Apache-2.0"
 
 	// maxResponseBytes caps a single HTTP response body (tree JSON or a raw file),
 	// a guard against a pathologically large download.

@@ -36,12 +36,17 @@ func (a *App) DetectStreamlitMainFile(dir string) (streamlit.MainFileResult, err
 // The upload uses PUT. PUT is always available in Thaw — the former PUT feature
 // flag was removed in feature-flags v18 (issue #567), so there is no flag to gate
 // on here.
+//
+// The executed CREATE STREAMLIT statement returned by streamlit.DeployStreamlit
+// is dropped here: the modal already previews the statement it asked for. The MCP
+// deploy_streamlit tool keeps it, where the AI client has no such preview.
 func (a *App) DeployStreamlit(params streamlit.DeployStreamlitParams) error {
 	client := a.currentClient()
 	if client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return streamlit.DeployStreamlit(a.fctx(FeatureObjectEditor), client, params)
+	_, err := streamlit.DeployStreamlit(a.fctx(FeatureObjectEditor), client, params)
+	return err
 }
 
 // ListStreamlitTemplates fetches the catalog of Streamlit app templates from the

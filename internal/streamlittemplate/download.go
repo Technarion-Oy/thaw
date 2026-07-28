@@ -103,8 +103,8 @@ func writeLicenseAndNotice(ctx context.Context, name, destDir string) error {
 	}
 
 	notice := fmt.Sprintf(
-		"Based on \"%s\" from %s/%s (Apache-2.0).\nSource: %s\n",
-		name, repoOwner, repoName, RepoURL)
+		"Based on \"%s\" from %s (%s).\nSource: %s\n",
+		name, Repo, License, RepoURL)
 	if err := os.WriteFile(filepath.Join(destDir, "NOTICE"), []byte(notice), 0o644); err != nil {
 		return fmt.Errorf("write NOTICE: %w", err)
 	}

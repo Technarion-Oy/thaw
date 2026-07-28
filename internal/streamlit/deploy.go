@@ -41,13 +41,18 @@ type DeployStreamlitParams struct {
 // A temporary stage is sufficient because CREATE STREAMLIT copies the files once
 // at creation time (modern FROM <stage> MAIN_FILE grammar), so the source need
 // not persist afterwards. (Mirrors snowflake.Client.DeployNotebook.)
-func DeployStreamlit(ctx context.Context, client *snowflake.Client, params DeployStreamlitParams) error {
+//
+// The executed CREATE STREAMLIT statement is returned so callers can show exactly
+// what ran — the MCP deploy_streamlit tool surfaces it to the AI client, since a
+// deploy is the one MCP action that mutates Snowflake without a human reading the
+// SQL first. It is empty when the deploy failed before the statement was built.
+func DeployStreamlit(ctx context.Context, client *snowflake.Client, params DeployStreamlitParams) (string, error) {
 	if strings.TrimSpace(params.LocalDir) == "" {
-		return fmt.Errorf("LocalDir must be provided")
+		return "", fmt.Errorf("LocalDir must be provided")
 	}
 	mainFile := filepath.ToSlash(strings.TrimSpace(params.MainFile))
 	if mainFile == "" {
-		return fmt.Errorf("MainFile must be provided")
+		return "", fmt.Errorf("MainFile must be provided")
 	}
 
 	// Create a temporary stage in the target schema.
@@ -56,24 +61,24 @@ func DeployStreamlit(ctx context.Context, client *snowflake.Client, params Deplo
 	stageAt := "@" + stageRef
 
 	if _, err := client.Execute(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
-		return fmt.Errorf("create streamlit stage: %w", err)
+		return "", fmt.Errorf("create streamlit stage: %w", err)
 	}
 	defer client.Execute(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
 	// Recursively upload the app folder to the stage, preserving relative paths.
 	if err := stage.UploadDirToStage(ctx, client, params.LocalDir, stageAt, true); err != nil {
-		return fmt.Errorf("upload streamlit app to stage: %w", err)
+		return "", fmt.Errorf("upload streamlit app to stage: %w", err)
 	}
 
 	// Build the CREATE STREAMLIT statement against the temp stage and run it.
 	sql, err := BuildCreateStreamlitSql(params.Database, params.Schema, deployConfig(stageAt, mainFile, params))
 	if err != nil {
-		return fmt.Errorf("build create streamlit: %w", err)
+		return "", fmt.Errorf("build create streamlit: %w", err)
 	}
 	if _, err := client.Execute(ctx, sql); err != nil {
-		return fmt.Errorf("create streamlit: %w", err)
+		return sql, fmt.Errorf("create streamlit: %w", err)
 	}
-	return nil
+	return sql, nil
 }
 
 // deployConfig maps the deploy params and the (already-created) temp stage

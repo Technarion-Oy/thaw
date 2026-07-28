@@ -78,8 +78,12 @@ func TestDeployStreamlit(t *testing.T) {
 
 	deployCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	if err := streamlit.DeployStreamlit(deployCtx, client, params); err != nil {
+	stmt, err := streamlit.DeployStreamlit(deployCtx, client, params)
+	if err != nil {
 		t.Fatalf("DeployStreamlit: %v", err)
+	}
+	if !strings.Contains(stmt, "CREATE STREAMLIT") {
+		t.Errorf("expected the executed statement to be returned, got %q", stmt)
 	}
 
 	fqn := fmt.Sprintf(`"%s"."PUBLIC"."%s"`, dbName, appName)
@@ -93,8 +97,12 @@ func TestDeployStreamlit(t *testing.T) {
 	params.OrReplace = true
 	redeployCtx, cancel2 := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel2()
-	if err := streamlit.DeployStreamlit(redeployCtx, client, params); err != nil {
+	stmt, err = streamlit.DeployStreamlit(redeployCtx, client, params)
+	if err != nil {
 		t.Fatalf("DeployStreamlit (redeploy): %v", err)
+	}
+	if !strings.Contains(stmt, "CREATE OR REPLACE STREAMLIT") {
+		t.Errorf("expected the redeploy statement to use OR REPLACE, got %q", stmt)
 	}
 	assertStreamlitMainFile(t, client, fqn, "streamlit_app.py")
 }
