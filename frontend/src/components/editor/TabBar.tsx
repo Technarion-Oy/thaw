@@ -69,8 +69,10 @@ function tabPrefix(tab: Tab) {
 // Full label to show in a truncation tooltip: the backing file's full path for
 // file tabs (so several files from the same directory are distinguishable),
 // otherwise the tab title. (issue #829)
-function tabFullLabel(t: Tab): string {
-  return t.path ?? tabDisplayTitle(t);
+// `display` lets a caller that already computed the rendered title (the strip
+// does, once per tab) pass it in rather than re-running the derivation.
+function tabFullLabel(t: Tab, display = tabDisplayTitle(t)): string {
+  return t.path ?? display;
 }
 
 // A single-line, ellipsis-truncated label that shows an AntD Tooltip with the
@@ -449,7 +451,7 @@ export default function TabBar() {
         const tooltipText: ReactNode =
           showFullTitle || sessionLine ? (
             <>
-              {showFullTitle && <div style={{ fontWeight: 600 }}>{tabFullLabel(tab)}</div>}
+              {showFullTitle && <div style={{ fontWeight: 600 }}>{tabFullLabel(tab, title)}</div>}
               {sessionLine && <div>{sessionLine}</div>}
             </>
           ) : undefined;
@@ -639,13 +641,17 @@ export default function TabBar() {
             <div style={{ maxHeight: 360, overflowY: "auto", padding: "2px 0" }}>
               {(() => {
                 const f = activeFilesFilter.trim().toLowerCase();
-                // Filter on the rendered title — matching a "SQL 3" the user
-                // can't see anywhere would be baffling.
-                const matches = tabs.filter((t) => !f || tabDisplayTitle(t).toLowerCase().includes(f));
+                // Rendered title per tab, computed once and used for the filter,
+                // the row label and the truncation tooltip. Filtering on the
+                // rendered title matters: matching a "SQL 3" the user can't see
+                // anywhere would be baffling.
+                const matches = tabs
+                  .map((t) => ({ t, title: tabDisplayTitle(t) }))
+                  .filter(({ title }) => !f || title.toLowerCase().includes(f));
                 if (matches.length === 0) {
                   return <div style={{ padding: "8px 12px", color: "var(--text-faint)", fontSize: 12 }}>No matching tabs</div>;
                 }
-                return matches.map((t) => (
+                return matches.map(({ t, title }) => (
                   <Dropdown
                     key={t.id}
                     trigger={["contextMenu"]}
@@ -673,8 +679,8 @@ export default function TabBar() {
                     {/* Tooltip with the full title/path, shown only when the row
                         is truncated. overlayStyle lifts the portal above the panel
                         (z-index 9999), same reason the context menu needs it. (#829) */}
-                    <OverflowTooltip fullText={tabFullLabel(t)} overlayStyle={{ zIndex: 10000 }}>
-                      <span style={{ fontStyle: t.preview ? "italic" : undefined }}>{tabPrefix(t)}{tabDisplayTitle(t)}</span>
+                    <OverflowTooltip fullText={tabFullLabel(t, title)} overlayStyle={{ zIndex: 10000 }}>
+                      <span style={{ fontStyle: t.preview ? "italic" : undefined }}>{tabPrefix(t)}{title}</span>
                     </OverflowTooltip>
                     {/* Close button — revealed on row hover (see .ctx-item-close).
                         Routes through the same request-close-tab flow as the strip

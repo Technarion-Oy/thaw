@@ -1316,6 +1316,12 @@ body,
   border-bottom-color: var(--accent);
   color: var(--text);
 }
+/* Active beats hover. `.qtab:hover` is (0,2,0) against `.qtab-active`'s (0,1,0),
+   so without this the raised surface — half of what marks the active tab, the
+   other half being the underline — would be replaced by the generic hover tint
+   whenever the pointer crossed it. The pre-CSS inline styles had this priority
+   built into their ternary; the port has to say it out loud. */
+.qtab-active:hover { background: var(--bg-raised); }
 
 /* Separators: a vertically inset hairline between neighbours, not a full-height
    border on every tab. A full-height grid of equal cells reads as a table
@@ -1381,8 +1387,7 @@ body,
 /* Hovering the tab always offers the ✕ — including over a marker, which is how
    you close a dirty tab. */
 .qtab:hover .qtab-mark { display: none; }
-.qtab:hover .qtab-close,
-.qtab-slot:focus-visible .qtab-close { display: block; }
+.qtab:hover .qtab-close { display: block; }
 /* The active tab keeps its ✕ at rest (quick exit from the tab you are in) —
    unless it has a marker to show instead. */
 .qtab-active:not(.qtab-marked) .qtab-close { display: block; }
