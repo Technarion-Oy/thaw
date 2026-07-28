@@ -661,6 +661,62 @@ func TestParseArgSig(t *testing.T) {
 	}
 }
 
+func TestParseArgSigFull(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"()", "noargs"},
+		{"(  )", "noargs"},
+		{"(X FLOAT)", "FLOAT"},
+		{"(X FLOAT, Y VARCHAR)", "FLOAT_VARCHAR"},
+		// Size qualifiers kept — the whole point of this variant.
+		{"(X VARCHAR(16))", "VARCHAR_16"},
+		{"(X VARCHAR(256))", "VARCHAR_256"},
+		{"(X NUMBER(38,0))", "NUMBER_38_0"},
+		{"(A NUMBER(18,2), B VARCHAR(256))", "NUMBER_18_2_VARCHAR_256"},
+		// Positional params (type only, no name).
+		{"(VARCHAR(16))", "VARCHAR_16"},
+		// Underscores inside a type name survive; only runs are collapsed.
+		{"(X TIMESTAMP_NTZ)", "TIMESTAMP_NTZ"},
+		{"(X TIMESTAMP_LTZ(9))", "TIMESTAMP_LTZ_9"},
+		// No opening paren / unclosed paren → empty, same as parseArgSig.
+		{"FLOAT", ""},
+		{"", ""},
+		{"(FLOAT", ""},
+		// DEFAULT keyword after the type — only the type is captured.
+		{"(X VARCHAR(256) DEFAULT 'hello')", "VARCHAR_256"},
+		// Trailing content after the closing paren is ignored.
+		{"(X VARCHAR(16)) RETURNS FLOAT AS $$ x $$", "VARCHAR_16"},
+		// Nested type argument lists flatten rather than being stripped, but the
+		// type token still ends at the first space (shared with parseArgSig), so
+		// "VECTOR(FLOAT, 64)" contributes only up to that space. Two VECTOR
+		// overloads of different width therefore still collide and fall through
+		// to planFiles' deterministic numeric suffix.
+		{"(A VECTOR(FLOAT, 64))", "VECTOR_FLOAT"},
+		{"(A VECTOR(FLOAT,64))", "VECTOR_FLOAT_64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := parseArgSigFull(tt.input); got != tt.want {
+				t.Errorf("parseArgSigFull(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// Overloads that parseArgSig cannot tell apart must be distinct under
+// parseArgSigFull — that is what makes OverloadNamingSignature useful.
+func TestParseArgSigFull_SeparatesSizeOnlyOverloads(t *testing.T) {
+	a, b := "(X VARCHAR(16))", "(X VARCHAR(256))"
+	if parseArgSig(a) != parseArgSig(b) {
+		t.Fatalf("precondition: parseArgSig should collide, got %q vs %q", parseArgSig(a), parseArgSig(b))
+	}
+	if parseArgSigFull(a) == parseArgSigFull(b) {
+		t.Errorf("parseArgSigFull collided: both %q", parseArgSigFull(a))
+	}
+}
+
 // ─── sanitize ────────────────────────────────────────────────────────────────
 
 func TestSanitize(t *testing.T) {
@@ -970,6 +1026,7 @@ func TestFilePathFor(t *testing.T) {
 		obj      Object
 		template string
 		database string
+		naming   OverloadNaming // zero value = DefaultOverloadNaming
 		want     string
 	}{
 		// DATABASE and SCHEMA always use fixed paths regardless of template.
@@ -1182,13 +1239,63 @@ func TestFilePathFor(t *testing.T) {
 			database: "DB",
 			want:     "SEQ.sql",
 		},
+
+		// ── overload naming strategies ──────────────────────────────────────
+		{
+			name:     "argtypes strategy drops size qualifiers",
+			obj:      Object{Kind: KindFunction, Schema: "SCH", Name: "F", ArgSig: "VARCHAR", ArgSigFull: "VARCHAR_256"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNamingArgTypes,
+			want:     fp("DB", "SCH", "functions", "F__VARCHAR.sql"),
+		},
+		{
+			name:     "signature strategy keeps size qualifiers",
+			obj:      Object{Kind: KindFunction, Schema: "SCH", Name: "F", ArgSig: "VARCHAR", ArgSigFull: "VARCHAR_256"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNamingSignature,
+			want:     fp("DB", "SCH", "functions", "F__VARCHAR_256.sql"),
+		},
+		{
+			name:     "signature strategy falls back to ArgSig when full is absent",
+			obj:      Object{Kind: KindProcedure, Schema: "SCH", Name: "P", ArgSig: "FLOAT"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNamingSignature,
+			want:     fp("DB", "SCH", "procedures", "P__FLOAT.sql"),
+		},
+		{
+			name:     "grouped strategy drops the suffix entirely",
+			obj:      Object{Kind: KindFunction, Schema: "SCH", Name: "F", ArgSig: "VARCHAR", ArgSigFull: "VARCHAR_256"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNamingGrouped,
+			want:     fp("DB", "SCH", "functions", "F.sql"),
+		},
+		{
+			name:     "unknown strategy falls back to the default",
+			obj:      Object{Kind: KindFunction, Schema: "SCH", Name: "F", ArgSig: "VARCHAR", ArgSigFull: "VARCHAR_256"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNaming("nonsense"),
+			want:     fp("DB", "SCH", "functions", "F__VARCHAR.sql"),
+		},
+		{
+			name:     "strategy does not touch non-overloadable kinds",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T", ArgSig: "VARCHAR", ArgSigFull: "VARCHAR_256"},
+			template: "",
+			database: "DB",
+			naming:   OverloadNamingSignature,
+			want:     fp("DB", "SCH", "tables", "T.sql"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.obj.FilePathFor(tt.template, tt.database)
+			got := tt.obj.FilePathFor(tt.template, tt.database, tt.naming)
 			if got != tt.want {
-				t.Errorf("FilePathFor(%q, %q) = %q, want %q", tt.template, tt.database, got, tt.want)
+				t.Errorf("FilePathFor(%q, %q, %q) = %q, want %q", tt.template, tt.database, tt.naming, got, tt.want)
 			}
 		})
 	}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"thaw/internal/objectkind"
 )
 
 // SearchAccountResult is the result of SearchAccountObjects: the matched objects
@@ -17,78 +19,15 @@ type SearchAccountResult struct {
 	CappedKinds []string          `json:"cappedKinds"`
 }
 
-// kindShow pairs an object KIND with the plural noun used in its SHOW command.
-type kindShow struct {
-	kind   string
-	plural string
-}
-
-// extendedShowKinds lists every object kind NOT covered by SHOW OBJECTS, paired
-// with the plural noun in its dedicated SHOW command. It is the single source of
-// truth for both the per-schema listing (ListExtendedObjects) and the
-// account-wide search (SearchObjects), so a newly supported kind is added in one
-// place. Order matches the historical ListExtendedObjects command list.
+// extendedShowKinds is every object kind NOT covered by SHOW OBJECTS, each
+// carrying the plural noun of its dedicated SHOW command. It comes straight from
+// the canonical registry (internal/objectkind), which both the per-schema
+// listing (ListExtendedObjects) and the account-wide search (SearchAccountObjects)
+// derive from, so a newly supported kind is one registry entry.
 //
 // Basic kinds (TABLE, VIEW, SEQUENCE) are intentionally absent — they come from
 // SHOW OBJECTS, exactly as ListBasicObjects sources them per-schema.
-var extendedShowKinds = []kindShow{
-	{"DYNAMIC TABLE", "DYNAMIC TABLES"},
-	{"EXTERNAL TABLE", "EXTERNAL TABLES"},
-	{"ICEBERG TABLE", "ICEBERG TABLES"},
-	{"HYBRID TABLE", "HYBRID TABLES"},
-	{"EVENT TABLE", "EVENT TABLES"},
-	{"MATERIALIZED VIEW", "MATERIALIZED VIEWS"},
-	{"ALERT", "ALERTS"},
-	{"TAG", "TAGS"},
-	{"MASKING POLICY", "MASKING POLICIES"},
-	{"ROW ACCESS POLICY", "ROW ACCESS POLICIES"},
-	{"JOIN POLICY", "JOIN POLICIES"},
-	{"PRIVACY POLICY", "PRIVACY POLICIES"},
-	{"STORAGE LIFECYCLE POLICY", "STORAGE LIFECYCLE POLICIES"},
-	{"PASSWORD POLICY", "PASSWORD POLICIES"},
-	{"SESSION POLICY", "SESSION POLICIES"},
-	{"AGGREGATION POLICY", "AGGREGATION POLICIES"},
-	{"PROJECTION POLICY", "PROJECTION POLICIES"},
-	{"AUTHENTICATION POLICY", "AUTHENTICATION POLICIES"},
-	{"PACKAGES POLICY", "PACKAGES POLICIES"},
-	{"NETWORK RULE", "NETWORK RULES"},
-	{"IMAGE REPOSITORY", "IMAGE REPOSITORIES"},
-	{"SERVICE", "SERVICES"},
-	{"GATEWAY", "GATEWAYS"},
-	{"CONTACT", "CONTACTS"},
-	{"STREAMLIT", "STREAMLITS"},
-	{"PROCEDURE", "PROCEDURES"},
-	{"FUNCTION", "FUNCTIONS"},
-	{"EXTERNAL FUNCTION", "EXTERNAL FUNCTIONS"},
-	{"DATA METRIC FUNCTION", "DATA METRIC FUNCTIONS"},
-	{"TASK", "TASKS"},
-	{"STREAM", "STREAMS"},
-	{"STAGE", "STAGES"},
-	{"FILE FORMAT", "FILE FORMATS"},
-	{"PIPE", "PIPES"},
-	{"NOTEBOOK", "NOTEBOOKS"},
-	{"SECRET", "SECRETS"},
-	{"GIT REPOSITORY", "GIT REPOSITORIES"},
-	{"DBT PROJECT", "DBT PROJECTS"},
-	{"MODEL", "MODELS"},
-	{"MODEL MONITOR", "MODEL MONITORS"},
-	{"DATASET", "DATASETS"},
-	{"CORTEX SEARCH SERVICE", "CORTEX SEARCH SERVICES"},
-	{"AGENT", "AGENTS"},
-	{"EXTERNAL AGENT", "EXTERNAL AGENTS"},
-	{"MCP SERVER", "MCP SERVERS"},
-	{"SEMANTIC VIEW", "SEMANTIC VIEWS"},
-}
-
-// extendedKindSet is the set of kinds sourced from a dedicated SHOW command.
-// Anything not in it (TABLE, VIEW, SEQUENCE, …) is sourced from SHOW OBJECTS.
-var extendedKindSet = func() map[string]bool {
-	m := make(map[string]bool, len(extendedShowKinds))
-	for _, k := range extendedShowKinds {
-		m[k.kind] = true
-	}
-	return m
-}()
+var extendedShowKinds = objectkind.Extended()
 
 // showLikeClause builds a case-insensitive substring LIKE clause for a SHOW
 // command, or "" when no pattern is given. The pattern is wrapped in %…% so it
@@ -144,7 +83,7 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 	needBasic := all
 	if !needBasic {
 		for k := range want {
-			if !extendedKindSet[k] {
+			if !objectkind.IsExtended(k) {
 				needBasic = true
 				break
 			}
@@ -155,11 +94,11 @@ func planAccountSearchCommands(namePattern string, kinds []string, excl map[stri
 	}
 
 	for _, k := range extendedShowKinds {
-		if excl[k.kind] {
+		if excl[k.Name] {
 			continue
 		}
-		if all || want[k.kind] {
-			commands = append(commands, accountShowCmd{"SHOW " + k.plural + suffix, k.kind})
+		if all || want[k.Name] {
+			commands = append(commands, accountShowCmd{"SHOW " + k.Plural + suffix, k.Name})
 		}
 	}
 	return commands

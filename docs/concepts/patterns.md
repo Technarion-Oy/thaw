@@ -39,6 +39,16 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 // call cleanup() on unmount
 ```
 
+## Adding a native menu item
+
+Every item lives in `buildMenu` (`internal/app/menu.go`) and only emits a `menu:*` event — the frontend listener (usually in `QueryPage.tsx`) does the work.
+
+**If the item's feature needs a live Snowflake connection**, add it with the local `addConnectionItem(menu, label, accelerator, event)` helper instead of `AddText`. That starts the item `Disabled` (the app always launches disconnected) and enrolls it in the `app.setMenuConnected` callback, which `Connect`/`Disconnect` (`internal/app/app.go`) call to grey it out or restore it. Offline-capable items (local files, preferences, git, terminal, help) keep plain `AddText`.
+
+Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `wailsruntime.MenuUpdateApplicationMenu(app.ctx)`. Call sites must nil-guard the field — tests construct `App` without a menu.
+
+Backend `ErrNotConnected` guards stay in place regardless: greying out is UX, not enforcement.
+
 ## Zustand stores
 
 - `connectionStore` — active connection, role, warehouse, database
@@ -90,6 +100,22 @@ Key prefixes identify node types:
 - **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:…` → `dbtdir:…` → `dbtfile:…`
 
 Loading state lives in the shared `loadingGitNodes` Set (namespaced keys). `buildEntryNodes(...)` is the shared stage/DBT helper; `emptyChildNode` is the empty-state placeholder.
+
+Only the `obj:` and `db:` prefixes take part in the tree's Cmd/Ctrl+click and Shift+click multi-selection
+(`MULTI_SELECT_PREFIXES` in `Sidebar.tsx`), and a selection never mixes the two — `selectionKind` decides
+which bulk context-menu actions are offered. See `frontend/src/components/layout/README.md`.
+
+## Adding a Snowflake object kind
+
+Object-kind metadata lives in **one** place: the registry in `internal/objectkind/kinds.go`. Each `Kind` carries the canonical KIND string, the SHOW plural, the display label, whether `SHOW OBJECTS` already returns it (`Basic`), and its `GET_DDL` object type (`""` = unsupported). Everything derives from it — the per-schema `ListExtendedObjects` commands, the account-wide search plan, `BuildObjectPropertiesQuery`, `buildGetDDLQuery` and its reject-list, and (via `go generate`) the frontend's `OBJECT_KIND_ORDER` / `OBJECT_KIND_LABEL` / `DDL_UNSUPPORTED_KINDS`.
+
+Adding a kind is therefore:
+
+1. One entry in `objectkind.Kinds`, positioned where it should appear in the tree.
+2. `go generate ./internal/objectkind/` → refreshes `frontend/src/generated/objectKinds.ts`.
+3. An icon + colour in `frontend/src/components/sidebar/objectIcons.tsx`, plus the `--icon-*` variable in `frontend/src/styles/global.css` (light **and** dark blocks).
+
+Icons are the one hand-maintained part (they are React components). Coverage tests fail if any step is skipped — see [testing.md](testing.md#generated-artifact-guards). Kinds that are *not* schema-scoped objects (DATABASE, SCHEMA, WAREHOUSE, ROLE, USER) are deliberately outside the registry and stay explicit in their few consumers.
 
 ## Object-listing cache (backend)
 

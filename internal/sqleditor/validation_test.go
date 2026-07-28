@@ -707,6 +707,21 @@ $$;
 			expectedError: "",
 		},
 		{
+			// Issue #871: "quoted" proc args seed the body's declared vars too.
+			name: "Procedure with quoted argument names",
+			sql: `
+create procedure add_one("X" float)
+returns float
+language sql
+as $$
+  begin
+    return x;
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
 			// Issue #705(b): RETURN <builtin>(...) is an expression, not a var.
 			name: "RETURN builtin function call",
 			sql: `
@@ -794,6 +809,33 @@ create function age_days(d date)
   as $$ datediff(day, d, current_date()) + abs(0) $$;
 			`,
 			expectedError: "",
+		},
+		{
+			// #871: "quoted" argument names must be recognized as arguments —
+			// otherwise the type name is mistaken for the argument name and every
+			// body reference is flagged.
+			name: "Scalar SQL function with quoted argument names",
+			sql: `
+CREATE OR REPLACE FUNCTION LINEAGE_TARGET_DB.CORE.UDF_CALCULATE_DISCOUNT("PRICE" NUMBER(38,0), "DISCOUNT_PCT" NUMBER(38,0))
+RETURNS NUMBER(38,0)
+LANGUAGE SQL
+AS $$
+    price - (price * (discount_pct / 100))
+  $$;
+			`,
+			expectedError: "",
+		},
+		{
+			// #871: with quoted args resolved, a genuine non-argument is still
+			// flagged.
+			name: "Scalar SQL function with quoted args still flags non-arguments",
+			sql: `
+create or replace function f("PRICE" number(38,0))
+returns number(38,0)
+language sql
+as $$ price - bogus $$;
+			`,
+			expectedError: "Identifier 'bogus' is not a function argument",
 		},
 		{
 			// #509: a body that queries a table can reference columns, not just

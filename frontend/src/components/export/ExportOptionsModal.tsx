@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Checkbox, Input, Select, Button, Space, Typography, Radio,
+  Modal, Checkbox, Select, Button, Space, Typography, Radio,
   Progress, Alert, Tag, Collapse, Tooltip, message,
 } from "antd";
 import {
@@ -24,6 +24,13 @@ import { useGitStore } from "../../store/gitStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useConnectionStore } from "../../store/connectionStore";
 import { getPlatformOS, getCachedPlatformOS, revealLabel } from "../files/platformUtil";
+import {
+  OVERLOAD_NAMING_OPTIONS,
+  normalizeOverloadNaming,
+  type OverloadNaming,
+} from "./overloadNaming";
+import PathTemplateField from "./PathTemplateField";
+import { validateTemplate } from "./pathTemplate";
 import type { ddl } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -51,14 +58,26 @@ const OBJECT_TYPES = [
 ];
 
 const ALL_TYPES = OBJECT_TYPES.map((t) => t.value);
-const DEFAULT_TEMPLATE = "{database}/{schema}/{object_type}/{object_name}.sql";
+
+/** Exportable databases plus any pre-selected ones the list didn't contain. */
+function mergeDbs(list: string[] | null, extra?: string[]): string[] {
+  const all = [...(list ?? [])];
+  for (const db of extra ?? []) if (!all.includes(db)) all.push(db);
+  return all;
+}
 
 interface Props {
   onClose: () => void;
+  /**
+   * Databases pre-selected in the dialog — set when the dialog is opened from
+   * the object browser's Export DDL context-menu action. Empty (the Tools-menu
+   * default) leaves the selection blank, which means "all databases".
+   */
+  initialDatabases?: string[];
 }
 
-export default function ExportOptionsModal({ onClose }: Props) {
-  const { exportDir, pickExportDir, exportPathTemplate } = useGitStore();
+export default function ExportOptionsModal({ onClose, initialDatabases }: Props) {
+  const { exportDir, pickExportDir, exportPathTemplate, exportOverloadNaming } = useGitStore();
   const { warehouse: sessionWarehouse, warehouses, loadWarehouses } = useSessionStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
 
@@ -68,19 +87,27 @@ export default function ExportOptionsModal({ onClose }: Props) {
 
   // ── options state ──────────────────────────────────────────────────────────
   const [availableDbs, setAvailableDbs] = useState<string[]>([]);
-  const [databases, setDatabases] = useState<string[]>([]);
+  const [databases, setDatabases] = useState<string[]>(initialDatabases ?? []);
   const [types, setTypes] = useState<string[]>(ALL_TYPES);
   const [schemas, setSchemas] = useState<string[]>([]);
   const [schemaOptions, setSchemaOptions] = useState<string[]>([]);
   const [skipExisting, setSkipExisting] = useState(false);
+  const [dollarQuoteBodies, setDollarQuoteBodies] = useState(false);
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined);
   const [template, setTemplate] = useState(exportPathTemplate || "");
+  // Prefilled from the persisted preference (Export Path Format dialog); changing
+  // it here applies to this export only, like the path template.
+  const [overloadNaming, setOverloadNaming] = useState<OverloadNaming>(
+    normalizeOverloadNaming(exportOverloadNaming),
+  );
 
   useEffect(() => {
     loadWarehouses();
     ListExportableDatabases()
-      .then((list) => setAvailableDbs(list ?? []))
-      .catch(() => setAvailableDbs([]));
+      // Keep any pre-selected database in the option list even if the account
+      // query fails or omits it, so the dropdown never shows a bare value.
+      .then((list) => setAvailableDbs(mergeDbs(list, initialDatabases)))
+      .catch(() => setAvailableDbs(initialDatabases ?? []));
   }, []);
 
   // Schema suggestions: union of schemas across the databases the export
@@ -117,8 +144,12 @@ export default function ExportOptionsModal({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
 
+  // Blocks the export rather than appending ".sql" for the user: a template
+  // that already ends in it would silently become "….sql.sql".
+  const templateError = validateTemplate(template);
+
   const runExport = async () => {
-    if (!exportDir || running) return;
+    if (!exportDir || running || templateError) return;
     setRunning(true);
     setFinished(false);
     setResults([]);
@@ -139,6 +170,8 @@ export default function ExportOptionsModal({ onClose }: Props) {
       skipExisting,
       warehouse: warehouse ?? "",
       pathTemplate: template.trim(),
+      overloadNaming,
+      dollarQuoteBodies,
     };
 
     try {
@@ -156,6 +189,7 @@ export default function ExportOptionsModal({ onClose }: Props) {
     }
   };
 
+  const namingOption = OVERLOAD_NAMING_OPTIONS.find((o) => o.value === overloadNaming)!;
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
   const totalFiles = results.reduce((s, r) => s + r.files, 0);
   const totalSkipped = results.reduce((s, r) => s + r.skipped, 0);
@@ -183,11 +217,15 @@ export default function ExportOptionsModal({ onClose }: Props) {
           ) : (
             <Button onClick={onClose}>Close</Button>
           )}
-          <Tooltip title={!isConnected ? "Connect to Snowflake to export" : undefined}>
+          <Tooltip
+            title={
+              !isConnected ? "Connect to Snowflake to export" : templateError ?? undefined
+            }
+          >
             <Button
               type="primary"
               icon={<CloudUploadOutlined />}
-              disabled={!isConnected || !exportDir || types.length === 0}
+              disabled={!isConnected || !exportDir || types.length === 0 || !!templateError}
               loading={running}
               onClick={runExport}
             >
@@ -285,18 +323,47 @@ export default function ExportOptionsModal({ onClose }: Props) {
           />
         </div>
 
+        <PathTemplateField
+          label="File path template"
+          value={template}
+          onChange={setTemplate}
+          disabled={running}
+          hint="Applies to this export only."
+        />
+
         <div>
-          <Text strong style={{ display: "block", marginBottom: 6 }}>File path template</Text>
-          <Input
-            value={template}
-            onChange={(e) => setTemplate(e.target.value)}
+          <Text strong style={{ display: "block", marginBottom: 6 }}>
+            Overloaded functions &amp; procedures
+          </Text>
+          <Radio.Group
+            value={overloadNaming}
             disabled={running}
-            placeholder={DEFAULT_TEMPLATE}
-            style={{ fontFamily: "monospace" }}
+            onChange={(e) => setOverloadNaming(e.target.value as OverloadNaming)}
+            optionType="button"
+            buttonStyle="solid"
+            size="small"
+            options={OVERLOAD_NAMING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
           />
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Applies to this export only. Overloaded functions/procedures are written as{" "}
-            <span style={{ fontFamily: "monospace" }}>name__ARGTYPES.sql</span>.
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+            {namingOption.hint} FOO(X VARCHAR(16)) + FOO(X VARCHAR(256)) →{" "}
+            <span style={{ fontFamily: "monospace" }}>{namingOption.example}</span>. Applies to
+            this export only; the saved default lives in Tools → Export Path Format.
+          </Text>
+          <Checkbox
+            checked={dollarQuoteBodies}
+            disabled={running}
+            onChange={(e) => setDollarQuoteBodies(e.target.checked)}
+            style={{ marginTop: 8 }}
+          >
+            <span style={{ fontSize: 13 }}>
+              Export bodies as dollar-quoted (
+              <span style={{ fontFamily: "monospace" }}>$$…$$</span>)
+            </span>
+          </Checkbox>
+          <Text type="secondary" style={{ fontSize: 11, display: "block" }}>
+            GET_DDL returns bodies as a quoted string with doubled quotes and backslash
+            escapes; this writes the literal code instead. Bodies that are already
+            dollar-quoted are left as they are.
           </Text>
         </div>
 

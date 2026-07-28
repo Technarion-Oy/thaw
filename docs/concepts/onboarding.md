@@ -48,6 +48,7 @@ Read these, in order:
 
 1. **Consult the semantic map.** Read `GetCodebaseSemanticMap()` in `internal/architecture/semantic_map.go` (generated) to find the domain that owns the area you're changing. Restrict new files to that domain's directories.
 2. **Use the per-module READMEs** as your map of responsibilities.
+3. **Check for a registry before adding a `switch`.** Some cross-cutting data has exactly one home: Snowflake object kinds live in `internal/objectkind` (see [patterns](patterns.md#adding-a-snowflake-object-kind)), data types in `internal/snowflake/datatypes.go`. Both generate their frontend counterpart under `frontend/src/generated/`. If you find yourself editing the same list in two files, it probably belongs in one of these.
 
 ## 6. Make your first change
 

@@ -7,5 +7,10 @@ export default defineConfig({
     environment: "node",
     // No browser globals needed for the pure-function formatter tests
     globals: false,
+    // Vitest stubs CSS imports to an empty string by default. The object-icon
+    // coverage test reads styles/global.css (as ?raw) to verify every kind's
+    // colour variable is actually declared, so CSS has to be processed rather
+    // than stubbed. No other test imports CSS.
+    css: true,
   },
 });

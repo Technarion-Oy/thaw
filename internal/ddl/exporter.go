@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"thaw/internal/snowflake"
 	"thaw/internal/sqltok"
 )
 
@@ -26,6 +27,11 @@ type ExportOptions struct {
 	// Supported placeholders: {database}, {schema}, {object_type}, {object_name}.
 	// An empty value falls back to DefaultExportPathTemplate.
 	PathTemplate string
+
+	// OverloadNaming controls how overloaded FUNCTION / PROCEDURE definitions
+	// are named, and whether all overloads of one name share a single file.
+	// An empty value falls back to DefaultOverloadNaming.
+	OverloadNaming OverloadNaming
 
 	// ObjectTypes restricts which object kinds are written. Empty = all.
 	// KindDatabase and KindSchema are structural anchors and always written.
@@ -43,6 +49,14 @@ type ExportOptions struct {
 	// SkipExisting leaves files that already exist on disk untouched instead
 	// of overwriting them. Skipped files are counted in ExportResult.Skipped.
 	SkipExisting bool
+
+	// DollarQuoteBodies rewrites FUNCTION / PROCEDURE bodies from the
+	// single-quoted string-literal form GET_DDL returns into the dollar-quoted
+	// ($$…$$) form, so the exported file holds readable code instead of doubled
+	// quotes and backslash escapes. Bodies that are already dollar-quoted, and
+	// literals that would not survive the round trip, are left alone
+	// (snowflake.DollarQuoteBody).
+	DollarQuoteBodies bool
 
 	// DBConcurrency is the maximum number of databases fetched from Snowflake
 	// simultaneously.  Defaults to min(16, runtime.NumCPU()*4).
@@ -157,11 +171,11 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 		return res
 	}
 
-	// Parse all statements and resolve file-path collisions.
-	// This is intentionally single-threaded: the collision resolver is stateful
-	// and sequential resolution gives deterministic, reproducible output.
+	// Parse and filter all statements first, then plan the output paths in one
+	// pass over the whole set (planFiles): collision resolution and overload
+	// grouping need to see every object that competes for a path, and the plan
+	// must not depend on the order Snowflake returned the statements in.
 	stmts := sqltok.Split(rawDDL)
-	tracker := newNameTracker()
 
 	wantKind := make(map[Kind]bool, len(opts.ObjectTypes))
 	for _, k := range opts.ObjectTypes {
@@ -174,7 +188,7 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 		}
 	}
 
-	jobs := make([]writeJob, 0, len(stmts))
+	objs := make([]Object, 0, len(stmts))
 	for _, s := range stmts {
 		obj := Parse(s)
 		if obj.Kind == KindUnknown || obj.Name == "" {
@@ -196,10 +210,23 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 			}
 		}
 
-		// resolve() before the SkipExisting check so numbered-suffix
-		// assignment stays deterministic regardless of what is on disk.
-		rel := tracker.resolve(obj.FilePathFor(opts.PathTemplate, database))
-		absPath := filepath.Join(opts.OutputDir, rel)
+		// Body rewriting happens before planning so every path decision — and
+		// the overload sort key, which includes the SQL text — sees the final
+		// statement.
+		if opts.DollarQuoteBodies && (obj.Kind == KindFunction || obj.Kind == KindProcedure) {
+			obj.SQL = snowflake.DollarQuoteBody(obj.SQL)
+		}
+
+		objs = append(objs, obj)
+	}
+
+	// Paths are planned for the full object set — before the SkipExisting check
+	// — so name assignment never depends on what happens to be on disk.
+	plans := planFiles(objs, opts.PathTemplate, database, opts.OverloadNaming)
+
+	jobs := make([]writeJob, 0, len(plans))
+	for _, p := range plans {
+		absPath := filepath.Join(opts.OutputDir, p.Path)
 
 		if opts.SkipExisting {
 			if _, statErr := os.Stat(absPath); statErr == nil {
@@ -208,10 +235,7 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 			}
 		}
 
-		jobs = append(jobs, writeJob{
-			absPath: absPath,
-			content: []byte(obj.SQL + ";\n"),
-		})
+		jobs = append(jobs, writeJob{absPath: absPath, content: p.content()})
 	}
 
 	if len(jobs) == 0 {

@@ -59,6 +59,10 @@ go test -tags integration ./internal/integration/...   # live Snowflake required
 make docs                            # regenerate TypeDoc + gomarkdoc reference
 make docs-serve                      # serve docs/ at http://localhost:4000
 
+# Generated frontend artifacts (committed; CI fails if stale)
+go generate ./internal/objectkind/   # → frontend/src/generated/objectKinds.ts (after adding an object kind)
+go generate ./internal/snowflake/    # → frontend/src/generated/snowflakeDataTypes.ts
+
 # Third-party license notices (About → Acknowledgements)
 go run scripts/gen_third_party_notices.go   # regenerate THIRD_PARTY_NOTICES.md after dependency changes
 ```
@@ -77,6 +81,9 @@ thaw/
 │   │                    #   app.go=struct+lifecycle, run.go=wails.Run wiring, menu.go=native menu,
 │   │                    #   <domain>.go=IPC bindings. See internal/app/README.md.
 │   ├── snowflake/       # gosnowflake driver wrapper, pool, object-cache, result helpers
+│   ├── objectkind/      # canonical object-kind registry (KIND, SHOW plural, label, order,
+│   │                    #   GET_DDL type) — every consumer derives from it; generates
+│   │                    #   frontend/src/generated/objectKinds.ts. See its README.
 │   ├── sqleditor/       # SQL diagnostics & JOIN engine (its own Wails-bound Service)
 │   ├── <domain>/        # SQL builders + parsers per object type (backup, table, column, pipe,
 │   │                    #   stage, secret, warehouse, tasks, objects, queryhistory, dbtproject, …)

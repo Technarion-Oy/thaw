@@ -1181,8 +1181,9 @@ func validateSyntaxScope(src string, baseLine, baseCol int, inScript bool, add f
 // signature whose $$ body is toks[dq], so those args seed the body's declared
 // variables (issue #705). It walks back to the current statement start (the
 // prior ';'), finds the PROCEDURE/FUNCTION keyword, then collects the first
-// bare word of each comma-separated segment inside the following (...) arg
-// list. Returns nil when the statement isn't a proc/func definition.
+// word — bare or "quoted" (#871) — of each comma-separated segment inside the
+// following (...) arg list, uppercased and unquoted.
+// Returns nil when the statement isn't a proc/func definition.
 func procFuncArgNames(toks []sqltok.Token, src string, dq int) map[string]bool {
 	start := 0
 	for j := dq - 1; j >= 0; j-- {
@@ -1231,9 +1232,12 @@ func procFuncArgNames(toks []sqltok.Token, src string, dq int) map[string]bool {
 			if depth == 1 {
 				expectName = true
 			}
-		case sqltok.Keyword, sqltok.Identifier:
+		case sqltok.Keyword, sqltok.Identifier, sqltok.QuotedIdent:
+			// A quoted arg name ("PRICE" NUMBER) contributes its unquoted text —
+			// otherwise the quotes would be skipped and the type name (NUMBER)
+			// mistaken for the argument name (#871).
 			if depth == 1 && expectName {
-				vars[strings.ToUpper(toks[j].Text(src))] = true
+				vars[strings.ToUpper(sqltok.Unquote(toks[j].Text(src)))] = true
 				expectName = false
 			}
 		}

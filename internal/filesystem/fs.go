@@ -115,13 +115,20 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // ListDir returns the direct children of dir, directories first then files,
 // both groups sorted alphabetically.
+//
+// An empty directory yields an empty, non-nil slice: a nil Go slice serializes
+// as JSON `null` over the Wails bridge, and the frontend's `entries.map(...)`
+// then throws inside a React state updater — a render-phase TypeError that
+// unmounts the whole React root (blank window, issue #875). Keep `dirs`
+// pre-allocated so the returned slice is never nil on success.
 func ListDir(dir string) ([]FileEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	var dirs, files []FileEntry
+	dirs := make([]FileEntry, 0, len(entries))
+	var files []FileEntry
 	for _, e := range entries {
 		info, _ := e.Info()
 		size := int64(0)
@@ -240,11 +247,47 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 // MkDir creates a directory (and any necessary parents) at path.
 // The path must be inside allowedRoot. Since the target doesn't exist yet,
 // the parent directory is validated instead.
+//
+// Returns an error if the target already exists, mirroring WriteFileInRoot's
+// O_EXCL behavior. os.MkdirAll alone succeeds silently on an existing
+// directory, which left the caller unable to tell "created" from "was already
+// there" — the file browser's inline create reported success and added a second
+// tree node for a folder it hadn't created. Parents are still created freely;
+// it's only the target itself that must be new.
+//
+// Callers that genuinely want "make sure this path exists" should call
+// os.MkdirAll themselves rather than loosening this: the sole caller today
+// (App.CreateDirectory, behind the file browser's inline create) depends on
+// being told when it created nothing.
+//
+// The target always goes through os.Mkdir, which fails atomically with ErrExist
+// rather than check-then-act. That matters because "Open Folder in New Window…"
+// puts two live processes on one export directory: an Lstat-then-MkdirAll pair
+// lets two racing New Folder calls for the same name both pass the check and
+// both report success. Only the intermediate parents are created with MkdirAll,
+// whose idempotence is the point of "and any necessary parents".
 func MkDir(path, allowedRoot string) error {
 	if err := validateNewPath(path, allowedRoot); err != nil {
 		return err
 	}
-	return os.MkdirAll(path, 0o755)
+	err := os.Mkdir(path, 0o755)
+	if os.IsNotExist(err) {
+		// A missing intermediate parent. Build the chain, then retry the target
+		// itself exclusively so the guarantee above still holds for it.
+		if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+			return mkErr
+		}
+		err = os.Mkdir(path, 0o755)
+	}
+	switch {
+	case err == nil:
+		return nil
+	case os.IsExist(err):
+		// Also covers a plain file sitting on the target path (EEXIST).
+		return fmt.Errorf("file or folder already exists: %s", filepath.Base(path))
+	default:
+		return err
+	}
 }
 
 // WriteFileInRoot creates a new file at path with content.

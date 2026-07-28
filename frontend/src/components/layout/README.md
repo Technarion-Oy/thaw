@@ -54,6 +54,19 @@ items (**Create Object**, **Show Dropped Objects…**, **Export Data…**, **Imp
 value dump with no ALTER controls (issue #854). Mirrors the backend's `ListUserSchemas` exclusion
 (`internal/app/objects.go`).
 
+### Object-kind labels & ordering (generated)
+`KIND_LABEL` and `KIND_ORDER` are **not** declared in `Sidebar.tsx` — they are `OBJECT_KIND_LABEL` /
+`OBJECT_KIND_ORDER` from `src/generated/objectKinds.ts`, generated from the canonical Go registry
+[`internal/objectkind`](../../../../internal/objectkind/README.md), the same source the backend
+derives its `SHOW` commands, Properties queries and `GET_DDL` types from. They drive the tree
+type-group titles and ordering, the search-result grouping, and `KIND_FILTER_OPTIONS`. A kind the
+registry doesn't know (e.g. one a newer Snowflake edition starts returning) still renders — it falls
+back to the raw kind string and sorts last, alphabetically. To add a kind, edit the Go registry and
+run `go generate ./internal/objectkind/`; don't hand-edit the generated file.
+
+`DROPPED_KIND_ORDER` is separate and stays local: it orders the four kinds the Time Travel undrop
+modals can show, which is not the object-tree ordering.
+
 ### Three-tier object-listing cache
 1. `objectStore` — previously expanded schemas (instant, all types).
 2. Go TTL cache (`ListObjects` / `ListBasicObjects`) — 30 s backend cache.
@@ -96,7 +109,8 @@ the loaded tree (issues #855 + follow-up):
   server as a `LIKE '%…%'` prefilter; **regex** queries fetch all of the selected kinds (no server
   filter) and match client-side.
 - **Type filter is the required scope.** A search runs only once **≥1 object type** is selected
-  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER`) — each selected kind is one
+  (`KIND_FILTER_OPTIONS`, a flat multi-select in `KIND_ORDER` — see the generated registry note
+  below) — each selected kind is one
   `SHOW … IN ACCOUNT`. Searching *every* kind would mean ~45 broad account-wide metadata queries (one
   per kind, each scanning all databases) with no cheaper account-wide alternative, so instead of a slow
   "all types" scan the type filter is mandatory: pick the kinds you want and each is a fast, targeted
@@ -159,16 +173,48 @@ of their root task with `isFinalizer: true`; root tasks with no predecessors get
 `ddlCache` (module-level `Map`, 60 s TTL) caches DDL fetched via `GetObjectDDL` to avoid
 repeated IPC calls on tree hover.
 
-### Multi-select (object nodes)
+### Multi-select (object and database nodes)
 `selectedNodeKeys` (Set) + `selectedNodeArgs` (Map of function/procedure signatures) hold the
 selection; the `Tree` is `multiple` with `selectedKeys={Array.from(selectedNodeKeys)}`. The
 `onSelect` handler branches on the native modifiers: **Cmd/Ctrl+click** toggles a node (and sets
-`objAnchorKey`, the range pivot); **Shift+click** selects every object node between `objAnchorKey`
+`selAnchorKey`, the range pivot); **Shift+click** selects every node between `selAnchorKey`
 and the click. Visible order for the range comes from `flattenVisibleNodes(displayData, expandedSet, …)`,
 which walks the tree against the controlled `expandedKeys`/`searchExpandedKeys`. A plain (no-modifier)
-click on the tree container clears the selection. The tree wrapper sets `userSelect: none` and
-`preventDefault`s shift-mousedown so a range click doesn't paint a browser text selection. The
-selection drives the context menu's bulk **Delete N selected objects** and **Add N as insert sources**.
+click on the tree container clears the selection (`clearNodeSelection`). The tree wrapper sets
+`userSelect: none` and `preventDefault`s shift-mousedown so a range click doesn't paint a browser
+text selection. Selected rows are painted with the shared module-level `SELECTED_NODE_STYLE`.
+
+Two node kinds take part, listed in `MULTI_SELECT_PREFIXES` and matched by `multiSelectPrefix(key)`:
+object nodes (`obj:`) and database nodes (`db:`); schemas and the synthetic type/git/stage nodes
+stay single-select. **A selection is never mixed** — range walks filter to the clicked node's own
+prefix, and a Cmd/Ctrl toggle drops keys of the other kind, so picking a database clears an object
+selection and vice versa. `selectionKind` (`"obj" | "db" | null`, read off the first key) says which
+kind is held.
+
+`bulkTarget` is what the context menu actually gates its bulk entries on: `selectionKind`, but only
+when the right-clicked row is **in** the selection (`selectedNodeKeys.has(ctxMenu.nodeKey)`) —
+otherwise `null`. Right-clicking outside the selection therefore shows only the single-node entries,
+which act on the row under the cursor; without the membership check the menu would carry
+**Drop Database…** (this row) and **Drop 2 selected databases…** (other rows) side by side with no
+cue which is which. Membership also pins the node kind — an `obj:` key can only be in an object
+selection — so `bulkTarget === "obj"` alone keeps **Delete N selected objects…** off database,
+schema, column, git and stage rows, which the `selectionKind` check alone did not. Right-clicking
+never modifies the selection. The entries are **Delete N selected objects…** / **Add N selected as
+Insert Sources** for `obj`, and **Export DDL for N selected databases…** / **Drop N selected
+databases…** for `db`.
+
+The bulk drop confirmation lists every database with its own Time Travel retention window (zero
+retention is called out in red) and offers the same CASCADE/RESTRICT mode select as the single-node
+**Drop Database…**. Those retention lookups are one IPC round trip per database and block the
+confirmation, so both the bulk and single-database drops hold a `message.loading` toast while they
+run. Every batch closes with exactly one summary toast — `success` when nothing failed, `warning`
+when some did, `error` when all did (per-item error toasts can otherwise stack off-screen with
+nothing stating the overall outcome).
+
+Because `expandAction="click"`, rc-tree also treats a modified click as an expand; `onExpand` returns
+early when the event carries Cmd/Ctrl/Shift and the node is multi-selectable, so building a selection
+doesn't expand (and lazily load) every row it touches. Ignoring the event is enough — `expandedKeys`
+is controlled, so rc-tree's own uncontrolled update is discarded.
 
 ### Show Dropped Objects (Time Travel undrop)
 Three modals — schema scope (`undropModal`, from the schema context menu's **Show Dropped Objects…**),
@@ -190,13 +236,13 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
 `AppLayout.tsx`: `panelLayoutStore` (panel order, widths), `featureFlagsStore`, `gitStore`.
 
 `Sidebar.tsx`: `queryStore` (open new tab, insert SQL), `objectStore` (schema/object cache),
-`connectionStore` (active DB/schema/role), `gitStore`, `diffStore`, `insertMappingStore`,
+`connectionStore` (active DB/schema/role), `diffStore`, `insertMappingStore`,
 `featureFlagsStore`.
 
 ## IPC calls in `Sidebar.tsx` (representative)
 
 `ListDatabases`, `ListSchemas`, `ListObjects`, `ListBasicObjects`, `SearchAccountObjects`, `ClearObjectCache`,
-`ClearObjectCacheForDatabase`, `GetObjectDDL`, `GetObjectProperties`, `ExportDatabaseDDL`,
+`ClearObjectCacheForDatabase`, `GetObjectDDL`, `GetObjectProperties`,
 `ListDroppedTables`, `ListDroppedSchemas`, `ListDroppedDatabases`, `GetTableRetentionDays`,
 `GetERDiagramData`, `FetchNotebookContent`, `DropTaskTree`, `GetTableColumnsWithTypes`,
 `GetTableForeignKeys`, `ListGitRepoEntries`, `ListGitBranches`, `ListGitTags`, `ExecuteGitFile`,

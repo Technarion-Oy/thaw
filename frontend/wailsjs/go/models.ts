@@ -135,6 +135,8 @@ export namespace app {
 	    skipExisting: boolean;
 	    warehouse: string;
 	    pathTemplate: string;
+	    overloadNaming: string;
+	    dollarQuoteBodies: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DDLExportOptions(source);
@@ -147,6 +149,8 @@ export namespace app {
 	        this.skipExisting = source["skipExisting"];
 	        this.warehouse = source["warehouse"];
 	        this.pathTemplate = source["pathTemplate"];
+	        this.overloadNaming = source["overloadNaming"];
+	        this.dollarQuoteBodies = source["dollarQuoteBodies"];
 	    }
 	}
 
@@ -652,6 +656,7 @@ export namespace config {
 	    authorName: string;
 	    authorEmail: string;
 	    exportPathTemplate: string;
+	    exportOverloadNaming: string;
 	    recentDirs?: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -666,6 +671,7 @@ export namespace config {
 	        this.authorName = source["authorName"];
 	        this.authorEmail = source["authorEmail"];
 	        this.exportPathTemplate = source["exportPathTemplate"];
+	        this.exportOverloadNaming = source["exportOverloadNaming"];
 	        this.recentDirs = source["recentDirs"];
 	    }
 	}

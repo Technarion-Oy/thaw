@@ -46,6 +46,23 @@ Never edit files under `frontend/wailsjs/` by hand — they are overwritten by `
 
 Do not edit it by hand. Annotate source files (`// thaw:domain:`, `// thaw:file-domain:`, `// @thaw-domain:`) and run `go generate ./internal/architecture/`. The CI test `TestSemanticMapAccuracy` fails if any annotated path no longer exists on disk.
 
+## A nil Go slice arrives in the frontend as `null`, not `[]`
+
+Wails marshals a nil slice to JSON `null`. Any IPC method that can return an empty collection must therefore return an initialized slice (`make([]T, 0, n)` / `[]T{}`), and every consumer should still defend with `?? []` — the pattern already used for `SearchFiles` matches, `recentDirs`, and `gitStore.branches`. `filesystem.ListDir` violated this for empty directories and white-screened the app (issue #875, see below).
+
+## Never build state inside a React state updater
+
+A `setState(prev => …)` callback runs during React's **render phase**, not synchronously at the call site. An exception thrown inside it is not caught by the `try`/`catch` (or `.catch()`) around the `setState` call — React rethrows it during render, which unmounts the root and leaves a blank window with nothing in the logs. In issue #875, `setTreeData(prev => updateNode(prev, path, entriesToNodes(entries)))` in `FileBrowser` threw on `null.map` when an empty folder was expanded, and the "crash" looked like a dead app rather than an error.
+
+Compute the new value **before** the updater and pass only the pure merge into it:
+
+```ts
+const children = entriesToNodes(entries);          // may throw — caught by the surrounding try
+setTreeData((prev) => updateNode(prev, path, children));
+```
+
+`AppErrorBoundary` (wrapped around `<App />` in `main.tsx`) is the backstop: it turns any remaining render-phase throw into a recoverable message with Try again / Reload instead of a blank window. It uses plain DOM and CSS variables, no Ant Design, so it still renders if the failure came from inside the theme provider.
+
 ## `runDiagnostics` must stay race-safe and exception-safe
 
 `runDiagnostics` in `SqlEditor.tsx` is async with three IPC `await` points. Two invariants must hold:

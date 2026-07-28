@@ -66,11 +66,16 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 		a.exportCancelFunc = nil
 	}()
 
-	var pathTemplate string
+	var pathTemplate, overloadNaming string
 	if cfg, err := config.Load(); err == nil {
 		pathTemplate = cfg.Git.ExportPathTemplate
+		overloadNaming = cfg.Git.ExportOverloadNaming
 	}
-	opts := ddl.ExportOptions{OutputDir: outputDir, PathTemplate: pathTemplate}
+	opts := ddl.ExportOptions{
+		OutputDir:      outputDir,
+		PathTemplate:   pathTemplate,
+		OverloadNaming: ddl.OverloadNaming(overloadNaming),
+	}
 
 	var result ddl.ExportResult
 	ddl.ExportDatabases(
@@ -125,6 +130,15 @@ type DDLExportOptions struct {
 	// PathTemplate overrides the configured export path template for this
 	// export only. Empty = configured template.
 	PathTemplate string `json:"pathTemplate"`
+	// OverloadNaming overrides the configured overloaded-function/procedure
+	// naming strategy for this export only — a ddl.OverloadNaming value
+	// ("argtypes", "signature", "grouped"). Empty = configured strategy, and an
+	// unknown value falls back to the ddl package default.
+	OverloadNaming string `json:"overloadNaming"`
+	// DollarQuoteBodies writes FUNCTION / PROCEDURE bodies in dollar-quoted
+	// ($$…$$) form instead of the single-quoted string literal GET_DDL returns.
+	// Per-export only; false = GET_DDL's own form.
+	DollarQuoteBodies bool `json:"dollarQuoteBodies"`
 }
 
 // ExportAllDatabasesDDL exports DDL for the given databases in parallel.
@@ -179,10 +193,18 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 		a.exportCancelFunc = nil
 	}()
 
+	// Both naming settings fall back to the persisted preference when the dialog
+	// sent nothing, so a sidebar-initiated export matches the configured layout.
 	pathTemplate := options.PathTemplate
-	if pathTemplate == "" {
+	overloadNaming := options.OverloadNaming
+	if pathTemplate == "" || overloadNaming == "" {
 		if cfg, err := config.Load(); err == nil {
-			pathTemplate = cfg.Git.ExportPathTemplate
+			if pathTemplate == "" {
+				pathTemplate = cfg.Git.ExportPathTemplate
+			}
+			if overloadNaming == "" {
+				overloadNaming = cfg.Git.ExportOverloadNaming
+			}
 		}
 	}
 	kinds := make([]ddl.Kind, len(options.ObjectTypes))
@@ -190,11 +212,13 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 		kinds[i] = ddl.Kind(t)
 	}
 	opts := ddl.ExportOptions{
-		OutputDir:    outputDir,
-		PathTemplate: pathTemplate,
-		ObjectTypes:  kinds,
-		Schemas:      options.Schemas,
-		SkipExisting: options.SkipExisting,
+		OutputDir:         outputDir,
+		PathTemplate:      pathTemplate,
+		OverloadNaming:    ddl.OverloadNaming(overloadNaming),
+		ObjectTypes:       kinds,
+		Schemas:           options.Schemas,
+		SkipExisting:      options.SkipExisting,
+		DollarQuoteBodies: options.DollarQuoteBodies,
 	}
 
 	results := ddl.ExportDatabases(

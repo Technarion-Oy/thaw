@@ -28,6 +28,7 @@ import (
 	"github.com/youmark/pkcs8"
 
 	"thaw/internal/logger"
+	"thaw/internal/objectkind"
 	"thaw/internal/sqltok"
 )
 
@@ -3766,18 +3767,11 @@ func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) 
 }
 
 // ListExtendedObjects returns the "extended" objects inside a schema by running
-// dedicated SHOW commands for object types not covered by SHOW OBJECTS (the
-// authoritative list is the command slice below: DYNAMIC TABLE, EXTERNAL TABLE,
-// ICEBERG TABLE, HYBRID TABLE, EVENT TABLE,
-// MATERIALIZED VIEW, ALERT, TAG, MASKING POLICY, ROW ACCESS POLICY, JOIN POLICY,
-// PRIVACY POLICY, STORAGE LIFECYCLE POLICY,
-// PASSWORD POLICY, SESSION POLICY, AGGREGATION POLICY, PROJECTION POLICY,
-// AUTHENTICATION POLICY, PACKAGES POLICY, NETWORK
-// RULE, IMAGE REPOSITORY, SERVICE, STREAMLIT, PROCEDURE, FUNCTION,
-// EXTERNAL FUNCTION, DATA METRIC FUNCTION, TASK, STREAM, STAGE, FILE FORMAT,
-// PIPE, NOTEBOOK, SECRET, GIT REPOSITORY, DBT PROJECT, MODEL). Individual commands that
-// fail (e.g. due to missing privileges) are silently skipped. Includes the TASK
-// finalize enrichment logic.
+// dedicated SHOW commands for object types not covered by SHOW OBJECTS — the
+// authoritative list is the non-basic half of the canonical registry
+// (internal/objectkind), one SHOW <plural> IN SCHEMA per kind. Individual
+// commands that fail (e.g. due to missing privileges) are silently skipped.
+// Includes the TASK finalize enrichment logic.
 func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
 	q := Qualify(database, schema)
 
@@ -3787,7 +3781,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	}
 	commands := make([]showCmd, 0, len(extendedShowKinds))
 	for _, k := range extendedShowKinds {
-		commands = append(commands, showCmd{fmt.Sprintf("SHOW %s IN SCHEMA %s", k.plural, q), k.kind})
+		commands = append(commands, showCmd{fmt.Sprintf("SHOW %s IN SCHEMA %s", k.Plural, q), k.Name})
 	}
 
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
@@ -4151,13 +4145,9 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 
 // DDLUnsupportedKinds are object kinds GET_DDL has no type for: buildGetDDLQuery
 // would emit an invalid GET_DDL('<kind>', …). Keys are upper-cased kind names.
-// Mirrored in frontend/src/utils/objectDdl.ts (DDL_UNSUPPORTED_KINDS);
-// TestDDLUnsupportedKindsInSyncWithFrontend fails CI if the two drift.
-var DDLUnsupportedKinds = map[string]bool{
-	"IMAGE REPOSITORY": true, "SERVICE": true, "GATEWAY": true, "PACKAGES POLICY": true,
-	"MODEL": true, "MODEL MONITOR": true, "DATASET": true, "CORTEX SEARCH SERVICE": true,
-	"EXTERNAL AGENT": true, "MCP SERVER": true,
-}
+// Derived from the canonical registry (the kinds with no objectkind.Kind.GetDDLType),
+// which also generates the frontend's DDL_UNSUPPORTED_KINDS.
+var DDLUnsupportedKinds = objectkind.DDLUnsupported()
 
 // GetObjectDDL returns the DDL definition of a Snowflake object using GET_DDL.
 //
@@ -4209,65 +4199,25 @@ func buildGetDDLQuery(database, schema, kind, name, arguments string) (query, id
 		// literal. Any single quotes in arguments are doubled, preventing
 		// breakout from the SQL string context. If this code is refactored,
 		// ensure arguments still passes through the same single-quote escaping.
-		upperKind := strings.ToUpper(kind)
-		if upperKind == "PROCEDURE" || upperKind == "FUNCTION" || upperKind == "EXTERNAL FUNCTION" || upperKind == "DATA METRIC FUNCTION" {
+		//
+		// Routine kinds (procedures and the function family) overload by
+		// signature, so the parameter type list — possibly empty — must be
+		// appended for Snowflake to resolve the right overload.
+		if k, ok := objectkind.ByName(kind); ok && k.Routine {
 			identifier += fmt.Sprintf("(%s)", arguments)
 		}
 		identifier = EscapeStringLit(identifier)
 	}
-	// GET_DDL expects the underscore form (e.g. 'DYNAMIC_TABLE',
-	// 'EXTERNAL_TABLE') as the object_type, whereas the rest of the app uses the
-	// space-separated SHOW kind ("DYNAMIC TABLE", "EXTERNAL TABLE"). Normalize it
-	// here so DDL export works for these object kinds.
+	// The GET_DDL object_type is not always the SHOW kind the rest of the app
+	// uses: some kinds take the underscore form ('DYNAMIC_TABLE'), some are
+	// folded into a broader type (the policy family → 'POLICY', Iceberg/hybrid
+	// tables → 'TABLE'). The registry records the right one per kind, so
+	// normalize through it. Kinds outside the registry (DATABASE, WAREHOUSE,
+	// ROLE, USER, …) and the GET_DDL-unsupported ones (which GetObjectDDL rejects
+	// before reaching here) keep the caller's kind verbatim, as before.
 	ddlKind := kind
-	switch strings.ToUpper(strings.TrimSpace(kind)) {
-	case "DYNAMIC TABLE":
-		ddlKind = "DYNAMIC_TABLE"
-	case "EXTERNAL TABLE":
-		ddlKind = "EXTERNAL_TABLE"
-	case "ICEBERG TABLE":
-		// GET_DDL has no ICEBERG_TABLE object type — Iceberg tables are
-		// retrieved via the 'TABLE' type.
-		ddlKind = "TABLE"
-	case "HYBRID TABLE":
-		// GET_DDL has no HYBRID_TABLE object type — hybrid tables are
-		// retrieved via the 'TABLE' type.
-		ddlKind = "TABLE"
-	case "EVENT TABLE":
-		// GET_DDL exposes a dedicated EVENT_TABLE object type (the SHOW kind
-		// is space-separated; the GET_DDL object_type uses the underscore form).
-		ddlKind = "EVENT_TABLE"
-	case "MATERIALIZED VIEW":
-		// GET_DDL has no MATERIALIZED_VIEW object type — TABLE and VIEW are
-		// interchangeable and materialized views are retrieved via 'VIEW'.
-		ddlKind = "VIEW"
-	case "MASKING POLICY", "ROW ACCESS POLICY", "JOIN POLICY", "PRIVACY POLICY", "STORAGE LIFECYCLE POLICY", "PASSWORD POLICY", "SESSION POLICY", "AGGREGATION POLICY", "PROJECTION POLICY", "AUTHENTICATION POLICY":
-		// GET_DDL exposes a single 'POLICY' object type covering most policy
-		// kinds (masking, row access, join, privacy, storage lifecycle, password,
-		// session, aggregation, projection, authentication, etc.), not a per-kind type. NOTE: packages policies are
-		// deliberately NOT here — GET_DDL supports neither the 'POLICY' nor a
-		// 'PACKAGES POLICY' object type for them (the call fails with "Cannot
-		// initialize Snowflake Metadata. Dictionary unavailable"), so packages
-		// policies have no GET_DDL mapping at all, handled like image repositories
-		// and services.
-		ddlKind = "POLICY"
-	case "NETWORK RULE":
-		ddlKind = "NETWORK_RULE"
-	case "AGENT":
-		// GET_DDL exposes Cortex agents under the CORTEX_AGENT object type (the
-		// SHOW kind is "AGENT"). External agents have no GET_DDL object type and
-		// are excluded in GetObjectDDL.
-		ddlKind = "CORTEX_AGENT"
-	case "EXTERNAL FUNCTION":
-		// GET_DDL has no EXTERNAL_FUNCTION object type — external functions are
-		// retrieved via the 'FUNCTION' type (with the argument signature appended
-		// to the identifier above).
-		ddlKind = "FUNCTION"
-	case "DATA METRIC FUNCTION":
-		// GET_DDL has no DATA_METRIC_FUNCTION object type — data metric functions
-		// are retrieved via the 'FUNCTION' type (with the TABLE argument signature
-		// appended to the identifier above).
-		ddlKind = "FUNCTION"
+	if k, ok := objectkind.ByName(kind); ok && k.GetDDLType != "" {
+		ddlKind = k.GetDDLType
 	}
 	escapedKind := EscapeStringLit(ddlKind)
 	// The third argument (true) enables recursive DDL output for objects that
