@@ -179,6 +179,47 @@ func registerStreamlitTools(srv *mcpsdk.Server, workspaceRoot string) {
 	})
 }
 
+// validateDeployStreamlitFields checks the required deploy inputs and returns
+// the trimmed entrypoint. Nothing is defaulted from the session context: a
+// deploy names its target explicitly or it does not happen.
+func validateDeployStreamlitFields(in deployStreamlitInput) (string, error) {
+	if strings.TrimSpace(in.Database) == "" {
+		return "", fmt.Errorf("database is required")
+	}
+	if strings.TrimSpace(in.Schema) == "" {
+		return "", fmt.Errorf("schema is required")
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(in.LocalDir) == "" {
+		return "", fmt.Errorf("localDir is required")
+	}
+	mainFile := strings.TrimSpace(in.MainFile)
+	if mainFile == "" {
+		return "", fmt.Errorf("mainFile is required")
+	}
+	return mainFile, nil
+}
+
+// validateDeployStreamlitPaths keeps a deploy inside the sandbox: the app folder
+// must resolve inside the workspace root, and the entrypoint must be a relative
+// path resolving inside that folder — so an app can neither be uploaded from
+// outside the workspace nor claim a main file it does not contain. Both checks
+// resolve symlinks, so a link planted inside the workspace cannot tunnel out.
+func validateDeployStreamlitPaths(localDir, mainFile, workspaceRoot string) error {
+	if err := filesystem.ValidateInsideOrEqual(localDir, workspaceRoot); err != nil {
+		return fmt.Errorf("access denied: %w", err)
+	}
+	if filepath.IsAbs(mainFile) {
+		return fmt.Errorf("mainFile must be a path relative to localDir")
+	}
+	if err := filesystem.ValidateInsideOrEqual(filepath.Join(localDir, filepath.FromSlash(mainFile)), localDir); err != nil {
+		return fmt.Errorf("invalid mainFile: %w", err)
+	}
+	return nil
+}
+
 // registerStreamlitModeTools registers deploy_streamlit, which is gated twice
 // over. Called from both buildServer (initial setup) and updateMode (mode
 // switches); "deploy_streamlit" is listed in modeSpecificToolNames so updateMode
@@ -207,36 +248,19 @@ func registerStreamlitModeTools(srv *mcpsdk.Server, client *snowflake.Client, wo
 			"set orReplace only when overwriting the named app is intended. " +
 			"The app folder must be inside the configured workspace root. Returns the CREATE STREAMLIT statement that was executed.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in deployStreamlitInput) (*mcpsdk.CallToolResult, any, error) {
-		if strings.TrimSpace(in.Database) == "" {
-			return nil, nil, fmt.Errorf("database is required")
+		mainFile, err := validateDeployStreamlitFields(in)
+		if err != nil {
+			return nil, nil, err
 		}
-		if strings.TrimSpace(in.Schema) == "" {
-			return nil, nil, fmt.Errorf("schema is required")
-		}
-		if strings.TrimSpace(in.Name) == "" {
-			return nil, nil, fmt.Errorf("name is required")
-		}
-		if strings.TrimSpace(in.LocalDir) == "" {
-			return nil, nil, fmt.Errorf("localDir is required")
-		}
-		mainFile := strings.TrimSpace(in.MainFile)
-		if mainFile == "" {
-			return nil, nil, fmt.Errorf("mainFile is required")
-		}
+		// The connection check precedes path validation on purpose: without a
+		// client the tool can do nothing anyway, and answering path questions
+		// first would let a caller probe the filesystem through the differing
+		// validation errors (same ordering as generate_dbt_project).
 		if client == nil {
 			return nil, nil, fmt.Errorf("no active Snowflake connection")
 		}
-		if err := filesystem.ValidateInsideOrEqual(in.LocalDir, workspaceRoot); err != nil {
-			return nil, nil, fmt.Errorf("access denied: %w", err)
-		}
-		// The entrypoint is a path relative to the app folder; reject an absolute
-		// path or one that climbs out of it, so the uploaded app can't claim a
-		// main file it doesn't contain.
-		if filepath.IsAbs(mainFile) {
-			return nil, nil, fmt.Errorf("mainFile must be relative to localDir")
-		}
-		if err := filesystem.ValidateInsideOrEqual(filepath.Join(in.LocalDir, filepath.FromSlash(mainFile)), in.LocalDir); err != nil {
-			return nil, nil, fmt.Errorf("invalid mainFile: %w", err)
+		if err := validateDeployStreamlitPaths(in.LocalDir, mainFile, workspaceRoot); err != nil {
+			return nil, nil, err
 		}
 
 		stmt, err := streamlit.DeployStreamlit(ctx, client, streamlit.DeployStreamlitParams{
