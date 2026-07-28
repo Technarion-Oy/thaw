@@ -126,7 +126,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 60 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+8), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), and SQL execution tools (+6–7 in readonly/explain_only modes):
+The server exposes 62 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+9), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), SQL execution tools (+6–7 in readonly/explain_only modes), and `deploy_streamlit` (+1, readonly mode with a workspace root only):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 

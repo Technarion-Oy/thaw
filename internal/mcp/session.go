@@ -191,13 +191,15 @@ func (s *session) updateMode(ctx context.Context, newMode string) error {
 	// Note: tab tools (open_sql_tab) and schema-browsing tools are always-on
 	// and not mode-gated — they are registered once in buildServer and must
 	// NOT appear in modeSpecificToolNames. SQL execution, editor context,
-	// and pipeline tools (preview_stage_file) are mode-specific.
+	// pipeline tools (preview_stage_file), and the Streamlit deploy tool are
+	// mode-specific.
 	s.server.RemoveTools(modeSpecificToolNames...)
 	if newMode == ExecutionModeReadonly || newMode == ExecutionModeExplainOnly {
 		registerSQLTools(s.server, s.client, newMode, s.cfg)
 	}
 	registerEditorTools(s.server, s.client, newMode, s.editorCtx)
 	registerPipelineModeTools(s.server, s.client, newMode)
+	registerStreamlitModeTools(s.server, s.client, s.cfg.WorkspaceRoot, newMode)
 
 	s.mode = newMode
 	return nil
