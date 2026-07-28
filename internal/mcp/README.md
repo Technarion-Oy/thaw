@@ -105,7 +105,7 @@ A `sync.RWMutex`-protected map of `tabID → {sql, result}` plus the active tab 
 | `Role` / `PinnedRole` | Runs `USE ROLE <role>` at session start. When `PinnedRole` is true, the `use_role` tool is not registered, preventing the AI client from switching roles. |
 | `Warehouse` / `PinnedWarehouse` | Runs `USE WAREHOUSE <warehouse>` at session start. When `PinnedWarehouse` is true, the `use_warehouse` tool is not registered. |
 | `SecondaryRoles` | When set to `"none"`, runs `USE SECONDARY ROLES NONE` at session start to restrict the session to only its primary role's grants. |
-| `WorkspaceRoot` | The directory that workspace tools are sandboxed to (populated from the app's cached export directory). When empty, workspace tools are not registered at all. All path inputs are validated against this root using `filesystem.ValidateInsideOrEqual` (symlink-resolving, case-aware). |
+| `WorkspaceRoot` | The directory that workspace tools are sandboxed to (populated from the app's cached export directory). When empty, workspace tools are not registered at all — this also gates the workspace-writing tools outside `workspace_tools.go`: `scan_migration_source`, `generate_dbt_project`, `read_notebook`, `create_streamlit_from_template`, and `deploy_streamlit`. All path inputs are validated against this root using `filesystem.ValidateInsideOrEqual` (symlink-resolving, case-aware). |
 
 ### SQL execution pipeline
 
@@ -234,6 +234,25 @@ All builder tools are pure SQL generators — no Snowflake client required, no S
 | `generate_dbt_project` | Workspace-gated (nil-client check at call time) | Scaffold a dbt project pre-wired to the active Snowflake connection (delegates to `dbt.CreateProject`) |
 
 `scan_migration_source` and `generate_dbt_project` are only registered when `WorkspaceRoot` is set in `SessionConfig`, matching the `registerWorkspaceTools` pattern. Both validate path inputs against the workspace root using `filesystem.ValidateInsideOrEqual`. `analyze_migration` and `generate_migration_script` are always registered (like builder tools); `analyze_migration` checks for a nil client at call time. All tools use a no-op emit callback since MCP does not stream progress events.
+
+**Streamlit tools** (`streamlit_tools.go`):
+
+| Tool | Gating | Description |
+|---|---|---|
+| `build_create_streamlit_sql` | Always registered (pure builder) | Generate `CREATE STREAMLIT` DDL from a `streamlit.StreamlitConfig` (delegates to `streamlit.BuildCreateStreamlitSql`) |
+| `list_streamlit_templates` | Always registered (network read, no client) | List the app templates in `Snowflake-Labs/snowflake-demo-streamlit` with descriptions (delegates to `streamlittemplate.ListTemplates`) |
+| `create_streamlit_from_template` | Workspace-gated | Scaffold one template into a local folder with its LICENSE + NOTICE (delegates to `streamlittemplate.DownloadTemplate`); returns the detected entrypoint |
+| `deploy_streamlit` | Workspace-gated **and** `readonly` mode only | Upload a local app folder to a temporary stage and create a STREAMLIT object (delegates to `streamlit.DeployStreamlit`); returns the executed statement |
+
+`deploy_streamlit` is the **only MCP tool that mutates Snowflake** — everything else reads, generates SQL for a human to run, or writes into the local workspace. It is therefore gated twice: a workspace root must be configured (it reads local files), and the mode must be `readonly`. `explain_only` is deliberately excluded even though it also registers `execute_snowflake_sql`: that mode's contract is that a statement is never actually executed, and a deploy would silently break it. The tool is listed in `modeSpecificToolNames`, so `updateMode` strips it before re-registering for the new mode (`registerStreamlitModeTools` is called from both `buildServer` and `updateMode`).
+
+Practical consequence of the workspace gate: `WorkspaceRoot` is populated from the app's cached export directory (`App.StartMCPSession`), so an MCP client can only scaffold into, and deploy from, folders under that directory — a Streamlit app living elsewhere on disk is refused with `access denied`. This is the same constraint `read_notebook` and `scan_migration_source` already work under.
+
+There is **no PUT feature flag to honour**: `PutCommand` was deleted in feature-flags v18 (issue #567) and was never admin-lockable, so PUT is unconditionally available and nothing needs threading into `SessionConfig`. The MCP surface as a whole remains gated by the admin-lockable `mcpServer` flag, enforced in `App.StartMCPSession`.
+
+Safety rails on `deploy_streamlit` (issue #847): `database`, `schema` and `name` are required and never defaulted from the session context; `orReplace` is an explicit opt-in so an existing app is never silently overwritten; `localDir` is validated against the workspace root and `mainFile` must resolve inside `localDir`; and the executed `CREATE STREAMLIT` statement is returned in the result so the client can show exactly what ran. `create_streamlit_from_template` validates `destDir` with `filesystem.ValidatePathOrAncestorInsideOrEqual` (the destination legitimately may not exist yet — `DownloadTemplate` creates it and refuses a non-empty folder).
+
+Both template tools stamp their result with the upstream attribution (`Snowflake-Labs/snowflake-demo-streamlit`, its URL, and `Apache-2.0`, from the exported `streamlittemplate.Repo`/`RepoURL`/`License` consts), so an MCP client can surface the same credit the Thaw UI does. Scaffolded folders additionally carry the LICENSE and NOTICE files written by `DownloadTemplate`.
 
 **Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 
