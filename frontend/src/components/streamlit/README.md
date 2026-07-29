@@ -36,6 +36,13 @@ object browser.
   Python environment via `StartStreamlitPreview` (backend `internal/snowpark`),
   streams `snowpark:streamlit-*` events, opens the browser when the server is
   ready, and offers Stop / Open-in-browser. Stops the process on unmount / Stop.
+  A `cancelled` ref (the `useSqlPreview` pattern from `createModalHooks.ts`)
+  covers the close-while-starting case: the unmount cleanup's
+  `StopStreamlitPreview` runs before the backend has recorded the process, so the
+  in-flight `handleStart` stops it on arrival and subscribes to nothing —
+  otherwise its listeners outlived the modal and the ready event opened a browser
+  tab after the dialog was gone. `snowpark:streamlit-error` (the readiness
+  timeout) surfaces as a message instead of a permanent "Starting…".
   Surfaces the **runtime-parity caveat** (Snowflake pins Python/Streamlit versions
   and an allow-listed Anaconda set, so local ≠ Snowflake).
 - **`NewStreamlitFromTemplateModal.tsx`** — scaffolds a new **local** Streamlit

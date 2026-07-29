@@ -38,6 +38,13 @@ const (
 	// maxResponseBytes caps a single HTTP response body (tree JSON or a raw file),
 	// a guard against a pathologically large download.
 	maxResponseBytes = 32 << 20 // 32 MiB
+
+	// contentsPageSize / contentsMaxPages bound the paginated top-level listing:
+	// 100 is the endpoint's maximum page size, and 20 pages is far past any
+	// plausible number of template folders — reaching it means something is wrong,
+	// and it is reported rather than silently truncating the catalog.
+	contentsPageSize = 100
+	contentsMaxPages = 20
 )
 
 // Base URLs are package vars (not consts) so tests can point them at an httptest
@@ -129,23 +136,49 @@ type contentsEntry struct {
 
 // fetchTopLevelDirs returns the deployable top-level folder names, sorted,
 // excluding shared_assets and hidden entries.
+//
+// The contents endpoint is paginated, so this walks pages rather than trusting a
+// single response: a repo whose top level outgrew one page would otherwise yield
+// a quietly incomplete catalog with no degraded-mode signal, the one failure this
+// package must never produce silently (the git-tree path in download.go checks
+// `truncated` for the same reason). Running past contentsMaxPages is reported as
+// an error, which ListTemplates turns into a Degraded catalog.
 func fetchTopLevelDirs(ctx context.Context) ([]string, error) {
-	u := fmt.Sprintf("%s/repos/%s/%s/contents?ref=%s",
-		githubAPIBase, url.PathEscape(repoOwner), url.PathEscape(repoName), url.QueryEscape(repoRef))
-	body, err := httpGet(ctx, u, "application/vnd.github+json")
-	if err != nil {
-		return nil, err
-	}
-	var entries []contentsEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("decode repo contents: %w", err)
-	}
 	var names []string
-	for _, e := range entries {
-		if e.Type != "dir" || excludedTopLevel[e.Name] || strings.HasPrefix(e.Name, ".") {
-			continue
+	seen := map[string]bool{}
+	for page := 1; ; page++ {
+		if page > contentsMaxPages {
+			return nil, fmt.Errorf("repository has more top-level folders than can be listed (%d pages)", contentsMaxPages)
 		}
-		names = append(names, e.Name)
+		u := fmt.Sprintf("%s/repos/%s/%s/contents?ref=%s&per_page=%d&page=%d",
+			githubAPIBase, url.PathEscape(repoOwner), url.PathEscape(repoName),
+			url.QueryEscape(repoRef), contentsPageSize, page)
+		body, err := httpGet(ctx, u, "application/vnd.github+json")
+		if err != nil {
+			return nil, err
+		}
+		var entries []contentsEntry
+		if err := json.Unmarshal(body, &entries); err != nil {
+			return nil, fmt.Errorf("decode repo contents: %w", err)
+		}
+
+		fresh := 0
+		for _, e := range entries {
+			if e.Type != "dir" || excludedTopLevel[e.Name] || strings.HasPrefix(e.Name, ".") {
+				continue
+			}
+			if seen[e.Name] {
+				continue
+			}
+			seen[e.Name] = true
+			fresh++
+			names = append(names, e.Name)
+		}
+		// A short page is the last one. `fresh == 0` also stops a server that
+		// ignores the pagination parameters and keeps replaying the same page.
+		if len(entries) < contentsPageSize || fresh == 0 {
+			break
+		}
 	}
 	sort.Strings(names)
 	return names, nil
@@ -229,7 +262,11 @@ func truncate(s string, max int) string {
 }
 
 // httpGet performs a GET with the shared client, returning the body bytes. It
-// maps a GitHub rate-limit 403 and other non-2xx statuses to clear errors.
+// maps GitHub's rate-limit responses — primary (403 with X-RateLimit-Remaining: 0)
+// and secondary/abuse (403 or 429 with Retry-After, or a body saying so) — to one
+// clear error, and any other non-2xx status to a generic one. The distinction
+// matters upstream: ListTemplates puts the rate-limit reason in its degraded note
+// so a user hitting the unauthenticated limit knows to simply wait.
 func httpGet(ctx context.Context, u, accept string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -245,14 +282,37 @@ func httpGet(ctx context.Context, u, accept string) ([]byte, error) {
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
-		return nil, fmt.Errorf("GitHub API rate limit exceeded; try again later")
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if msg, limited := rateLimitMessage(resp, snippet); limited {
+			return nil, fmt.Errorf("%s", msg)
+		}
 		return nil, fmt.Errorf("GitHub returned %s: %s", resp.Status, strings.TrimSpace(string(snippet)))
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+}
+
+// rateLimitMessage reports whether an error response is a rate limit, and with
+// what message. GitHub signals three ways: the primary limit (403 +
+// X-RateLimit-Remaining: 0), the secondary/abuse limit (403 or 429, usually with
+// Retry-After), and 429 on its own.
+func rateLimitMessage(resp *http.Response, body []byte) (string, bool) {
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return "", false
+	}
+	retryAfter := resp.Header.Get("Retry-After")
+	limited := resp.StatusCode == http.StatusTooManyRequests ||
+		resp.Header.Get("X-RateLimit-Remaining") == "0" ||
+		retryAfter != "" ||
+		strings.Contains(strings.ToLower(string(body)), "rate limit")
+	if !limited {
+		return "", false
+	}
+	msg := "GitHub API rate limit exceeded; try again later"
+	if retryAfter != "" {
+		msg += fmt.Sprintf(" (retry after %s)", strings.TrimSpace(retryAfter))
+	}
+	return msg, true
 }
 
 // rawURL builds a raw.githubusercontent.com URL for a repo-relative path,

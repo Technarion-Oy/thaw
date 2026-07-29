@@ -73,8 +73,13 @@ func BuildCreateStreamlitSql(db, schema string, cfg StreamlitConfig) (string, er
 	if eai := snowflake.SplitIdentList(cfg.ExternalAccessIntegrations, false); len(eai) > 0 {
 		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(eai, ", "))
 	}
+	// TITLE is human-entered display text, so it is escaped like COMMENT
+	// (EscapeTextLit doubles backslashes as well as quotes). EscapeStringLit is
+	// for delimiter/control values where a backslash escape is intentional; used
+	// here it silently swallowed a lone backslash — Snowflake reads '\d' inside a
+	// single-quoted literal as an escape sequence.
 	if t := strings.TrimSpace(cfg.Title); t != "" {
-		fmt.Fprintf(&sb, "\n  TITLE = '%s'", snowflake.EscapeStringLit(t))
+		fmt.Fprintf(&sb, "\n  TITLE = %s", snowflake.QuoteTextLit(t))
 	}
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 

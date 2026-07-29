@@ -40,6 +40,13 @@ func (a *App) DetectStreamlitMainFile(dir string) (streamlit.MainFileResult, err
 // The executed CREATE STREAMLIT statement returned by streamlit.DeployStreamlit
 // is dropped here: the modal already previews the statement it asked for. The MCP
 // deploy_streamlit tool keeps it, where the AI client has no such preview.
+//
+// Unlike its siblings here (ListStreamlitTemplates: 25s, CreateStreamlitFromTemplate:
+// 2min) this method deliberately takes no timeout beyond the app-lifetime context:
+// a deploy is one PUT per file against the user's own warehouse, so its duration
+// scales with the app folder and the connection, and any fixed deadline would
+// abort a legitimate large upload part-way — leaving a half-populated stage behind.
+// The user cancels by quitting or disconnecting, which cancels a.ctx.
 func (a *App) DeployStreamlit(params streamlit.DeployStreamlitParams) error {
 	client := a.currentClient()
 	if client == nil {

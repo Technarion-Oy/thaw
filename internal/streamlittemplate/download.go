@@ -22,8 +22,11 @@ import (
 // for attribution.
 //
 // destDir must be empty or not yet exist — DownloadTemplate refuses to overwrite a
-// non-empty target (the caller confirms destination choice in the UI).
-func DownloadTemplate(ctx context.Context, name, destDir string) error {
+// non-empty target (the caller confirms destination choice in the UI). A download
+// that fails part-way is rolled back (see rollbackScaffold), so the destination is
+// never left holding half an app — which, given the empty-destination rule, would
+// otherwise permanently block retrying into the same folder.
+func DownloadTemplate(ctx context.Context, name, destDir string) (err error) {
 	if !validTemplateName(name) {
 		return fmt.Errorf("invalid template name %q", name)
 	}
@@ -38,6 +41,9 @@ func DownloadTemplate(ctx context.Context, name, destDir string) error {
 	if !empty {
 		return fmt.Errorf("destination folder is not empty: %s", destDir)
 	}
+	// Whether the folder already existed decides how far the rollback goes: an
+	// empty folder the user picked stays, one created here is removed entirely.
+	destExisted := dirExists(destDir)
 
 	rels, err := fetchTemplateFiles(ctx, name)
 	if err != nil {
@@ -50,18 +56,35 @@ func DownloadTemplate(ctx context.Context, name, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
+	// From here on the destination has been touched: undo it on any failure. Safe
+	// because the destination was verified empty above, so everything under it is
+	// ours.
+	defer func() {
+		if err != nil {
+			rollbackScaffold(destDir, destExisted)
+		}
+	}()
+
+	// Resolve — and reject — every path BEFORE starting any download, so one bad
+	// tree entry fails the scaffold without a single request going out. Doing this
+	// inside the fetch loop instead would return while sibling goroutines were
+	// still writing, and the rollback would then race those writes.
+	targets := make([]string, len(rels))
+	for i, rel := range rels {
+		target, terr := safeJoin(destDir, rel)
+		if terr != nil {
+			return terr
+		}
+		targets[i] = target
+	}
 
 	// Fetch + write each file with bounded parallelism (mirrors the SetLimit(8)
 	// used by ListTemplates' description fetch) so a multi-file template scaffolds
 	// as fast as its slowest file rather than the sum of them.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(8)
-	for _, rel := range rels {
-		// Reject unsafe paths before any download so a bad tree entry fails fast.
-		target, err := safeJoin(destDir, rel)
-		if err != nil {
-			return err
-		}
+	for i, rel := range rels {
+		target := targets[i]
 		g.Go(func() error {
 			data, err := httpGet(gctx, rawURL(path.Join(name, rel)), "")
 			if err != nil {
@@ -102,13 +125,48 @@ func writeLicenseAndNotice(ctx context.Context, name, destDir string) error {
 		}
 	}
 
-	notice := fmt.Sprintf(
+	provenance := fmt.Sprintf(
 		"Based on \"%s\" from %s (%s).\nSource: %s\n",
 		name, Repo, License, RepoURL)
-	if err := os.WriteFile(filepath.Join(destDir, "NOTICE"), []byte(notice), 0o644); err != nil {
+
+	// A NOTICE shipped by the template itself is part of what Apache-2.0 §4(d)
+	// requires downstream copies to carry, so it is appended to rather than
+	// overwritten — the same reasoning that leaves a template's own LICENSE alone.
+	noticePath := filepath.Join(destDir, "NOTICE")
+	notice := []byte(provenance)
+	if existing, rerr := os.ReadFile(noticePath); rerr == nil {
+		if !strings.HasSuffix(string(existing), "\n") {
+			existing = append(existing, '\n')
+		}
+		notice = append(existing, append([]byte("\n"), provenance...)...)
+	}
+	if err := os.WriteFile(noticePath, notice, 0o644); err != nil {
 		return fmt.Errorf("write NOTICE: %w", err)
 	}
 	return nil
+}
+
+// rollbackScaffold undoes a partial download: the whole folder when this call
+// created it, otherwise just its contents (it was verified empty beforehand).
+// Best-effort — a failure to clean up must not mask the error that caused it.
+func rollbackScaffold(destDir string, destExisted bool) {
+	if !destExisted {
+		_ = os.RemoveAll(destDir)
+		return
+	}
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		_ = os.RemoveAll(filepath.Join(destDir, e.Name()))
+	}
+}
+
+// dirExists reports whether path is an existing directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // treeResponse is the GitHub "get a tree (recursive)" response.

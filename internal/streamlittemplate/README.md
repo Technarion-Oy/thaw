@@ -15,7 +15,10 @@ single chosen folder locally — never a full clone of the 30+ demos.
 - `ListTemplates(ctx) Catalog` — the deployable top-level folders (excludes
   `shared_assets` and hidden entries), each with a one-line `Description` taken
   from its `README.md` first paragraph (best-effort, fetched in parallel with a
-  concurrency cap). **Never errors on network/rate-limit failure**: those return
+  concurrency cap). The contents endpoint is **paginated** (`per_page=100`, up to
+  `contentsMaxPages`), so a repo that outgrows one page can't yield a quietly
+  incomplete catalog; running past the page cap is an error, not a truncation.
+  **Never errors on network/rate-limit failure**: those return
   a `Catalog{Degraded: true}` carrying `embeddedTemplateNames` (names only) plus
   a human-readable `Note`, so the picker stays usable and the feature is purely
   additive.
@@ -23,7 +26,11 @@ single chosen folder locally — never a full clone of the 30+ demos.
   `destDir`, preserving its relative structure. Fetches **only the chosen
   folder's files** via the GitHub git-tree API (one request) + raw file
   downloads (fetched with bounded parallelism, `errgroup.SetLimit(8)`, matching
-  `ListTemplates`' description fetch). Refuses a non-empty destination. Writes the repo's Apache-2.0
+  `ListTemplates`' description fetch). Refuses a non-empty destination, and
+  **rolls back on failure** (`rollbackScaffold`): a folder it created is removed,
+  a pre-existing empty folder is emptied again — otherwise a half-written app
+  would trip the empty-destination rule and block every retry into that folder.
+  Writes the repo's Apache-2.0
   `LICENSE` (best-effort download, bundled fallback header if unreachable) and a
   `NOTICE` provenance line for attribution; the template's own `README.md` is
   kept.
@@ -47,6 +54,15 @@ single chosen folder locally — never a full clone of the 30+ demos.
   deps), so the in-UI credit is the attribution surface. The MCP tools are a
   second such surface and carry the same credit in their results (see
   `internal/mcp/streamlit_tools.go`).
+- **A template's own `LICENSE`/`NOTICE` is never overwritten.** An existing
+  `LICENSE` is left alone, and an existing `NOTICE` is *appended to* with Thaw's
+  provenance lines rather than replaced — Apache-2.0 §4(d) requires a downstream
+  copy to carry the upstream `NOTICE` contents forward.
+- **Rate limiting** is detected for both of GitHub's forms: the primary limit
+  (403 + `X-RateLimit-Remaining: 0`) and the secondary/abuse limit (403 or 429,
+  usually with `Retry-After`, or a body that says so) — `rateLimitMessage` maps
+  them all to one "rate limit exceeded" error, which `ListTemplates` turns into
+  its `Degraded` note. A plain 403 (e.g. a private repo) stays a generic error.
 - **Path safety**: `validTemplateName` rejects traversal/hidden/excluded names,
   and `safeJoin` rejects any tree entry that would escape `destDir`.
 - Base URLs (`githubAPIBase`, `rawBase`) are package vars so tests can point them

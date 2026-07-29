@@ -52,9 +52,24 @@ func TestDeployStreamlit(t *testing.T) {
 	writeAppFile(t, appDir, "helpers.py", "def greet():\n    return 'hi'\n")
 	writeAppFile(t, appDir, "environment.yml", "name: sf_env\ndependencies:\n  - streamlit\n")
 	writeAppFile(t, appDir, "pages/page_1.py", "import streamlit as st\nst.write('page 1')\n")
+	// A subdirectory whose name contains a space: ordinary in a real app folder,
+	// and the case that used to fail the whole deploy at the first PUT into it
+	// (the stage reference is quoted for file transfers now).
+	writeAppFile(t, appDir, "static files/logo.txt", "not really a logo\n")
 	writeAppFile(t, appDir, ".DS_Store", "junk")
 	writeAppFile(t, appDir, ".git/config", "[core]\n")
 	writeAppFile(t, appDir, "__pycache__/helpers.cpython-310.pyc", "bytecode")
+
+	// A symlink pointing outside the app folder must be skipped, not followed:
+	// PUT opens the local path through the link, so uploading it would copy an
+	// unrelated file into the stage. The deploy must still succeed.
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("do not upload"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(appDir, "leak.txt")); err != nil {
+		t.Logf("skipping symlink case: %v", err)
+	}
 
 	// Main-file detection should pick the conventional entrypoint.
 	detected, err := streamlit.DetectStreamlitMainFile(appDir)
@@ -105,6 +120,39 @@ func TestDeployStreamlit(t *testing.T) {
 		t.Errorf("expected the redeploy statement to use OR REPLACE, got %q", stmt)
 	}
 	assertStreamlitMainFile(t, client, fqn, "streamlit_app.py")
+
+	// Failure path: deploying onto the existing name without OR REPLACE must fail
+	// at CREATE STREAMLIT — after the upload — which is the one case that
+	// exercises the deferred DROP STAGE. The temp stage must not survive it.
+	params.OrReplace = false
+	failCtx, cancel3 := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel3()
+	stmt, err = streamlit.DeployStreamlit(failCtx, client, params)
+	if err == nil {
+		t.Fatal("expected the no-OR-REPLACE redeploy to fail on an existing app")
+	}
+	if !strings.Contains(stmt, "CREATE STREAMLIT") {
+		t.Errorf("expected the attempted statement to be returned alongside the error, got %q", stmt)
+	}
+	assertNoLeftoverDeployStages(t, client, dbName)
+}
+
+// assertNoLeftoverDeployStages checks that no THAW_STREAMLIT_* stage is left in
+// the schema after a failed deploy — the deferred DROP STAGE ran. Best-effort by
+// nature: the stages are TEMPORARY, so a stage created on another pooled session
+// would not be listed here either; this catches the case where the drop was
+// skipped outright.
+func assertNoLeftoverDeployStages(t *testing.T, client *snowflake.Client, dbName string) {
+	t.Helper()
+	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := client.Execute(c, fmt.Sprintf(`SHOW STAGES LIKE 'THAW_STREAMLIT%%' IN SCHEMA "%s"."PUBLIC"`, dbName))
+	if err != nil {
+		t.Fatalf("SHOW STAGES: %v", err)
+	}
+	if len(res.Rows) != 0 {
+		t.Errorf("failed deploy left %d temporary stage(s) behind", len(res.Rows))
+	}
 }
 
 // writeAppFile writes content to appDir/rel, creating parent directories.

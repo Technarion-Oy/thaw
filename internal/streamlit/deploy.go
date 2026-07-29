@@ -4,6 +4,7 @@ package streamlit
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -55,8 +56,12 @@ func DeployStreamlit(ctx context.Context, client *snowflake.Client, params Deplo
 		return "", fmt.Errorf("MainFile must be provided")
 	}
 
-	// Create a temporary stage in the target schema.
-	stageName := fmt.Sprintf("THAW_STREAMLIT_%d", time.Now().UnixNano())
+	// Create a temporary stage in the target schema. The name carries a random
+	// suffix as well as the timestamp: two deploys started in the same clock tick
+	// (coarse timers on some platforms, or an MCP client firing in parallel) would
+	// otherwise collide on the name, and the second CREATE TEMPORARY STAGE would
+	// silently reuse the first one's stage and mix both apps' files.
+	stageName := fmt.Sprintf("THAW_STREAMLIT_%d_%s", time.Now().UnixNano(), randomSuffix())
 	stageRef := fmt.Sprintf(`%s.%s.%s`, snowflake.QuoteIdent(params.Database), snowflake.QuoteIdent(params.Schema), stageName)
 	stageAt := "@" + stageRef
 
@@ -79,6 +84,18 @@ func DeployStreamlit(ctx context.Context, client *snowflake.Client, params Deplo
 		return sql, fmt.Errorf("create streamlit: %w", err)
 	}
 	return sql, nil
+}
+
+// randomSuffix returns 8 hex characters of crypto-random data for the temporary
+// stage name. It falls back to a nanosecond-derived value if the system source is
+// unavailable — the suffix only has to make a collision improbable, it is not a
+// security boundary.
+func randomSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%08X", uint32(time.Now().UnixNano()))
+	}
+	return fmt.Sprintf("%X", b)
 }
 
 // deployConfig maps the deploy params and the (already-created) temp stage

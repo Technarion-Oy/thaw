@@ -62,6 +62,15 @@ SQL the way the deploy modal does. `App.DeployStreamlit` discards it.
   single leading `@`.
 - `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive; when both are set the
   builder drops `IF NOT EXISTS`.
+- **`TITLE` is free text, so it is quoted with `snowflake.QuoteTextLit`** (the
+  `COMMENT` escaping), not `EscapeStringLit`. Snowflake treats `\` as an escape
+  inside a single-quoted literal, so the delimiter-oriented escaper silently
+  swallowed a lone backslash in a display title.
+- The temporary stage name is `THAW_STREAMLIT_<unixnano>_<random>`. The random
+  suffix matters: two deploys starting in the same clock tick (coarse platform
+  timers, or an MCP client firing in parallel) would otherwise pick the same name
+  and the second `CREATE TEMPORARY STAGE` would silently reuse the first's stage,
+  mixing both apps' files.
 - Mutations (`MAIN_FILE` / `QUERY_WAREHOUSE` / `TITLE` / `COMMENT` /
   `EXTERNAL_ACCESS_INTEGRATIONS` `SET`/`UNSET`, and `RENAME TO`) are issued as
   free-form `ALTER STREAMLIT` statements via `App.AlterStreamlit` in

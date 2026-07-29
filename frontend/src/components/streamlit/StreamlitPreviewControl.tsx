@@ -32,6 +32,9 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
 
   // Active event unsubscribers, torn down on stop / unmount.
   const offs = useRef<Array<() => void>>([]);
+  // Set on unmount: a start already in flight must not subscribe or open a
+  // browser tab against a component that is gone (see handleStart).
+  const cancelled = useRef(false);
 
   const teardown = () => {
     offs.current.forEach((off) => off());
@@ -41,17 +44,28 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
   // Stop the preview if the modal unmounts while it's still running.
   useEffect(() => {
     return () => {
+      cancelled.current = true;
       teardown();
       StopStreamlitPreview().catch(() => {});
     };
   }, []);
 
   const handleStart = async () => {
+    if (starting) return;
     setStarting(true);
     setReady(false);
     setLastLine("");
     try {
       const res = await StartStreamlitPreview(localDir, mainFile);
+      // The modal can close while the start is in flight: its cleanup already ran
+      // its StopStreamlitPreview against a backend that had nothing recorded yet,
+      // so stop the process we just learned about and subscribe to nothing —
+      // otherwise these listeners outlive the component and the ready event pops
+      // a browser tab long after the user closed the dialog.
+      if (cancelled.current) {
+        StopStreamlitPreview().catch(() => {});
+        return;
+      }
       setUrl(res.url);
       setRunning(true);
       teardown();
@@ -65,6 +79,15 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
           setReady(false);
           teardown();
         }),
+        // The preview started but never answered on its port — no ready event is
+        // coming, so surface the reason instead of showing "Starting…" forever.
+        EventsOn("snowpark:streamlit-error", (msg: string) => {
+          setReady(false);
+          if (msg) {
+            setLastLine(msg);
+            message.error(msg);
+          }
+        }),
         EventsOn("snowpark:streamlit-output", (line: string) => {
           if (line) setLastLine(line);
         }),
@@ -72,7 +95,7 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
     } catch (e) {
       message.error(String(e));
     } finally {
-      setStarting(false);
+      if (!cancelled.current) setStarting(false);
     }
   };
 

@@ -2019,10 +2019,38 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 // crafted name graft a second query, e.g. `foo UNION SELECT secret FROM t`.
 // '..' path segments are rejected as defense-in-depth against traversal within the
 // stage. Legitimate filenames needing spaces/quotes aren't expressible in an
-// unquoted stage path anyway, so nothing valid is lost.
+// unquoted stage path anyway, so nothing valid is lost — except in PUT/GET, which
+// accept a single-quoted reference; see ValidateStageFileRef.
 func ValidateStageRef(stageName string) error {
+	_, err := validateStageRef(stageName, false)
+	return err
+}
+
+// ValidateStageFileRef is ValidateStageRef relaxed for the file-transfer commands
+// (PUT/GET), which — unlike LIST/REMOVE/SELECT — accept the whole stage reference
+// wrapped in single quotes, where whitespace no longer terminates it. It reports
+// whether the path segment contains whitespace, i.e. whether the caller MUST emit
+// the quoted form (NormalizeStageFileRef does this).
+//
+// This exists because a stage path mirrors local folder names on the way in: a
+// Streamlit app with a "static files/" folder is entirely ordinary, and rejecting
+// it failed the whole deploy at the first PUT into that subdirectory. Whitespace
+// is still illegal in the identifier prefix (db/schema/stage) unless it sits
+// inside a quoted identifier, and every other rule is unchanged — in particular a
+// single-quote anywhere is still rejected, which is what makes wrapping the
+// reference in single quotes safe.
+func ValidateStageFileRef(stageName string) (pathHasSpace bool, err error) {
+	return validateStageRef(stageName, true)
+}
+
+// validateStageRef implements both variants. When allowPathSpaces is true, spaces
+// and tabs are tolerated after the first unquoted '/' (the path segment) and
+// reported back so the caller can quote the reference; they remain illegal in the
+// identifier prefix, and CR/LF/NUL remain illegal everywhere.
+func validateStageRef(stageName string, allowPathSpaces bool) (bool, error) {
 	inQuote := false
 	pathStart := -1 // index of the first unquoted '/' (stage-vs-path separator), -1 until seen
+	pathHasSpace := false
 	for i := 0; i < len(stageName); i++ {
 		c := stageName[i]
 		if inQuote {
@@ -2046,22 +2074,24 @@ func ValidateStageRef(stageName string) error {
 				inQuote = true
 				continue
 			}
-			return fmt.Errorf("invalid stage reference %q: unexpected quote", stageName)
+			return false, fmt.Errorf("invalid stage reference %q: unexpected quote", stageName)
+		case (c == ' ' || c == '\t') && allowPathSpaces && pathStart >= 0:
+			pathHasSpace = true
 		case c == ';' || c == '\'' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0:
-			return fmt.Errorf("invalid stage reference %q: contains illegal character", stageName)
+			return false, fmt.Errorf("invalid stage reference %q: contains illegal character", stageName)
 		case c == '-' && i+1 < len(stageName) && stageName[i+1] == '-':
-			return fmt.Errorf("invalid stage reference %q: contains a SQL comment", stageName)
+			return false, fmt.Errorf("invalid stage reference %q: contains a SQL comment", stageName)
 		}
 	}
 	if inQuote {
-		return fmt.Errorf("invalid stage reference %q: unbalanced quote", stageName)
+		return false, fmt.Errorf("invalid stage reference %q: unbalanced quote", stageName)
 	}
 	// The path segment (after the first unquoted '/') has no quotes — any '"' there
 	// is rejected above — so splitting it on '/' is quote-safe, unlike the prefix.
 	if pathStart >= 0 && slices.Contains(strings.Split(stageName[pathStart+1:], "/"), "..") {
-		return fmt.Errorf("invalid stage reference %q: contains a traversal segment", stageName)
+		return false, fmt.Errorf("invalid stage reference %q: contains a traversal segment", stageName)
 	}
-	return nil
+	return pathHasSpace, nil
 }
 
 // NormalizeStageRef prepares a caller-supplied stage reference for splicing into
@@ -2078,6 +2108,31 @@ func NormalizeStageRef(stageName string) (string, error) {
 	}
 	if err := ValidateStageRef(stageName); err != nil {
 		return "", err
+	}
+	return stageName, nil
+}
+
+// NormalizeStageFileRef is NormalizeStageRef for the PUT/GET builders: it adds the
+// '@' sigil, validates with ValidateStageFileRef, and returns a reference ready to
+// splice into a file-transfer statement — wrapped in single quotes when the path
+// segment contains whitespace, which is the form Snowflake documents for stage
+// paths with spaces (the local 'file://…' side is already always quoted).
+//
+// Quoting only when it is needed keeps every existing reference byte-identical,
+// so this is additive: paths that used to work still emit exactly the same SQL,
+// and paths that used to be rejected outright now transfer. Wrapping is safe
+// because validation rejects a single-quote anywhere in the reference, so the
+// literal cannot be closed early.
+func NormalizeStageFileRef(stageName string) (string, error) {
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+	spaced, err := ValidateStageFileRef(stageName)
+	if err != nil {
+		return "", err
+	}
+	if spaced {
+		return "'" + stageName + "'", nil
 	}
 	return stageName, nil
 }
