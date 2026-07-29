@@ -33,7 +33,10 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
   // Active event unsubscribers, torn down on stop / unmount.
   const offs = useRef<Array<() => void>>([]);
   // Set on unmount: a start already in flight must not subscribe or open a
-  // browser tab against a component that is gone (see handleStart).
+  // browser tab against a component that is gone (see handleStart). It MUST be
+  // reset when the effect (re-)runs — StrictMode mounts, unmounts and remounts in
+  // development, so a ref left at true from the throwaway first cleanup would
+  // cancel every later start and never clear the button's loading state.
   const cancelled = useRef(false);
 
   const teardown = () => {
@@ -43,6 +46,7 @@ export default function StreamlitPreviewControl({ localDir, mainFile, disabled }
 
   // Stop the preview if the modal unmounts while it's still running.
   useEffect(() => {
+    cancelled.current = false;
     return () => {
       cancelled.current = true;
       teardown();

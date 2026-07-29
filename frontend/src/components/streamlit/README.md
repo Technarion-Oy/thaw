@@ -36,8 +36,11 @@ object browser.
   Python environment via `StartStreamlitPreview` (backend `internal/snowpark`),
   streams `snowpark:streamlit-*` events, opens the browser when the server is
   ready, and offers Stop / Open-in-browser. Stops the process on unmount / Stop.
-  A `cancelled` ref (the `useSqlPreview` pattern from `createModalHooks.ts`)
-  covers the close-while-starting case: the unmount cleanup's
+  A `cancelled` ref (the `useSqlPreview` pattern from `createModalHooks.ts`,
+  as a ref because `handleStart` lives outside the effect — and therefore
+  **reset to `false` when the effect runs**, or StrictMode's development
+  mount→unmount→remount leaves it stuck at `true` and every start is cancelled
+  on arrival) covers the close-while-starting case: the unmount cleanup's
   `StopStreamlitPreview` runs before the backend has recorded the process, so the
   in-flight `handleStart` stops it on arrival and subscribes to nothing —
   otherwise its listeners outlived the modal and the ready event opened a browser
