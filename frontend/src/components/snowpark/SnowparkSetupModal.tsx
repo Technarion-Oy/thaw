@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useEffect, useRef, useState } from "react";
-import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Select, Input, List, Spin } from "antd";
+import { App as AntApp, Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Select, Input, List, Spin } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -137,6 +137,10 @@ function venvSteps(venvPath: string, withPandas: boolean, pythonBin: string): St
 }
 
 export default function SnowparkSetupModal({ onClose }: Props) {
+  // Hook-based modal instance — the static `Modal.confirm` renders in its own
+  // React root outside <ConfigProvider>, so it would ignore the app's dark
+  // theme and come up white. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [backend, setBackend]         = useState<Backend>("conda");
   const [withPandas, setWithPandas]   = useState(true);
   const [registryOpen, setRegistryOpen] = useState(false);
@@ -341,7 +345,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
   const handleDeleteVenv = () => {
     const venvPathDisplay = venvPath || `${exportDir || "~"}/snowpark_venv`;
-    Modal.confirm({
+    modal.confirm({
       title: "Delete venv folder?",
       content: `This will permanently delete the virtual environment at:\n${venvPathDisplay}`,
       okText: "Delete",
@@ -396,7 +400,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   };
 
   const handleUninstallPackage = (name: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: `Uninstall ${name}?`,
       content: `This will remove ${name} from the Snowpark environment.`,
       okText: "Uninstall",

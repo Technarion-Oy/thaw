@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table,
+  App as AntApp, Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table,
   Dropdown, Form,
 } from "antd";
 import {
@@ -158,6 +158,9 @@ interface Props {
 type VersionInputAction = { version: string; kind: "alias" | "comment" | "metadata" };
 
 export default function ModelPropertiesModal({ db, schema, name, onClose }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -338,12 +341,12 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
                   setVersionInputError(null);
                   setVersionInput({ version: ver, kind: key });
                 } else if (key === "unset-alias") {
-                  Modal.confirm({
+                  modal.confirm({
                     title: `Unset alias for version "${ver}"?`,
                     onOk: () => runVersionClause(`VERSION ${qId(ver)} UNSET ALIAS`).catch((e) => setActionError(String(e))),
                   });
                 } else if (key === "drop") {
-                  Modal.confirm({
+                  modal.confirm({
                     title: `Drop version "${ver}"?`,
                     content: "This permanently removes the version. The default version cannot be dropped.",
                     okButtonProps: { danger: true },

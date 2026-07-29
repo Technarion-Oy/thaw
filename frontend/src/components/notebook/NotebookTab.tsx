@@ -20,7 +20,7 @@ import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/
 // Slim editor API only (no language services) — see monacoSetup.ts for why.
 import * as monacoLib from "monaco-editor/esm/vs/editor/editor.api.js";
 import { getOrCreateMenuId } from "../editor/monacoMenu";
-import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message, Tag } from "antd";
+import { App as AntApp, Button, Dropdown, Space, Spin, Tooltip, Typography, Select, message, Tag } from "antd";
 import type { MenuProps } from "antd";
 import {
   PlayCircleOutlined,
@@ -267,6 +267,9 @@ interface Props {
 }
 
 export default function NotebookTab({ tabId }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const resolved = useThemeStore((s) => s.resolved);
   const isDark   = resolved === "dark";
 
@@ -844,7 +847,7 @@ export default function NotebookTab({ tabId }: Props) {
   }, [syncToStore]);
 
   const confirmDeleteCell = useCallback((id: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: "Delete cell?",
       content: "This action cannot be undone.",
       okText: "Delete",
@@ -852,7 +855,7 @@ export default function NotebookTab({ tabId }: Props) {
       cancelText: "Cancel",
       onOk: () => deleteCell(id),
     });
-  }, [deleteCell]);
+  }, [deleteCell, modal]);
 
   const moveCell = useCallback((id: string, dir: -1 | 1) => {
     setCells((prev) => {

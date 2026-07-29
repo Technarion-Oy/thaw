@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Input, Spin, Button, Modal, Typography, message, Tag, Space } from "antd";
+import { App as AntApp, Input, Spin, Button, Modal, Typography, message, Tag, Space } from "antd";
 import {
   UserOutlined,
   UserAddOutlined,
@@ -34,6 +34,9 @@ interface CtxMenu {
 }
 
 export default function UserManagementPanel() {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const role = useSessionStore((s) => s.role);
   const [users,          setUsers]          = useState<snowflake.SnowflakeUser[]>([]);
   const [accessible,     setAccessible]     = useState<boolean | null>(null); // null = loading
@@ -109,7 +112,7 @@ export default function UserManagementPanel() {
 
   const handleDrop = (user: snowflake.SnowflakeUser) => {
     setCtxMenu(null);
-    Modal.confirm({
+    modal.confirm({
       title: `Drop user ${user.name}?`,
       content: "This cannot be undone.",
       okText: "Drop",
@@ -128,7 +131,7 @@ export default function UserManagementPanel() {
 
   const handleResetPassword = (user: snowflake.SnowflakeUser) => {
     setCtxMenu(null);
-    Modal.confirm({
+    modal.confirm({
       title: `Reset password for ${user.name}?`,
       content: "Generates a single-use password reset URL and invalidates the current password.",
       okText: "Reset",
@@ -140,7 +143,7 @@ export default function UserManagementPanel() {
           // this one.
           const msg = await ResetUserPassword(user.name);
           if (msg && msg.trim()) {
-            Modal.info({
+            modal.info({
               title: `Password reset for ${user.name}`,
               width: 560,
               content: (
@@ -169,7 +172,7 @@ export default function UserManagementPanel() {
 
   const handleAbortQueries = (user: snowflake.SnowflakeUser) => {
     setCtxMenu(null);
-    Modal.confirm({
+    modal.confirm({
       title: `Abort all queries for ${user.name}?`,
       content: "Cancels every running and queued query the user has across all sessions.",
       okText: "Abort",

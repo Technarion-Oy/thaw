@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Checkbox,
+  App as AntApp, Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tooltip, Checkbox,
 } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
 import {
@@ -48,6 +48,9 @@ interface Props {
 }
 
 export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [params, setParams] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +183,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   // first. On success the modal's name context is stale, so close and refresh.
   const doSwap = () => {
     if (!swapTarget) return;
-    Modal.confirm({
+    modal.confirm({
       title: "Swap database contents?",
       content: `This exchanges every object between "${name}" and "${swapTarget}". It is disruptive and can't be undone automatically.`,
       okText: "Swap",
@@ -226,7 +229,7 @@ export default function DatabasePropertiesModal({ db, name, onClose }: Props) {
   // PRIMARY / REFRESH are lifecycle operations on secondary databases — PRIMARY
   // (promote) is disruptive, so confirm it.
   const doPromote = () => {
-    Modal.confirm({
+    modal.confirm({
       title: "Promote to primary?",
       content: `This makes "${name}" the primary database in its replication group. Other replicas become secondary.`,
       okText: "Promote",

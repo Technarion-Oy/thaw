@@ -31,4 +31,8 @@
 - [`help/`](help/README.md) — About + keyboard shortcuts
 - [`setup/`](setup/README.md) — first-launch license agreement gate
 
+## Conventions
+
+- **Confirmation dialogs use `App.useApp()`, never the static `Modal.confirm`.** The static helpers render in their own React root outside the `<ConfigProvider>` in `App.tsx`, so they ignore the theme and appear white in dark mode (issue #884). Take `const { modal } = AntApp.useApp()` at the top of the component and call `modal.confirm(...)` / `modal.info(...)`. The `<Modal>` component itself is unaffected. See [`docs/concepts/gotchas.md`](../../../docs/concepts/gotchas.md).
+
 See [`docs/concepts/architecture.md`](../../../docs/concepts/architecture.md) for how components connect to Zustand stores and the Go backend over Wails IPC.

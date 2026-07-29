@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, Tag, message } from "antd";
+import { App as AntApp, Modal, Spin, Button, Input, Space, Typography, Alert, Checkbox, Select, Tag, message } from "antd";
 import { UserOutlined, CheckOutlined, SearchOutlined, KeyOutlined, DeleteOutlined, TagsOutlined, SafetyOutlined, ApiOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterUserProperty, ListWarehouses, ListRoles, ParseSecondaryRoles,
@@ -42,6 +42,9 @@ function KeyPairSlotRow({
   onOpen: () => void;
   search?: string;
 }) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [removing, setRemoving] = useState(false);
   const hay = `${label} rsa public key fingerprint`.toLowerCase();
   if (search && !hay.includes(search.toLowerCase())) return null;
@@ -56,7 +59,7 @@ function KeyPairSlotRow({
   const mayHaveKey = hasKey || degraded;
 
   const remove = () => {
-    Modal.confirm({
+    modal.confirm({
       title: `Remove ${label} from ${name}?`,
       content: "This UNSETs the RSA public key in this slot. Anyone still " +
         "authenticating with the matching private key will be locked out.",
@@ -183,6 +186,7 @@ function PolicyManager({
   optionsByKind: Record<PolicyKind, { value: string; label: string }[]>;
   onReload: () => Promise<void>;
 }) {
+  const { modal } = AntApp.useApp();
   const [kind, setKind]   = useState<PolicyKind>("AUTHENTICATION");
   const [pol, setPol]     = useState("");
   const [force, setForce] = useState(false);
@@ -203,7 +207,7 @@ function PolicyManager({
   };
 
   const remove = (ref: PolicyRef) => {
-    Modal.confirm({
+    modal.confirm({
       title: `Unset ${PolicyKindLabel[ref.kind].toLowerCase()} policy on ${name}?`,
       content: `This detaches ${ref.label} from the user.`,
       okText: "Unset",
@@ -270,6 +274,7 @@ function PolicyManager({
  * so a load failure is shown as a faint caveat rather than a loud error.
  */
 function MfaRemoveRow({ name, search }: { name: string; search?: string }) {
+  const { modal } = AntApp.useApp();
   const [methods, setMethods] = useState<MfaMethod[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [busy, setBusy]       = useState<string>("");
@@ -288,7 +293,7 @@ function MfaRemoveRow({ name, search }: { name: string; search?: string }) {
   if (search && !"mfa methods".includes(search.toLowerCase())) return null;
 
   const remove = (m: MfaMethod) => {
-    Modal.confirm({
+    modal.confirm({
       title: `Remove ${m.type || "MFA"} method from ${name}?`,
       content: "The user loses this factor and must re-enroll it.",
       okText: "Remove",
@@ -355,6 +360,7 @@ function DelegatedAuthRows({ name, roleOptions, integrationOptions, onReload, se
   onReload: () => Promise<void>;
   search?: string;
 }) {
+  const { modal } = AntApp.useApp();
   const [role, setRole]       = useState("");
   const [integration, setInt] = useState("");
   const [busy, setBusy]       = useState<string>("");
@@ -378,7 +384,7 @@ function DelegatedAuthRows({ name, roleOptions, integrationOptions, onReload, se
   // integration (across all roles), so the copy calls that out explicitly.
   const remove = () => {
     const all = !role.trim();
-    Modal.confirm({
+    modal.confirm({
       title: all
         ? `Remove all delegated authorizations for ${integration}?`
         : `Remove delegated authorization of ${role} for ${integration}?`,
