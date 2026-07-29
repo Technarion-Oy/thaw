@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"thaw/internal/filesystem"
 )
 
 // writeTree materializes a map of relative path → content under a fresh temp
@@ -91,6 +93,73 @@ func TestPlanDirUploads_AllJunkIsEmpty(t *testing.T) {
 	}
 	if len(ups) != 0 {
 		t.Errorf("expected empty plan, got %#v", relPlan(t, root, ups))
+	}
+}
+
+// TestPlanDirUploads_SymlinkEscapesAreSkipped is the regression test for the
+// exfiltration hole: PUT opens the local path through a symlink, so a link
+// planted under the app folder — by an AI client driving deploy_streamlit, or
+// just present in the user's project — would otherwise copy a file from outside
+// the sandbox into the stage, where it is readable back out of the deployed app.
+func TestPlanDirUploads_SymlinkEscapesAreSkipped(t *testing.T) {
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "id_rsa")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	root := writeTree(t, map[string]string{
+		"streamlit_app.py":  "app",
+		"pages/page1.py":    "p1",
+		"assets/shared.css": "css",
+	})
+
+	// A link to a file outside the app folder, at the root and nested.
+	mustSymlink(t, secret, filepath.Join(root, "leak.txt"))
+	mustSymlink(t, secret, filepath.Join(root, "pages", "leak.py"))
+	// A link to the enclosing directory outside the app folder.
+	mustSymlink(t, outside, filepath.Join(root, "elsewhere"))
+	// A link to a directory inside the app folder: not uploadable as a file, and
+	// its contents are already walked at their real location.
+	mustSymlink(t, filepath.Join(root, "assets"), filepath.Join(root, "assets_link"))
+	// A dangling link.
+	mustSymlink(t, filepath.Join(outside, "does-not-exist"), filepath.Join(root, "broken.txt"))
+	// A link to a regular file inside the app folder: legitimate, kept in place.
+	mustSymlink(t, filepath.Join(root, "assets", "shared.css"), filepath.Join(root, "pages", "shared.css"))
+
+	ups, err := planDirUploads(root)
+	if err != nil {
+		t.Fatalf("planDirUploads: %v", err)
+	}
+
+	want := []dirUpload{
+		{Path: "assets/shared.css", RelDir: "assets"},
+		{Path: "pages/page1.py", RelDir: "pages"},
+		{Path: "pages/shared.css", RelDir: "pages"},
+		{Path: "streamlit_app.py", RelDir: ""},
+	}
+	got := relPlan(t, root, ups)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("plan mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+	// Belt and braces: no planned upload may resolve outside the app folder.
+	for _, u := range ups {
+		resolved, err := filepath.EvalSymlinks(u.Path)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", u.Path, err)
+		}
+		if err := filesystem.ValidateInsideOrEqual(resolved, root); err != nil {
+			t.Errorf("planned upload escapes the app folder: %s → %s", u.Path, resolved)
+		}
+	}
+}
+
+// mustSymlink creates target←link, skipping the test on platforms/accounts that
+// can't (unprivileged Windows).
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 }
 
