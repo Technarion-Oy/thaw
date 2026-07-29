@@ -136,6 +136,10 @@ func buildMenu(app *App) *menu.Menu {
 	toolsMenu.AddSeparator()
 	addConnectionItem(toolsMenu, "Schema Migration…", nil, "menu:migration")
 	addConnectionItem(toolsMenu, "Create dbt Project…", nil, "menu:dbt-create")
+	// Scaffolding a template is a purely local workflow — no connection needed.
+	toolsMenu.AddText("New Streamlit App from Template…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:streamlit-template")
+	})
 	toolsMenu.AddSeparator()
 	toolsMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")

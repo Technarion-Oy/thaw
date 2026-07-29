@@ -6,10 +6,15 @@ package stage
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"thaw/internal/fileformat"
+	"thaw/internal/filesystem"
 	"thaw/internal/snowflake"
 )
 
@@ -260,9 +265,12 @@ func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName str
 	return files, nil
 }
 
-// UploadFileToStage executes a PUT command to upload a local file to an internal stage.
+// UploadFileToStage executes a PUT command to upload a local file to an internal
+// stage. The stage reference goes through NormalizeStageFileRef, so a target
+// directory whose name contains spaces (ordinary in a local app folder being
+// deployed) is emitted in the quoted form PUT accepts instead of being rejected.
 func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
-	stageName, err := snowflake.NormalizeStageRef(stageName)
+	stageName, err := snowflake.NormalizeStageFileRef(stageName)
 	if err != nil {
 		return err
 	}
@@ -289,9 +297,190 @@ func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath 
 	return err
 }
 
-// DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
+// ── Recursive directory upload ──────────────────────────────────────────────
+
+// dirUpload is one planned file upload: an absolute local file path and the
+// '/'-separated stage subdirectory (relative to the stage root) it belongs in
+// ("" for the folder root).
+type dirUpload struct {
+	Path   string
+	RelDir string
+}
+
+// bulkDirs are non-hidden directories that commonly sit alongside a Streamlit
+// app but must never be uploaded to a stage: local virtualenvs and JS dependency
+// trees. Each can hold thousands of tiny files (one PUT apiece), and all are
+// reconstructed from requirements/environment specs — they aren't part of the
+// app. `python -m venv venv` / `python -m venv env` are the standard tutorial
+// invocations, so these are the common case, not an edge case.
+var bulkDirs = map[string]bool{
+	"venv":         true,
+	"env":          true,
+	"node_modules": true,
+}
+
+// isJunkDir reports whether a directory should be skipped when uploading a local
+// folder: VCS metadata, Python bytecode caches, local virtualenv / JS dependency
+// trees (see bulkDirs), and any hidden (dot) directory — except ".streamlit",
+// which holds the app's config.toml (theming/client options) and is a genuine
+// part of the deployable app, not junk.
+func isJunkDir(name string) bool {
+	if name == ".streamlit" {
+		return false
+	}
+	return name == ".git" || name == "__pycache__" || bulkDirs[name] || strings.HasPrefix(name, ".")
+}
+
+// isJunkFile reports whether a file should be skipped: OS junk and any hidden
+// (dot) file (".DS_Store" is covered by the dot rule but named for clarity).
+func isJunkFile(name string) bool {
+	return name == ".DS_Store" || strings.HasPrefix(name, ".")
+}
+
+// planDirUploads walks the folder at root and returns an ordered, deterministic
+// set of file uploads that reproduce its non-junk tree, preserving relative
+// paths. It performs no I/O beyond the walk and the symlink resolution described
+// below, so it is unit-testable without a live connection. Skips .git/,
+// __pycache__/, venv/env/node_modules/, other hidden directories, hidden files,
+// and .DS_Store — but keeps .streamlit/ (see isJunkDir / isJunkFile).
+//
+// root must already be absolute and symlink-resolved (UploadDirToStage does
+// both), because every symlink found in the tree is containment-checked against
+// it — see keepSymlink. WalkDir reports entries with Lstat semantics, so a
+// symlink is never a directory here: without that check a link planted anywhere
+// under root (or one the user's project legitimately has) would be uploaded as a
+// plain file, and PUT — which opens the local path through the link — would copy
+// whatever it points at into the stage. That is the whole sandbox for the MCP
+// deploy_streamlit tool, where root is a workspace subfolder chosen by an AI
+// client, so an unchecked link is an arbitrary-file-read out of the workspace.
+func planDirUploads(root string) ([]dirUpload, error) {
+	var ups []dirUpload
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if path != root && isJunkDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isJunkFile(d.Name()) {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 && !keepSymlink(path, root) {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relDir := filepath.ToSlash(filepath.Dir(rel))
+		if relDir == "." {
+			relDir = ""
+		}
+		ups = append(ups, dirUpload{Path: path, RelDir: relDir})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(ups, func(i, j int) bool { return ups[i].Path < ups[j].Path })
+	return ups, nil
+}
+
+// keepSymlink reports whether a symlink found under root may be uploaded: only
+// when it resolves to a regular file that is itself inside root. Everything else
+// is skipped rather than rejected, matching how the junk filters treat entries
+// that aren't part of the deployable app:
+//
+//   - a link pointing outside root would exfiltrate the file it targets (PUT
+//     follows it), so it is dropped — the sandbox boundary;
+//   - a link to a directory can't be PUT at all (Snowflake would be handed a
+//     directory as a file), and its contents are already walked at their real
+//     location when that directory is inside root;
+//   - a broken or unresolvable link has nothing to upload.
+//
+// A link to a file inside root is kept and uploaded at the link's own position
+// in the tree, so an app that uses links for shared assets still deploys with
+// its layout intact.
+func keepSymlink(path, root string) bool {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	if err := filesystem.ValidateInsideOrEqual(target, root); err != nil {
+		return false
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
+}
+
+// UploadDirToStage recursively uploads every non-junk file under localDir to
+// stageName, preserving each file's path relative to localDir — one PUT per file
+// via UploadFileToStage (AUTO_COMPRESS=FALSE). stageName is the stage root (e.g.
+// "@DB.SCHEMA.STAGE"); files land under "<stageName>/<relative subdir>". VCS
+// metadata, hidden files, __pycache__, virtualenv/dependency trees
+// (venv/env/node_modules), and .DS_Store are skipped; .streamlit/ is kept, and
+// symlinks are uploaded only when they resolve to a regular file inside localDir
+// (see keepSymlink) — a link out of the folder is never followed.
+func UploadDirToStage(ctx context.Context, client *snowflake.Client, localDir, stageName string, overwrite bool) error {
+	abs, err := filepath.Abs(localDir)
+	if err != nil {
+		return fmt.Errorf("resolve app dir: %w", err)
+	}
+	// Resolve the folder itself before walking: planDirUploads compares every
+	// symlink it finds against this root, and that comparison is only meaningful
+	// between two fully-resolved paths (the app folder may legitimately be
+	// reached through a link, e.g. /tmp on macOS).
+	root, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return fmt.Errorf("resolve app dir: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat app dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("app path is not a directory: %s", root)
+	}
+
+	ups, err := planDirUploads(root)
+	if err != nil {
+		return err
+	}
+	if len(ups) == 0 {
+		return fmt.Errorf("no files to upload in %s", root)
+	}
+
+	// Uploads run one at a time on purpose, unlike the template downloader's
+	// bounded-parallel fetches: each PUT is a statement on the shared client, so
+	// concurrent ones would be spread across pooled connections — i.e. across
+	// Snowflake sessions — and the streamlit deploy path targets a TEMPORARY
+	// stage, which only exists in the session that created it. Sequential PUTs
+	// also keep "upload <file>: <err>" attribution exact.
+	base := strings.TrimRight(stageName, "/")
+	for _, u := range ups {
+		target := base
+		if u.RelDir != "" {
+			target = base + "/" + u.RelDir
+		}
+		if err := UploadFileToStage(ctx, client, u.Path, target, 0, false, "", overwrite); err != nil {
+			return fmt.Errorf("upload %s: %w", u.Path, err)
+		}
+	}
+	return nil
+}
+
+// DownloadFileFromStage executes a GET command to download files from an internal
+// stage to a local directory. Like PUT, GET accepts a quoted stage reference, so
+// NormalizeStageFileRef is used here too — a stage folder with spaces in its name
+// is downloadable, not just uploadable.
 func DownloadFileFromStage(ctx context.Context, client *snowflake.Client, stageName string, localDirPath string, parallel int, pattern string) error {
-	stageName, err := snowflake.NormalizeStageRef(stageName)
+	stageName, err := snowflake.NormalizeStageFileRef(stageName)
 	if err != nil {
 		return err
 	}

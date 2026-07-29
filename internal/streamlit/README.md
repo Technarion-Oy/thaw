@@ -26,6 +26,33 @@ CREATE [OR REPLACE] STREAMLIT [IF NOT EXISTS] <fqn>
   `Comment`.
 - `BuildCreateStreamlitSql` — the only exported builder.
 
+## Local-app deploy
+
+`DeployStreamlit(ctx, client, DeployStreamlitParams) (string, error)` (`deploy.go`)
+stands a local app folder up as a `STREAMLIT` object: `CREATE TEMPORARY STAGE` →
+recursive upload via `stage.UploadDirToStage` → `CREATE [OR REPLACE] STREAMLIT …
+FROM @stage MAIN_FILE = …` via `BuildCreateStreamlitSql` → deferred `DROP STAGE`.
+A temporary stage suffices because Streamlit copies files once at creation time.
+It lives here (not in `internal/snowflake`) so it can reuse both `internal/stage`
+and the CREATE builder — `streamlit → stage → snowflake`, no import cycle. The
+`deployConfig` mapping (params + temp-stage location → `StreamlitConfig`) is
+unit-tested; live coverage is `internal/integration` `TestDeployStreamlit`
+(`-tags integration`).
+
+The returned string is the `CREATE STREAMLIT` statement that was executed (empty
+if the deploy failed before it was built). The temp-stage name is generated
+inside the function, so a caller cannot reconstruct the statement — the MCP
+`deploy_streamlit` tool returns it to the AI client, which has no preview of the
+SQL the way the deploy modal does. `App.DeployStreamlit` discards it.
+
+- `DetectStreamlitMainFile(dir) (MainFileResult, error)` — inspects the **root**
+  of a local app folder and picks the entrypoint, preferring `streamlit_app.py`
+  then `app.py`. When neither is present `MainFile` is empty and the caller picks
+  from `Candidates` (all root-level `*.py` base names, sorted — always populated
+  so the UI can offer overrides). Only the root is scanned (pages under `pages/`
+  are not entrypoints); hidden files are skipped and the `.py` extension is
+  matched case-insensitively.
+
 ## Gotchas
 
 - **No legacy `ROOT_LOCATION`.** Snowflake's `ROOT_LOCATION = '…'` form is
@@ -35,6 +62,15 @@ CREATE [OR REPLACE] STREAMLIT [IF NOT EXISTS] <fqn>
   single leading `@`.
 - `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive; when both are set the
   builder drops `IF NOT EXISTS`.
+- **`TITLE` is free text, so it is quoted with `snowflake.QuoteTextLit`** (the
+  `COMMENT` escaping), not `EscapeStringLit`. Snowflake treats `\` as an escape
+  inside a single-quoted literal, so the delimiter-oriented escaper silently
+  swallowed a lone backslash in a display title.
+- The temporary stage name is `THAW_STREAMLIT_<unixnano>_<random>`. The random
+  suffix matters: two deploys starting in the same clock tick (coarse platform
+  timers, or an MCP client firing in parallel) would otherwise pick the same name
+  and the second `CREATE TEMPORARY STAGE` would silently reuse the first's stage,
+  mixing both apps' files.
 - Mutations (`MAIN_FILE` / `QUERY_WAREHOUSE` / `TITLE` / `COMMENT` /
   `EXTERNAL_ACCESS_INTEGRATIONS` `SET`/`UNSET`, and `RENAME TO`) are issued as
   free-form `ALTER STREAMLIT` statements via `App.AlterStreamlit` in

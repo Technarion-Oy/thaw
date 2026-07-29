@@ -186,6 +186,8 @@ func buildServer(client, mode, cfg) *mcpsdk.Server {
 
 Within `registerSQLTools`, individual context-switching tools are further gated by `SessionConfig` pinning — `use_role` is omitted when `PinnedRole` is true, `use_warehouse` when `PinnedWarehouse` is true. This ensures the AI client cannot switch to a different role or warehouse when the session is pinned.
 
+A tool that is both mode-gated and dependency-gated combines the two conditions in its own registrar, called from **both** `buildServer` and `session.updateMode`, and lists its name in `modeSpecificToolNames` so `updateMode` strips it before re-registering. `deploy_streamlit` is the strictest example — `registerStreamlitModeTools` returns early unless a `WorkspaceRoot` is configured *and* the mode is `readonly`. It is the only tool that mutates Snowflake, so it is deliberately absent from `explain_only` even though that mode registers `execute_snowflake_sql`: `explain_only` promises that no statement is executed.
+
 ## Code snippets cascading menu
 
 Implemented via Monaco's internal `MenuRegistry` + `CommandsRegistry` (a one-time module IIFE), not per-editor patching. Snippets respect `editorPrefsRef` at insertion time (`applyPrefsToSnippet`). Definitions live in `snowflakeSnippets.ts`; `SNIPPET_CATEGORIES` drives the submenu. **Do not use `instanceof SubmenuAction` from an external import** — use `MenuRegistry` and let Monaco build the action internally.

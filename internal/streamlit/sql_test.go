@@ -86,6 +86,23 @@ func TestBuildCreateStreamlitSql(t *testing.T) {
 			},
 		},
 		{
+			// TITLE is free text, so a backslash must be doubled like it is in
+			// COMMENT — Snowflake treats '\' as an escape inside a single-quoted
+			// literal and would otherwise swallow it.
+			name: "backslashes in free text are doubled",
+			cfg: StreamlitConfig{
+				Name:          "APP_BS",
+				StageLocation: "@stg",
+				MainFile:      "app.py",
+				Title:         `C:\temp report`,
+				Comment:       `path C:\temp`,
+			},
+			contains: []string{
+				`TITLE = 'C:\\temp report'`,
+				`COMMENT = 'path C:\\temp'`,
+			},
+		},
+		{
 			name: "empty stage yields placeholder",
 			cfg: StreamlitConfig{
 				Name: "APP4",

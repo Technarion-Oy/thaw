@@ -34,6 +34,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `function_tools.go` | `registerFunctionTools` — function/procedure metadata and invocation builder tools (`search_functions`, `get_function_tooltip`, `get_procedure_params`, `get_function_info`, `build_call_statement`, `build_function_select`); delegates to `fnmeta.Store`, `snowflake.Client`, and `procedure` packages; always registered in all modes |
 | `builder_tools.go` | `registerBuilderTools` — pure DDL builder tools (`build_create_stage_sql`, `build_alter_stage_sql`, `build_create_file_format_sql`, `build_create_pipe_sql`, `build_refresh_pipe_sql`, `build_create_secret_sql`, `build_storage_integration_sql`, `build_api_integration_sql`, `build_catalog_integration_sql`, `build_external_access_integration_sql`, `build_notification_integration_sql`, `build_security_integration_sql`); delegates to `stage`, `fileformat`, `pipe`, `secret`, `integrations` packages; no Snowflake client needed; always registered in all modes |
 | `migration_tools.go` | `registerMigrationTools` — migration diff/script engine and dbt project scaffolder tools (`scan_migration_source`, `analyze_migration`, `generate_migration_script`, `generate_dbt_project`); delegates to `migration` and `dbt` packages; `scan_migration_source` and `generate_dbt_project` are workspace-gated; `analyze_migration` and `generate_migration_script` are always registered |
+| `streamlit_tools.go` | `registerStreamlitTools` — Streamlit builder/template tools (`build_create_streamlit_sql`, `list_streamlit_templates` always registered; `create_streamlit_from_template` workspace-gated); `registerStreamlitModeTools` — `deploy_streamlit`, the only Snowflake-mutating tool, gated on a workspace root **and** `readonly` mode. Delegates to `streamlit` and `streamlittemplate`; `validateDeployStreamlitFields`/`validateDeployStreamlitPaths` hold the required-input and sandbox rules |
 | `gate.go` | EXPLAIN precompilation gate: `queryRunner` interface, `CheckGate` (3-layer validation), `checkExplainPlan`, `readOnlyOps` allow-list, `extractOperations`, `isUSEStatement` (tokenizer-based via `sqltok.FirstToken`) |
 | `sql_tools.go` | `registerSQLTools` — SQL execution tool (`execute_snowflake_sql`) with EXPLAIN-gated pipeline (`executeSQLPipeline`), LIMIT injection (`injectLimit`), and trusted context-switching tools (`use_role`, `use_warehouse`, `use_database`, `use_schema`); only registered in `readonly`/`explain_only` modes |
 | `gate_test.go` | Unit tests for the EXPLAIN gate and `checkExplainPlan` |
@@ -52,6 +53,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `function_tools_test.go` | Unit tests for function/procedure tools (registration in all modes, nil fnStore, empty inputs, nil client, success paths for `build_call_statement` and `build_function_select`) |
 | `builder_tools_test.go` | Unit tests for DDL builder tools (registration in all modes, empty db/schema validation, success paths for stage, pipe, secret, and all six integration builders) |
 | `migration_tools_test.go` | Unit tests for migration/dbt tools (registration in all modes, workspace-gating, input validation, sandbox path tests, success paths for scan and script generation) |
+| `streamlit_tools_test.go` | Unit tests for Streamlit tools (gating matrix across mode × workspace, `deploy_streamlit` appearing/disappearing across `updateMode` switches, input validation, template attribution in both result shapes, sandbox tests for `create_streamlit_from_template` including a symlink escape, nil-client handling, and the deploy path rules via `validateDeployStreamlitPaths`) |
 | `mcp_test.go` | SSE round-trip test (external client lists tools), port-allocation test, diagnostics tool tests (including the `validate_sql` `schemaAware` result shape), mode-gating tests |
 | `metadata_cache_test.go` | Unit tests for `metadataCache` (cache hits within TTL, per-key isolation, TTL expiry via injected clock, errors not cached, `singleflight` dedup, `SessionContext` never cached) using a call-counting `metadataSource` fake |
 | `doc.go` | Package doc + `thaw:domain: MCP Server` annotation |
@@ -105,7 +107,7 @@ A `sync.RWMutex`-protected map of `tabID → {sql, result}` plus the active tab 
 | `Role` / `PinnedRole` | Runs `USE ROLE <role>` at session start. When `PinnedRole` is true, the `use_role` tool is not registered, preventing the AI client from switching roles. |
 | `Warehouse` / `PinnedWarehouse` | Runs `USE WAREHOUSE <warehouse>` at session start. When `PinnedWarehouse` is true, the `use_warehouse` tool is not registered. |
 | `SecondaryRoles` | When set to `"none"`, runs `USE SECONDARY ROLES NONE` at session start to restrict the session to only its primary role's grants. |
-| `WorkspaceRoot` | The directory that workspace tools are sandboxed to (populated from the app's cached export directory). When empty, workspace tools are not registered at all. All path inputs are validated against this root using `filesystem.ValidateInsideOrEqual` (symlink-resolving, case-aware). |
+| `WorkspaceRoot` | The directory that workspace tools are sandboxed to (populated from the app's cached export directory). When empty, workspace tools are not registered at all — this also gates the workspace-writing tools outside `workspace_tools.go`: `scan_migration_source`, `generate_dbt_project`, `read_notebook`, `create_streamlit_from_template`, and `deploy_streamlit`. All path inputs are validated against this root using `filesystem.ValidateInsideOrEqual` (symlink-resolving, case-aware). |
 
 ### SQL execution pipeline
 
@@ -126,9 +128,11 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 60 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+8), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), and SQL execution tools (+6–7 in readonly/explain_only modes):
+The server exposes 62 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+9), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), SQL execution tools (+6–7 in readonly/explain_only modes), and `deploy_streamlit` (+1, readonly mode with a workspace root only):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
+
+`list_objects` covers every kind in the canonical `objectkind` registry — including `STREAMLIT`, which `Client.ListExtendedObjects` picks up from its own `SHOW STREAMLITS` — so no per-kind listing tool is needed. `get_ddl` accepts `STREAMLIT` in `allowedDDLKinds` (`GET_DDL('STREAMLIT', …)` takes a three-part name directly), so Streamlit apps need no dedicated DDL tool either.
 
 **Extended schema discovery tools** (always registered, `schema_tools.go`):
 
@@ -232,6 +236,25 @@ All builder tools are pure SQL generators — no Snowflake client required, no S
 | `generate_dbt_project` | Workspace-gated (nil-client check at call time) | Scaffold a dbt project pre-wired to the active Snowflake connection (delegates to `dbt.CreateProject`) |
 
 `scan_migration_source` and `generate_dbt_project` are only registered when `WorkspaceRoot` is set in `SessionConfig`, matching the `registerWorkspaceTools` pattern. Both validate path inputs against the workspace root using `filesystem.ValidateInsideOrEqual`. `analyze_migration` and `generate_migration_script` are always registered (like builder tools); `analyze_migration` checks for a nil client at call time. All tools use a no-op emit callback since MCP does not stream progress events.
+
+**Streamlit tools** (`streamlit_tools.go`):
+
+| Tool | Gating | Description |
+|---|---|---|
+| `build_create_streamlit_sql` | Always registered (pure builder) | Generate `CREATE STREAMLIT` DDL from a `streamlit.StreamlitConfig` (delegates to `streamlit.BuildCreateStreamlitSql`) |
+| `list_streamlit_templates` | Always registered (network read, no client) | List the app templates in `Snowflake-Labs/snowflake-demo-streamlit` with descriptions (delegates to `streamlittemplate.ListTemplates`) |
+| `create_streamlit_from_template` | Workspace-gated | Scaffold one template into a local folder with its LICENSE + NOTICE (delegates to `streamlittemplate.DownloadTemplate`); returns the detected entrypoint |
+| `deploy_streamlit` | Workspace-gated **and** `readonly` mode only | Upload a local app folder to a temporary stage and create a STREAMLIT object (delegates to `streamlit.DeployStreamlit`); returns the executed statement |
+
+`deploy_streamlit` is the **only MCP tool that mutates Snowflake** — everything else reads, generates SQL for a human to run, or writes into the local workspace. It is therefore gated twice: a workspace root must be configured (it reads local files), and the mode must be `readonly`. `explain_only` is deliberately excluded even though it also registers `execute_snowflake_sql`: that mode's contract is that a statement is never actually executed, and a deploy would silently break it. The tool is listed in `modeSpecificToolNames`, so `updateMode` strips it before re-registering for the new mode (`registerStreamlitModeTools` is called from both `buildServer` and `updateMode`).
+
+Practical consequence of the workspace gate: `WorkspaceRoot` is populated from the app's cached export directory (`App.StartMCPSession`), so an MCP client can only scaffold into, and deploy from, folders under that directory — a Streamlit app living elsewhere on disk is refused with `access denied`. This is the same constraint `read_notebook` and `scan_migration_source` already work under.
+
+There is **no PUT feature flag to honour**: `PutCommand` was deleted in feature-flags v18 (issue #567) and was never admin-lockable, so PUT is unconditionally available and nothing needs threading into `SessionConfig`. The MCP surface as a whole remains gated by the admin-lockable `mcpServer` flag, enforced in `App.StartMCPSession`.
+
+Safety rails on `deploy_streamlit` (issue #847): `database`, `schema` and `name` are required and never defaulted from the session context; `orReplace` is an explicit opt-in so an existing app is never silently overwritten; `localDir` is validated against the workspace root and `mainFile` must resolve inside `localDir`; and the executed `CREATE STREAMLIT` statement is returned in the result so the client can show exactly what ran. Those two path checks cover only the two paths the tool names — the sandbox for the rest of the tree is enforced one layer down, in `stage.planDirUploads`, which skips any symlink under `localDir` that doesn't resolve to a regular file inside it. That matters because `PUT` opens each local path *through* a link, so an unchecked one is an arbitrary-file read out of the workspace and into a stage the deployed app can serve back. `create_streamlit_from_template` validates `destDir` with `filesystem.ValidatePathOrAncestorInsideOrEqual` (the destination legitimately may not exist yet — `DownloadTemplate` creates it and refuses a non-empty folder).
+
+Both template tools stamp their result with the upstream attribution (`Snowflake-Labs/snowflake-demo-streamlit`, its URL, and `Apache-2.0`, from the exported `streamlittemplate.Repo`/`RepoURL`/`License` consts), so an MCP client can surface the same credit the Thaw UI does. Scaffolded folders additionally carry the LICENSE and NOTICE files written by `DownloadTemplate`.
 
 **Workspace tools** (registered when `WorkspaceRoot` is set, `workspace_tools.go`; sandboxed to the configured workspace root):
 

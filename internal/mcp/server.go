@@ -24,6 +24,7 @@ var modeSpecificToolNames = []string{
 	"use_schema",
 	"get_query_results_summary",
 	"preview_stage_file",
+	"deploy_streamlit",
 }
 
 // buildServer constructs an MCP server and registers tools based on the
@@ -32,6 +33,8 @@ var modeSpecificToolNames = []string{
 // registered in readonly and explain_only modes. Editor context tools are
 // registered when editorCtx is non-nil. Tab tools (open_sql_tab) are
 // registered when emit is non-nil (i.e. running inside the app, not tests).
+// deploy_streamlit is narrower still — workspace root plus readonly mode only
+// (see registerStreamlitModeTools).
 func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, editorCtx *EditorContextStore, emit func(string, interface{}), fnStore *fnmeta.Store, nb NotebookBackend) *mcpsdk.Server {
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "thaw",
@@ -68,6 +71,8 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerFunctionTools(srv, client, fnStore)
 	registerBuilderTools(srv)
 	registerMigrationTools(srv, client, cfg.WorkspaceRoot)
+	registerStreamlitTools(srv, cfg.WorkspaceRoot)
+	registerStreamlitModeTools(srv, client, cfg.WorkspaceRoot, mode)
 
 	if mode == ExecutionModeReadonly || mode == ExecutionModeExplainOnly {
 		registerSQLTools(srv, client, mode, cfg)

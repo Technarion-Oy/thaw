@@ -18,6 +18,7 @@ formatting. They are opt-in only and are never run in normal CI without explicit
 | `migration_test.go` | Schema migration engine tests. |
 | `formatter_test.go` | SQL formatter round-trip tests. |
 | `cortexsearch_test.go` | Cortex Search Service CREATE/ALTER grammar smoke test — exercises every clause the UI emits (single- and multi-index CREATE, all SET/UNSET, lifecycle, tags, scoring profiles) and asserts the `DESCRIBE` column names the properties modal reads. |
+| `streamlit_deploy_test.go` | Local-folder → STREAMLIT deploy smoke test (`Client.DeployStreamlit`): writes a multi-file app (subdirectory + junk to skip), deploys it, asserts `DESCRIBE STREAMLIT` reports the expected `main_file`, then redeploys with OR REPLACE (update-existing path). |
 
 ## Patterns & integration
 

@@ -62,8 +62,9 @@ type StageFile struct {
 | Function | SQL issued | Notes |
 |----------|-----------|-------|
 | `ListStageFiles(ctx, client, stageName, pattern)` | `LIST @stage [PATTERN='...']` | Prepends `@` if absent (via `snowflake.NormalizeStageRef`); reads the result columns with the shared `snowflake.ColumnIndexes` + `snowflake.StrVal`; returns `[]StageFile` |
-| `UploadFileToStage(ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)` | `PUT 'file://...' @stage ...` | Internal stages only |
-| `DownloadFileFromStage(ctx, client, stageName, localDirPath, parallel, pattern)` | `GET @stage 'file://...' ...` | Internal stages only |
+| `UploadFileToStage(ctx, client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)` | `PUT 'file://...' @stage ...` | Internal stages only; the stage reference goes through `snowflake.NormalizeStageFileRef`, which quotes it when the path contains spaces |
+| `UploadDirToStage(ctx, client, localDir, stageName, overwrite)` | one `PUT` per file (via `UploadFileToStage`, `AUTO_COMPRESS=FALSE`) | Recursively uploads a local folder, preserving subdirectories under `@stage/<reldir>`; skips `.git/`, `__pycache__/`, virtualenv/dependency trees (`venv/`, `env/`, `node_modules/`), other hidden files/dirs, `.DS_Store`, and **symlinks that don't resolve to a regular file inside `localDir`** — but **keeps** `.streamlit/` (config.toml theming). The walk/grouping is the pure, unit-tested `planDirUploads(root)`. Uploads are sequential by design (see Gotchas). Used by `streamlit.DeployStreamlit`. |
+| `DownloadFileFromStage(ctx, client, stageName, localDirPath, parallel, pattern)` | `GET @stage 'file://...' ...` | Internal stages only; same `NormalizeStageFileRef` quoting as `PUT` |
 | `RemoveStageFiles(ctx, client, stageName, pattern)` | `REMOVE @stage [PATTERN='...']` | Optional regex pattern |
 
 ## Patterns & integration (thin-delegator)
@@ -79,6 +80,22 @@ prefixes) uses the `ListStageEntries` IPC method, which delegates to
 
 ## Gotchas
 
+- **Symlinks under `localDir` are not followed out of it.** `filepath.WalkDir`
+  reports entries with `Lstat` semantics, so a symlink is never seen as a
+  directory — without a check it would be planned as a plain file upload and `PUT`
+  would open the local path *through* the link, copying whatever it targets into
+  the stage (readable back out via `GET` or the deployed app). `planDirUploads`
+  therefore resolves every symlink and keeps it only when it points at a regular
+  file inside the (already symlink-resolved) root: links out of the folder, links
+  to directories, and dangling links are skipped. This is the sandbox boundary for
+  the MCP `deploy_streamlit` tool, whose `localDir` is chosen by an AI client.
+- **Uploads are sequential on purpose.** Each `PUT` is a statement on the shared
+  client, so concurrent uploads would spread across pooled connections — i.e.
+  separate Snowflake sessions — while the Streamlit deploy path targets a
+  `TEMPORARY` stage that only exists in the session that created it. Sequential
+  PUTs also keep the `upload <file>: <err>` attribution exact. (Contrast
+  `internal/streamlittemplate`, whose downloads are plain HTTP and *are* run with
+  bounded parallelism.)
 - `BuildAlterStageSql` has a latent bug in the `SET` action: the `first` flag is
   set to `false` only for `Comment` and `Url` — `StorageIntegration` and
   `DirectoryEnabled` do not update `first`, so a comma will always be prepended

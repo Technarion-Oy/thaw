@@ -66,6 +66,7 @@ var allowedDDLKinds = map[string]bool{
 	"SEQUENCE":          true,
 	"FILE_FORMAT":       true,
 	"STAGE":             true,
+	"STREAMLIT":         true,
 	"MASKING_POLICY":    true,
 	"ROW_ACCESS_POLICY": true,
 }

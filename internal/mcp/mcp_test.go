@@ -33,6 +33,7 @@ var expectedTools = []string{
 	"build_create_pipe_sql",
 	"build_create_secret_sql",
 	"build_create_stage_sql",
+	"build_create_streamlit_sql",
 	"build_external_access_integration_sql",
 	"build_function_select",
 	"build_notification_integration_sql",
@@ -77,6 +78,7 @@ var expectedTools = []string{
 	"list_schemas",
 	"list_secrets",
 	"list_stage_files",
+	"list_streamlit_templates",
 	"list_tasks",
 	"list_warehouses",
 	"search_functions",
@@ -440,7 +442,7 @@ func TestAuthenticatedSSERoundTrip(t *testing.T) {
 // TestAllowedDDLKinds verifies the kind whitelist accepts standard Snowflake
 // object kinds and rejects unknown/malicious strings.
 func TestAllowedDDLKinds(t *testing.T) {
-	for _, kind := range []string{"TABLE", "VIEW", "FUNCTION", "PROCEDURE", "STAGE"} {
+	for _, kind := range []string{"TABLE", "VIEW", "FUNCTION", "PROCEDURE", "STAGE", "STREAMLIT"} {
 		if !allowedDDLKinds[kind] {
 			t.Errorf("expected %q to be allowed", kind)
 		}
