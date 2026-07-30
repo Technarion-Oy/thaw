@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Table, Form, Dropdown,
+  App as AntApp, Modal, Spin, Button, Input, Space, Typography, Alert, Table, Form, Dropdown,
 } from "antd";
 import {
   DotChartOutlined, ReloadOutlined, PlusOutlined, MoreOutlined,
@@ -43,6 +43,9 @@ interface Props {
 }
 
 export default function DatasetPropertiesModal({ db, schema, name, onClose }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -144,7 +147,7 @@ export default function DatasetPropertiesModal({ db, schema, name, onClose }: Pr
               ],
               onClick: ({ key }) => {
                 if (key === "drop") {
-                  Modal.confirm({
+                  modal.confirm({
                     title: `Drop version "${ver}"?`,
                     content: "This permanently removes the version from the dataset.",
                     okButtonProps: { danger: true },

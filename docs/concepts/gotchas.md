@@ -63,6 +63,21 @@ setTreeData((prev) => updateNode(prev, path, children));
 
 `AppErrorBoundary` (wrapped around `<App />` in `main.tsx`) is the backstop: it turns any remaining render-phase throw into a recoverable message with Try again / Reload instead of a blank window. It uses plain DOM and CSS variables, no Ant Design, so it still renders if the failure came from inside the theme provider.
 
+## Never call the static `Modal.confirm` / `Modal.info` — use `App.useApp()`
+
+Ant Design's static modal helpers (`Modal.confirm`, `Modal.info`, `Modal.warning`, …) render into a **detached React root** created on demand, outside the `<ConfigProvider>` in `App.tsx`. They therefore see none of the app's theme tokens and always come up in the default light palette — a white confirmation dialog on top of the dark UI (issue #884, "Delete venv folder…" in the Snowpark setup modal).
+
+Use the hook-based instance instead, which renders inside the provider tree via `<AntApp>` (already wrapped around the app in `App.tsx`):
+
+```tsx
+import { App as AntApp } from "antd";
+
+const { modal } = AntApp.useApp();          // top of the component, before any early return
+modal.confirm({ title: "Delete venv folder?", … });
+```
+
+The `<Modal>` **component** is fine — it renders in the normal tree and inherits the theme. Only the static helpers are broken. `useApp()` is a hook, so a confirm fired from a non-component helper needs the `modal` instance threaded in from the calling component (or the action lifted into one). If a `modal.confirm` call lives inside a `useCallback`, add `modal` to the dependency array.
+
 ## `runDiagnostics` must stay race-safe and exception-safe
 
 `runDiagnostics` in `SqlEditor.tsx` is async with three IPC `await` points. Two invariants must hold:

@@ -101,6 +101,7 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 - **Icons**: Use `@ant-design/icons` (e.g., `SyncOutlined`, `TableOutlined`).
 - **Feedback**: Use `antd`'s `message.success`/`error` for immediate feedback.
 - **Modals**: Use `antd` `Modal` with `destroyOnClose`. Prefer conditionally mounting the modal (`{open && <Modal open … />}`) so it unmounts on close — every modal is globally draggable (by its header) and width-resizable (bottom-right corner) via `frontend/src/utils/modalDragResize.ts` + the `.ant-modal` rules in `styles/global.css`, and that global feature relies on the unmount to reset a dragged/resized dialog to its default on reopen (a modal left mounted across close keeps its last position/width). Don't add per-modal drag/resize props.
+- **Confirm dialogs**: Never call the static `Modal.confirm`/`.info`/`.warning`/`.error`/`.success` — they render in a detached React root outside `App.tsx`'s `<ConfigProvider>` and come up white in dark mode (#884). Take `const { modal } = AntApp.useApp()` at the top of the component and call `modal.confirm(…)`; `frontend/src/components/staticModal.test.ts` fails the build if a static call reappears.
 - **Alerts**: `antd` `Alert` does **not** have a `size` property. Use `showIcon` and `message` (can be a `Space` or `Typography` block).
 - **Typography**: Use `Typography.Text` for consistent font styling.
 - **Tree Component**:

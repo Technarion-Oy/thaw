@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Select, Space, Typography, Alert, Tag,
+  App as AntApp, Modal, Spin, Button, Select, Space, Typography, Alert, Tag,
 } from "antd";
 import { FolderOutlined } from "@ant-design/icons";
 import {
@@ -47,6 +47,9 @@ interface Props {
 }
 
 export default function SchemaPropertiesModal({ db, schema, name, readOnly, onClose }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [params, setParams] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -186,7 +189,7 @@ export default function SchemaPropertiesModal({ db, schema, name, readOnly, onCl
   // sidebar refresh.
   const doSwap = () => {
     if (!swapTarget) return;
-    Modal.confirm({
+    modal.confirm({
       title: "Swap schema contents?",
       content: `This exchanges every object between "${name}" and "${swapTarget}". It is disruptive and can't be undone automatically.`,
       okText: "Swap",

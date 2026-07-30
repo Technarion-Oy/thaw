@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
-import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
+import { App as AntApp, Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, GetAccountParameters, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
@@ -100,6 +100,9 @@ const saveDefaultName = (tab: Tab) =>
   tab.isDefaultTitle ? "untitled.sql" : tab.title;
 
 export default function QueryPage() {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   // Subscribe to specific fields via useShallow — NOT the bare `useQueryStore()`,
   // which subscribed to the whole store and re-rendered the entire page (results
   // grid included) on every keystroke. `sql` is deliberately excluded: it changes
@@ -643,7 +646,7 @@ export default function QueryPage() {
       window.dispatchEvent(new Event("thaw:mcp-changed"));
     };
     if (anyRunning) {
-      Modal.confirm({
+      modal.confirm({
         title: "Disconnect while query is running?",
         content: "A query is currently running. Disconnecting will cancel it and discard any pending results.",
         okText: "Disconnect",

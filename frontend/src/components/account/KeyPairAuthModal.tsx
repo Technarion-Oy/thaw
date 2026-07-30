@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Space, Typography, Button, Alert,
+  App as AntApp, Modal, Form, Input, Space, Typography, Button, Alert,
   Divider, message, Select, Tooltip, Segmented,
 } from "antd";
 import {
@@ -62,6 +62,9 @@ interface Props {
 export default function KeyPairAuthModal({
   username, slot = "RSA_PUBLIC_KEY", slotHasKey, onKeyPicked, onApplied, onClose,
 }: Props) {
+  // Hook-based modal instance — static Modal.* renders outside <ConfigProvider>
+  // and would ignore the dark theme. See frontend/src/components/README.md.
+  const { modal } = AntApp.useApp();
   const [source,        setSource]        = useState<"generate" | "paste">("generate");
   const [availableTools, setAvailableTools] = useState<string[]>([]);
   const [method,     setMethod]     = useState("go");
@@ -141,7 +144,7 @@ export default function KeyPairAuthModal({
       // Worded to also cover the DESCRIBE-degraded case, where slotHasKey is
       // set defensively and we can't be sure a key is present — "may already"
       // rather than asserting one exists.
-      Modal.confirm({
+      modal.confirm({
         title: `Replace ${SLOT_LABEL[slot]} on ${username}?`,
         content: "This user may already have a public key in this slot. Applying will " +
           "overwrite it — anyone still authenticating with the old key will be locked out.",
