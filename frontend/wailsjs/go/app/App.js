@@ -2066,6 +2066,10 @@ export function SaveSessionConfig(arg1) {
   return window['go']['app']['App']['SaveSessionConfig'](arg1);
 }
 
+export function SaveSnowparkCondaPython(arg1) {
+  return window['go']['app']['App']['SaveSnowparkCondaPython'](arg1);
+}
+
 export function SaveSnowparkConfig(arg1) {
   return window['go']['app']['App']['SaveSnowparkConfig'](arg1);
 }

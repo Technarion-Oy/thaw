@@ -18,6 +18,7 @@ import {
   GetSnowparkConfig,
   SaveSnowparkConfig,
   SaveSnowparkPythonPath,
+  SaveSnowparkCondaPython,
   ListSystemPythons,
   CheckSnowparkEnv,
   InstallCondaEnv,
@@ -69,6 +70,24 @@ function makeStepState(): StepState {
   return { status: "idle", log: [], error: null };
 }
 
+// Wails rejects a failing IPC call with a plain string carrying the Go error.
+// Backend pip errors are two blocks — "install from requirements.txt failed: …"
+// then a blank line and the explanation — so the text must survive intact.
+function errText(e: unknown): string {
+  if (typeof e === "string") return e.trim();
+  if (e instanceof Error) return e.message.trim();
+  return String(e).trim();
+}
+
+// splitErr peels off the first line as the alert headline, leaving the rest
+// (the actionable explanation, when the backend recognized the failure) as the
+// description.
+function splitErr(msg: string): { head: string; body: string } {
+  const nl = msg.indexOf("\n");
+  if (nl === -1) return { head: msg, body: "" };
+  return { head: msg.slice(0, nl).trim(), body: msg.slice(nl + 1).trim() };
+}
+
 function stepsFromEnvCheck(env: snowpark.SnowparkCheckResult): { steps: StepState[]; firstIncomplete: number } {
   const newSteps: StepState[] = [
     { status: "done", log: [], error: null },
@@ -90,14 +109,14 @@ function CheckItem({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function condaSteps(isM1: boolean): StepDef[] {
+function condaSteps(isM1: boolean, pyVersion: string): StepDef[] {
+  const create =
+    `conda create -n thaw_snowpark -y \\\n  --override-channels -c https://repo.anaconda.com/pkgs/snowflake \\\n  python=${pyVersion} numpy pandas pyarrow`;
   return [
     {
       title: "Create Conda Environment",
-      description: "thaw_snowpark  ·  Python 3.12",
-      command: isM1
-        ? "CONDA_SUBDIR=osx-64 conda create -n thaw_snowpark -y \\\n  --override-channels -c https://repo.anaconda.com/pkgs/snowflake \\\n  python=3.12 numpy pandas pyarrow"
-        : "conda create -n thaw_snowpark -y \\\n  --override-channels -c https://repo.anaconda.com/pkgs/snowflake \\\n  python=3.12 numpy pandas pyarrow",
+      description: `thaw_snowpark  ·  Python ${pyVersion}`,
+      command: isM1 ? `CONDA_SUBDIR=osx-64 ${create}` : create,
     },
     {
       title: "Install Snowpark",
@@ -147,6 +166,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [isAppleSilicon, setIsAppleSilicon] = useState(false);
   const [venvPath, setVenvPath]     = useState("");
   const [pythonPath, setPythonPath] = useState("");
+  // Python version for a new conda env. Selectable because a requirements file
+  // pinning pre-3.12 releases can't be installed on 3.12+ — those pins ship no
+  // wheel for it and fail to build from source (issue #885).
+  const [condaPython, setCondaPython] = useState("3.12");
+  const [condaPythonOptions, setCondaPythonOptions] = useState<string[]>([]);
   const [availablePythons, setAvailablePythons] = useState<snowpark.PythonInfo[]>([]);
   const [current, setCurrent]       = useState(0);
   const [steps, setSteps]           = useState<StepState[]>([makeStepState(), makeStepState(), makeStepState()]);
@@ -167,6 +191,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [uninstallingPkg, setUninstallingPkg] = useState<string | null>(null);
   // Which dependency-file operation is in flight (drives per-button spinners); null = idle.
   const [depFileOp, setDepFileOp] = useState<"requirements" | "pyproject" | "freeze" | null>(null);
+  // Last package-operation failure (install, uninstall, dependency file). Shown
+  // in its own alert because the backend's explanation (e.g. "pandas==2.0.3
+  // ships no prebuilt wheel for Python 3.14…") is the actionable part and would
+  // otherwise be lost at the tail of a several-hundred-line pip build trace.
+  const [packageOpError, setPackageOpError] = useState<string | null>(null);
   const depFileRunning = depFileOp !== null;
   // Synchronous guard against a rapid double-click opening two pickers before the
   // disabled prop has re-rendered (state updates are async).
@@ -185,6 +214,8 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       setBackend((cfg.backend as Backend) || "conda");
       setVenvPath(cfg.venvPath);
       setPythonPath(cfg.pythonPath || "");
+      if (cfg.condaPythonVersion) setCondaPython(cfg.condaPythonVersion);
+      setCondaPythonOptions(cfg.condaPythonVersions || []);
       setConfigLoaded(true);
     });
     ListSystemPythons().then(setAvailablePythons);
@@ -388,12 +419,14 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     if (!pkg) return;
     setPackageOpRunning(true);
     setPackageLog([]);
+    setPackageOpError(null);
     try {
       await InstallEnvPackage(pkg);
       setPackageInput("");
       await refreshPackages();
     } catch (e) {
       setPackageLog((prev) => [...prev, String(e)]);
+      setPackageOpError(errText(e));
     } finally {
       setPackageOpRunning(false);
     }
@@ -408,11 +441,13 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       onOk: async () => {
         setUninstallingPkg(name);
         setPackageLog([]);
+        setPackageOpError(null);
         try {
           await UninstallEnvPackage(name);
           await refreshPackages();
         } catch (e) {
           setPackageLog((prev) => [...prev, String(e)]);
+          setPackageOpError(errText(e));
         } finally {
           setUninstallingPkg(null);
         }
@@ -436,6 +471,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     depFileGuard.current = true;
     const prevLog = packageLog;
     setDepFileOp(op);
+    setPackageOpError(null);
     try {
       let path: string;
       try {
@@ -443,6 +479,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       } catch (e) {
         // The picker itself failed — keep the prior log and surface the error.
         setPackageLog([...prevLog, String(e)]);
+        setPackageOpError(errText(e));
         return;
       }
       if (!path) return; // canceled — leave the prior log untouched
@@ -452,6 +489,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         if (refresh) await refreshPackages();
       } catch (e) {
         setPackageLog((prev) => [...prev, String(e)]);
+        setPackageOpError(errText(e));
       }
     } finally {
       setDepFileOp(null);
@@ -469,7 +507,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const handleFreezeRequirements = () =>
     runDepFileOp("freeze", PickFreezeOutputFile, FreezeRequirements, false);
 
-  const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
+  const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon, condaPython) : venvSteps(venvPath, withPandas, pythonPath);
   const defs = useExisting
     ? rawDefs.map((d, i) =>
         i === 0
@@ -516,6 +554,33 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             <Radio value="venv">venv  <Text type="secondary" style={{ fontSize: 11 }}>(uses system Python)</Text></Radio>
           </Radio.Group>
         </div>
+
+        {/* ── Python version (conda only) ─────────────────────────────────── */}
+        {backend === "conda" && (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+              Python version
+            </Text>
+            <Select
+              style={{ width: "100%" }}
+              size="small"
+              value={condaPython}
+              disabled={anyRunning || steps[0].status === "done"}
+              onChange={(v: string) => {
+                setCondaPython(v);
+                SaveSnowparkCondaPython(v).catch(() => {});
+              }}
+              options={(condaPythonOptions.length ? condaPythonOptions : [condaPython]).map((v) => ({
+                value: v,
+                label: `Python ${v}`,
+              }))}
+            />
+            <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+              Pick an older version if your requirements.txt pins releases that predate it — old pins
+              ship no wheel for a newer Python and fail to build from source.
+            </Text>
+          </div>
+        )}
 
         {/* ── Pandas option (venv only) ───────────────────────────────────── */}
         {backend === "venv" && (
@@ -828,6 +893,24 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 Freeze to requirements.txt
               </Button>
             </div>
+
+            {/* Package-operation failure — surfaced here so the backend's
+                explanation isn't buried under pip's build trace in the log. */}
+            {packageOpError && (
+              <Alert
+                type="error"
+                showIcon
+                closable
+                onClose={() => setPackageOpError(null)}
+                message={splitErr(packageOpError).head}
+                description={
+                  splitErr(packageOpError).body
+                    ? <span style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{splitErr(packageOpError).body}</span>
+                    : undefined
+                }
+                style={{ fontSize: 12 }}
+              />
+            )}
 
             {/* Output log */}
             {(packageLog.length > 0 || packageOpRunning || depFileRunning) && (
