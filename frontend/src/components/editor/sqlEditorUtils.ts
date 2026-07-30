@@ -188,6 +188,29 @@ export function clearFKCache(): void {
   fetchingFKs.clear();
 }
 
+// ── gitDiffLines ──────────────────────────────────────────────────────────────
+// Split a file's text into the line array fed to `ComputeGitLineDiff`.
+//
+// A terminating newline *ends* the last line rather than creating an empty one.
+// HEAD content (raw go-git bytes) is always newline-terminated, while Monaco's
+// getValue() usually isn't — so one trailing "\n" is stripped from each side
+// before splitting. Otherwise appending a line diffs it against HEAD's phantom
+// trailing "" and shows blue (modified) instead of green (added). (#530)
+//
+// Empty text is *zero* lines, not one empty line: `"".split("\n")` yields [""],
+// which makes an empty HEAD (a brand-new file) look like a one-line file holding
+// a blank line. That phantom line is then "deleted" at the end of the diff and
+// the last row of a new file renders blue instead of green. (#886)
+//
+// A HEAD of exactly "\n" (a file committed as one blank line) therefore also maps
+// to zero lines — which is the symmetric answer, because Monaco's getValue() for a
+// document whose only line is blank is "" too. Interior and extra trailing blank
+// lines beyond the single terminator are preserved.
+export const gitDiffLines = (s: string): string[] => {
+  const t = s.endsWith("\n") ? s.slice(0, -1) : s;
+  return t === "" ? [] : t.split("\n");
+};
+
 // ── variableSuggestions factory ───────────────────────────────────────────────
 export function buildVariableSuggestions(
   declaredVars: string[],
