@@ -1,3 +1,22 @@
+# [0.6.0](https://github.com/Technarion-Oy/thaw/compare/v0.5.1...v0.6.0) (2026-07-30)
+
+
+### Bug Fixes
+
+* confirmation dialogs ignore the dark theme ([#884](https://github.com/Technarion-Oy/thaw/issues/884)) ([#887](https://github.com/Technarion-Oy/thaw/issues/887)) ([3e3cb2c](https://github.com/Technarion-Oy/thaw/commit/3e3cb2ca82c44f329b0bc85245bdb0e3bd8f5e20))
+* explain Snowpark pip installs that fail on a missing wheel ([#890](https://github.com/Technarion-Oy/thaw/issues/890)) ([dd7e385](https://github.com/Technarion-Oy/thaw/commit/dd7e38593411d3799dffa30ec3ab017342dceeb8))
+* git gutter marks last row of a new file as changed ([#886](https://github.com/Technarion-Oy/thaw/issues/886)) ([#888](https://github.com/Technarion-Oy/thaw/issues/888)) ([9e04fcb](https://github.com/Technarion-Oy/thaw/commit/9e04fcb822d04d331fffd257ac939e912b6cbff4)), closes [#530](https://github.com/Technarion-Oy/thaw/issues/530)
+* reveal the active tab, close preview tabs on navigate-away ([#891](https://github.com/Technarion-Oy/thaw/issues/891)) ([f9b32cb](https://github.com/Technarion-Oy/thaw/commit/f9b32cb4bd63bcad5e6c6111cda80f58597782a9)), closes [#849](https://github.com/Technarion-Oy/thaw/issues/849)
+
+
+### Features
+
+* create files and folders inline in the tree, VS Code style ([#878](https://github.com/Technarion-Oy/thaw/issues/878)) ([eff3c83](https://github.com/Technarion-Oy/thaw/commit/eff3c835749a22474a1585c7bf634d26980ab638))
+* deploy local Streamlit apps, scaffold from templates, local preview ([#502](https://github.com/Technarion-Oy/thaw/issues/502)) ([#846](https://github.com/Technarion-Oy/thaw/issues/846)) ([14a306e](https://github.com/Technarion-Oy/thaw/commit/14a306efad92082f063d8da7dbbf5dec6d87e057)), closes [#847](https://github.com/Technarion-Oy/thaw/issues/847) [#847](https://github.com/Technarion-Oy/thaw/issues/847) [#847](https://github.com/Technarion-Oy/thaw/issues/847) [#567](https://github.com/Technarion-Oy/thaw/issues/567) [#567](https://github.com/Technarion-Oy/thaw/issues/567) [#847](https://github.com/Technarion-Oy/thaw/issues/847) [#847](https://github.com/Technarion-Oy/thaw/issues/847)
+* grey out menu items that need a Snowflake connection ([#879](https://github.com/Technarion-Oy/thaw/issues/879)) ([8c046f3](https://github.com/Technarion-Oy/thaw/commit/8c046f34f471653aa67de3b21ad6829b97f4c56f))
+* informative default tab titles, calmer tab strip ([#883](https://github.com/Technarion-Oy/thaw/issues/883)) ([3fd282d](https://github.com/Technarion-Oy/thaw/commit/3fd282d8431a069894721cd8d97de6a6eeebb687))
+* unify the file browser git pills, calm the header action strip ([#882](https://github.com/Technarion-Oy/thaw/issues/882)) ([e6fe6fc](https://github.com/Technarion-Oy/thaw/commit/e6fe6fc74796004ba82b1e3285b10608729eb256))
+
 ## [0.5.1](https://github.com/Technarion-Oy/thaw/compare/v0.5.0...v0.5.1) (2026-07-26)
 
 
