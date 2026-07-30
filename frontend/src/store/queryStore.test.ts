@@ -160,6 +160,105 @@ describe("queryStore preview tabs (#849)", () => {
     expect(state.tabs.find((t) => t.id === state.activeTabId)?.preview).toBe(true);
   });
 
+  it("closes the preview tab when the user navigates away from it (#889)", async () => {
+    const useQueryStore = await loadStore();
+    const scratchId = useQueryStore.getState().activeTabId;
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+    expect(useQueryStore.getState().tabs.length).toBe(before + 1);
+
+    // A peek is not an open document: switching to another tab discards it, so
+    // clicking through the file explorer leaves no trail of italic tabs behind.
+    useQueryStore.getState().activateTab(scratchId);
+    const state = useQueryStore.getState();
+    expect(state.activeTabId).toBe(scratchId);
+    expect(state.tabs.find((t) => t.id === previewId)).toBeUndefined();
+    expect(state.tabs.length).toBe(before);
+  });
+
+  it("closes the preview tab when a new scratch tab is opened (#889)", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+
+    useQueryStore.getState().openScratch();
+    const state = useQueryStore.getState();
+    expect(state.tabs.find((t) => t.id === previewId)).toBeUndefined();
+    expect(state.tabs.length).toBe(before + 1); // the new scratch tab, not two
+  });
+
+  it("closes the preview tab when another file is opened permanently (#889)", async () => {
+    const useQueryStore = await loadStore();
+    const before = useQueryStore.getState().tabs.length;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+
+    // Double-click open of a *different* file: the new tab is permanent, so the
+    // preview isn't recycled in place — it's navigated away from, so it closes.
+    useQueryStore.getState().openFile("/tmp/b.sql", "-- b", false);
+    const state = useQueryStore.getState();
+    expect(state.tabs.find((t) => t.id === previewId)).toBeUndefined();
+    expect(state.tabs.find((t) => t.id === state.activeTabId)?.path).toBe("/tmp/b.sql");
+    expect(state.tabs.length).toBe(before + 1);
+  });
+
+  it("promotes rather than closes a preview with unsaved edits, a run, or a lost file (#889)", async () => {
+    // Dirty (dirtied without going through setSql, which promotes on its own).
+    let useQueryStore = await loadStore();
+    let scratchId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    let previewId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().setSqlForTab(previewId, "-- a edited");
+    useQueryStore.getState().activateTab(scratchId);
+    let kept = useQueryStore.getState().tabs.find((t) => t.id === previewId);
+    expect(kept?.path).toBe("/tmp/a.sql"); // still open…
+    expect(kept?.preview).toBeFalsy();     // …and now permanent
+
+    // Running: the in-flight query is bound to this tab id.
+    useQueryStore = await loadStore();
+    scratchId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    previewId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().setTabRunning(previewId, true);
+    useQueryStore.getState().activateTab(scratchId);
+    kept = useQueryStore.getState().tabs.find((t) => t.id === previewId);
+    expect(kept?.isRunning).toBe(true);
+    expect(kept?.preview).toBeFalsy();
+
+    // Orphaned: the backing file is gone, so the tab holds the only copy.
+    // (`orphanFileTab` also clears savedSql, so it's dirty as well — both guards
+    // point the same way; the tab must survive either way.)
+    useQueryStore = await loadStore();
+    scratchId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    previewId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().orphanFileTab(previewId);
+    useQueryStore.getState().activateTab(scratchId);
+    kept = useQueryStore.getState().tabs.find((t) => t.id === previewId);
+    expect(kept?.orphaned).toBe(true);
+    expect(kept?.preview).toBeFalsy();
+  });
+
+  it("promotes rather than closes a preview that is the split target (#889)", async () => {
+    const useQueryStore = await loadStore();
+    const scratchId = useQueryStore.getState().activeTabId;
+
+    useQueryStore.getState().openFile("/tmp/a.sql", "-- a", true);
+    const previewId = useQueryStore.getState().activeTabId;
+    useQueryStore.getState().setSplitTab(previewId);
+
+    // It's visible in the other pane — closing it would collapse the split.
+    useQueryStore.getState().activateTab(scratchId);
+    const state = useQueryStore.getState();
+    expect(state.splitTabId).toBe(previewId);
+    expect(state.tabs.find((t) => t.id === previewId)?.preview).toBeFalsy();
+  });
+
   it("a permanent open (double-click) of a previewed file promotes it in place", async () => {
     const useQueryStore = await loadStore();
     const before = useQueryStore.getState().tabs.length;
