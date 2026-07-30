@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -132,5 +132,36 @@ describe("byteColToUtf16Col", () => {
 
   it("clamps a byte column past the line end to end+1", () => {
     expect(byteColToUtf16Col("äö", 10)).toBe(3);
+  });
+});
+
+// gitDiffLines splits file text into the line array fed to ComputeGitLineDiff.
+// See issues #530 (trailing newline) and #886 (empty HEAD → zero lines).
+describe("gitDiffLines", () => {
+  it("treats empty text as zero lines, not one blank line (issue #886)", () => {
+    // An empty HEAD is a brand-new file. Encoding it as [""] leaves a phantom
+    // HEAD line that gets deleted at the end of the diff, painting the last row
+    // of the new file blue (modified) instead of green (added).
+    expect(gitDiffLines("")).toEqual([]);
+  });
+
+  it("strips a single terminating newline (issue #530)", () => {
+    expect(gitDiffLines("a\n")).toEqual(["a"]);
+    expect(gitDiffLines("a\nb\n")).toEqual(["a", "b"]);
+  });
+
+  it("splits text without a terminating newline", () => {
+    expect(gitDiffLines("a\nb")).toEqual(["a", "b"]);
+  });
+
+  it("maps a lone newline to zero lines, matching Monaco's getValue()", () => {
+    // A file committed as a single blank line is "\n" in HEAD bytes but "" in
+    // Monaco's getValue(); collapsing both to [] keeps that file undecorated.
+    expect(gitDiffLines("\n")).toEqual([]);
+  });
+
+  it("keeps interior and trailing blank lines beyond the terminator", () => {
+    expect(gitDiffLines("a\n\nb\n")).toEqual(["a", "", "b"]);
+    expect(gitDiffLines("a\n\n")).toEqual(["a", ""]);
   });
 });

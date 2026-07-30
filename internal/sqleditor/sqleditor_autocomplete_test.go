@@ -2834,6 +2834,51 @@ func TestComputeGitLineDiff_DeletedFromEnd(t *testing.T) {
 	}
 }
 
+// A brand-new (untracked) file has an *empty* HEAD, which callers must encode as
+// zero lines. Every current line is then purely added — the whole file lights up
+// green. Issue #886.
+func TestComputeGitLineDiff_EmptyHeadAllAdded(t *testing.T) {
+	got := ComputeGitLineDiff([]string{}, []string{"a", "b", "c"}, 3000)
+	if !reflect.DeepEqual(got.Added, []int{1, 2, 3}) {
+		t.Errorf("Added = %v, want [1 2 3]", got.Added)
+	}
+	if len(got.Modified) != 0 {
+		t.Errorf("Modified = %v, want []", got.Modified)
+	}
+	if len(got.Deleted) != 0 {
+		t.Errorf("Deleted = %v, want []", got.Deleted)
+	}
+}
+
+// Documents *why* the contract above matters: an empty HEAD mis-encoded as [""]
+// (what `"".split("\n")` produces in JS) leaves a phantom blank HEAD line. With no
+// blank line in the file to absorb it, the LCS is empty and the phantom is deleted
+// at the very end, where the reclassification step folds it together with the
+// addition on the same position and reports the last line as *modified* (blue)
+// instead of added (green). Callers must never encode an empty HEAD as [""].
+// Issue #886.
+func TestComputeGitLineDiff_PhantomEmptyHeadLineMisreportsLastLine(t *testing.T) {
+	got := ComputeGitLineDiff([]string{""}, []string{"a", "b", "c"}, 3000)
+	if !reflect.DeepEqual(got.Modified, []int{3}) {
+		t.Errorf("Modified = %v, want [3] (phantom HEAD line folds into the last row)", got.Modified)
+	}
+	if !reflect.DeepEqual(got.Added, []int{1, 2}) {
+		t.Errorf("Added = %v, want [1 2]", got.Added)
+	}
+}
+
+// Symmetric case: a tracked file emptied out in the editor. Zero current lines
+// means every HEAD line is deleted, reported at line 1. Issue #886.
+func TestComputeGitLineDiff_EmptyCurrentAllDeleted(t *testing.T) {
+	got := ComputeGitLineDiff([]string{"a", "b"}, []string{}, 3000)
+	if len(got.Added) != 0 || len(got.Modified) != 0 {
+		t.Errorf("expected no added/modified, got added=%v mod=%v", got.Added, got.Modified)
+	}
+	if !reflect.DeepEqual(got.Deleted, []int{1, 1}) {
+		t.Errorf("Deleted = %v, want [1 1]", got.Deleted)
+	}
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Additional edge cases: ResolveTableRefs
 // ══════════════════════════════════════════════════════════════════════════════

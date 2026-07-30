@@ -13,8 +13,8 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 | File | Purpose |
 |------|---------|
 | `SqlEditor.tsx` | Main editor component. Mounts Monaco, registers all completion/hover/code-action/signature providers (module-level, not in render), runs `runDiagnostics` on content change, handles git gutter decoration, clipboard patching, and the snippet context menu via internal Monaco `MenuRegistry`. Exports `DiagMarker`, `ColInfo`, `ResolvedRef`, `pendingMcpMarkers`. |
-| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `colCacheKey` (shared NUL-delimited per-table cache key), `normId` (frontend mirror of the backend `normID` identifier normaliser, for matching captured qualifiers against resolved refs), `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name), `byteColToUtf16Col` (converts a 1-based UTF-8 byte column to a 1-based UTF-16 Monaco column). No React. |
-| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name and single-quoted-string hidden, apostrophe-in-`"it's"` still eligible), `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape), and `byteColToUtf16Col` (ASCII pass-through, multi-byte/emoji shift, past-end clamp). |
+| `sqlEditorUtils.ts` | Pure helpers: `UC`, `quoteIfNecessary`, `colCacheKey` (shared NUL-delimited per-table cache key), `normId` (frontend mirror of the backend `normID` identifier normaliser, for matching captured qualifiers against resolved refs), `FKEntry`, `getFKs` (async, deduped), `getFKsCached`, `setFKCache`, `buildVariableSuggestions`, `getQualifiedIdent`, `getStatementLineRanges`, `identifierRangeAt` (quote-aware column span of the dotted identifier under the cursor, for the cmd/ctrl-hover link underline), `starMenuEligible` (reuses `identifierRangeAt` to gate the "Expand \*" menu — hides it when the `*` is inside a quoted object name), `byteColToUtf16Col` (converts a 1-based UTF-8 byte column to a 1-based UTF-16 Monaco column), `gitDiffLines` (splits file text into the line array fed to `ComputeGitLineDiff` — strips one terminating newline and maps empty text to *zero* lines). No React. |
+| `sqlEditorUtils.test.ts` | Unit tests for `identifierRangeAt` (bare/quoted/escaped-quote/unterminated-quote spans), `starMenuEligible` (bare/`alias.*` eligible, quoted-object-name and single-quoted-string hidden, apostrophe-in-`"it's"` still eligible), `normId` (bare→upper, quoted case-preserved/distinct, `""` unescape), `byteColToUtf16Col` (ASCII pass-through, multi-byte/emoji shift, past-end clamp), and `gitDiffLines` (empty text → zero lines, terminating-newline strip, blank lines preserved). |
 | `editorRef.ts` | Singleton ref to the active `IStandaloneCodeEditor`. Exports `setEditorInstance`, `getEditorInstance`, `insertAtCursor`. Kept separate from `SqlEditor.tsx` so Vite Fast Refresh is not broken by mixing component and non-component exports. |
 | `monacoSetup.ts` | One-time Monaco initialisation: Snowflake Monarch language, Python & Markdown Monarch grammars (inlined to avoid side-effect imports), YAML worker wiring, `thawDarkTheme`/`thawLightTheme` registration. Called via `ensureMonacoSetup()` guard. Imports the **slim** Monaco API (`editor.api.js` + `editor.all.js`), never the `monaco-editor` barrel, to keep the TS/HTML/CSS/JSON language workers (~9 MB) and ~80 basic-language grammars out of the binary — see [gotchas](../../../../docs/concepts/gotchas.md). |
 | `snowflakeSql.ts` | Snowflake Monarch tokenizer (`snowflakeMonarchLanguage`) and custom Monaco theme definitions (`thawDarkTheme`, `thawLightTheme`). The tokenizer's `datatypes` list is sourced from the generated artifact `src/generated/snowflakeDataTypes.ts` (source of truth: `internal/snowflake/datatypes.go`) rather than hand-maintained. Also the single source for the built-in-function catalogue: `BUILTIN_FUNCTION_CATEGORIES`, `CONTEXT_FUNCTIONS`, and the assembled `FUNCTION_CATEGORIES` consumed by the Code Snippets modal and the editor's Built-in Functions submenu. |
@@ -59,7 +59,7 @@ mis-firing the "No database/schema selected" diagnostics (#717).
 - `hoverDDLCache` — `Map<key, {ddl, ts}>`, 60 s TTL.
 - `fetchedSchemaObjects` — `Set<string>` to suppress duplicate `ListObjects` calls.
 - `fetchedDatabaseSchemas` — `Set<string>` for schema listing dedup.
-- `headContentCache` — `Map<filePath, {content, hasHead}>` for git gutter diffs. `hasHead` is false when the file is outside the active repo or the repo has no commits yet; the gutter is cleared (not drawn) in that case rather than marking every line as newly added. (#530)
+- `headContentCache` — `Map<filePath, {content, hasHead}>` for git gutter diffs. `hasHead` is false when the file is outside the active repo or the repo has no commits yet; the gutter is cleared (not drawn) in that case rather than marking every line as newly added. (#530) Empty `content` with `hasHead: true` is a new file inside the repo and must split to *zero* lines, not `[""]` — see the gutter note below. (#886)
 - FK cache lives in `sqlEditorUtils.ts` (`fkCache` Map + `fetchingFKs` Set).
 - `pendingMcpMarkers` — `Map<tabId, DiagMarker[]>` for MCP marker seeding. Written by `QueryPage` when the `mcp:open-sql-tab` Wails event fires; read and cleared by `onDidChangeModelContent` in `SqlEditor`. Markers are applied immediately before the 400ms debounced diagnostics run, so the user sees inline errors as soon as the tab opens.
 
@@ -205,10 +205,20 @@ Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.edi
   (which would mark every line as newly added — issue #530). Empty content with `hasHead: true`
   still means a genuinely new tracked file, so it correctly lights the whole file as added.
 - **Trailing newline is normalized symmetrically before diffing.** HEAD content (raw go-git bytes)
-  is always newline-terminated; Monaco's `getValue()` usually isn't. `refreshGitGutter` strips one
-  trailing `"\n"` from *each* side before `split("\n")`, so a terminating newline ends the last
-  line rather than adding a phantom `""`. Without this, appending a line diffs it against HEAD's
-  phantom trailing `""` and it shows blue (modified) instead of green (added). (#530)
+  is always newline-terminated; Monaco's `getValue()` usually isn't. `gitDiffLines` (in
+  `sqlEditorUtils.ts`) strips one trailing `"\n"` from *each* side before `split("\n")`, so a
+  terminating newline ends the last line rather than adding a phantom `""`. Without this, appending
+  a line diffs it against HEAD's phantom trailing `""` and it shows blue (modified) instead of
+  green (added). (#530)
+- **Empty content splits to zero lines, not `[""]`.** `"".split("\n")` is `[""]`, so a new file's
+  empty HEAD would look like a one-line file holding one blank line. `ComputeGitLineDiff` then
+  reports that phantom line as deleted at the end of the file, where the reclassification step
+  folds it into the addition at the same position — the last row of a brand-new file renders blue
+  (modified) instead of green. `gitDiffLines` maps empty text to `[]`, and the backend already
+  handles `H == 0` correctly (everything added, nothing deleted). It applies to both sides: a
+  tracked file emptied out in the editor reports all HEAD lines as deleted at line 1. A HEAD of
+  exactly `"\n"` also maps to `[]`, matching Monaco's `getValue()` of `""` for a document whose
+  only line is blank, so such a file stays undecorated. (#886)
 - **Do not use `instanceof SubmenuAction`** from an external import for the snippet submenu —
   Monaco's `menu.js` checks its own bundled class; external imports are different module instances
   and always fail. Use `MenuRegistry` and let Monaco create `SubmenuAction` internally.

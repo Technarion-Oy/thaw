@@ -31,7 +31,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -1286,14 +1286,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
 
       const currentText = model.getValue();
-      // A terminating newline ends the last line rather than creating an empty one.
-      // HEAD content (raw go-git bytes) is always newline-terminated, while Monaco's
-      // getValue() usually isn't — so strip one trailing "\n" from each side before
-      // splitting. Otherwise appending a line diffs it against HEAD's phantom trailing
-      // "" and it shows blue (modified) instead of green (added). (#530)
-      const toLines = (s: string) => (s.endsWith("\n") ? s.slice(0, -1) : s).split("\n");
-      const headLines    = toLines(head.content);
-      const currentLines = toLines(currentText);
+      // gitDiffLines strips one trailing "\n" from each side and maps empty text to
+      // zero lines — see its comment for why (#530, #886).
+      const headLines    = gitDiffLines(head.content);
+      const currentLines = gitDiffLines(currentText);
 
       const { added, modified, deleted } = await ComputeGitLineDiff(headLines, currentLines, MAX_DIFF_LINES);
 
