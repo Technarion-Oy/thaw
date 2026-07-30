@@ -139,6 +139,54 @@ function patchTab(tabs: Tab[], id: string, patch: Partial<Tab>): Tab[] {
 }
 
 /**
+ * A preview tab is a *peek*, not an open document: as soon as the user navigates
+ * away from it, it goes away — so single-clicking through the file explorer never
+ * leaves a trail of tabs behind (#889). Applied by every action that moves
+ * `activeTabId`; the tab that is being activated is of course never dropped.
+ *
+ * A preview holding something the user would lose is **promoted** to a permanent
+ * tab instead of being discarded — the same policy `openFile` applies when it
+ * can't recycle a preview in place:
+ *   - unsaved edits (`sql !== savedSql`; normally already promoted by `setSql`,
+ *     but `setSqlForTab` can dirty a non-active tab)
+ *   - a query in flight (`isRunning`) — the run is bound to this tab id
+ *   - the backing file is gone (`orphaned`) — the tab holds the only copy
+ *     (belt-and-braces: `orphanFileTab` also clears `savedSql`, so such a tab is
+ *     dirty too — but the intent shouldn't depend on that implementation detail)
+ *   - it is the current split target — it's visible in the other pane, and
+ *     closing it would collapse the split
+ * A clean idle peek is dropped along with any result it has, exactly as the
+ * recycle path in `openFile` already discards them.
+ *
+ * Dropping a non-active tab is precisely `closeTab`'s `id !== activeTabId`
+ * branch, so no extra bookkeeping is needed: the list can't go empty (the tab
+ * being activated is still in it) and `splitTabId` can't dangle (a split target
+ * is promoted, never dropped).
+ */
+function dropStalePreview(state: QueryState, patch: Partial<QueryState>): Partial<QueryState> {
+  const tabs         = patch.tabs ?? state.tabs;
+  const nextActiveId = patch.activeTabId ?? state.activeTabId;
+  // `splitTabId` is legitimately null in a patch, so `??` would read through it.
+  const nextSplitId  = patch.splitTabId !== undefined ? patch.splitTabId : state.splitTabId;
+
+  const stale = tabs.find((t) => t.preview && t.id !== nextActiveId);
+  if (!stale) return patch;
+
+  const holdsWork =
+    stale.id === nextSplitId ||
+    stale.sql !== stale.savedSql ||
+    stale.isRunning === true ||
+    stale.orphaned === true;
+
+  return {
+    ...patch,
+    tabs: holdsWork
+      ? patchTab(tabs, stale.id, { preview: false })
+      : tabs.filter((t) => t.id !== stale.id),
+  };
+}
+
+/**
  * Next scratch-tab title "SQL n", where n is one past the highest existing.
  * The parentheses went away in #881 — one digit between an identical prefix and
  * a closing paren is hard to pick out of a strip of five — but titles persisted
@@ -245,7 +293,9 @@ export const useQueryStore = create<QueryState>()(
       if (id === state.activeTabId) return {};
       const target = state.tabs.find((t) => t.id === id);
       if (!target) return {};
-      return {
+      // Switching tabs navigates away from any preview tab — it's a peek, so it
+      // closes rather than lingering italic in the strip (#889).
+      return dropStalePreview(state, {
         activeTabId: id,
         sql: target.sql,
         selectedSql: "",
@@ -253,7 +303,7 @@ export const useQueryStore = create<QueryState>()(
         result: target.result,
         error: target.error,
         isRunning: target.isRunning ?? false,
-      };
+      });
     }),
 
   openFile: (path, content, preview = false) => {
@@ -273,7 +323,9 @@ export const useQueryStore = create<QueryState>()(
         if (existing.id === state.activeTabId) {
           return tabs === state.tabs ? {} : { tabs };
         }
-        return {
+        // Activating the file's existing tab leaves any *other* preview behind —
+        // drop it, same as a plain tab switch (#889).
+        return dropStalePreview(state, {
           tabs,
           activeTabId: existing.id,
           sql: existing.sql,
@@ -281,7 +333,7 @@ export const useQueryStore = create<QueryState>()(
           currentFile: existing.path,
           result: existing.result,
           error: existing.error,
-        };
+        });
       }
 
       const kind  = kindFromPath(path);
@@ -332,7 +384,10 @@ export const useQueryStore = create<QueryState>()(
         path, kind, title, sql: content, savedSql: content,
         ...(preview ? { preview: true } : {}),
       });
-      return {
+      // A permanent open (double-click) doesn't touch the existing preview above,
+      // so drop that peek here — for a preview open `baseTabs` already cleared the
+      // flag on the one preview that couldn't be recycled. (#889)
+      return dropStalePreview(state, {
         tabs: [...baseTabs, newTab],
         activeTabId: newTab.id,
         sql: content,
@@ -340,7 +395,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: path,
         result: null,
         error: null,
-      };
+      });
     });
     // A recycled preview keeps its tab id, so any per-id state QueryPage holds
     // *outside* the store — result history, history/compare selection, in-flight
@@ -362,7 +417,7 @@ export const useQueryStore = create<QueryState>()(
   openScratch: () =>
     set((state) => {
       const newTab = makeScratchTab(state.tabs);
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql: "",
@@ -370,7 +425,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: null,
         result: null,
         error: null,
-      };
+      });
     }),
 
   openDiff: (leftLabel, leftText, rightLabel, rightText) =>
@@ -384,7 +439,7 @@ export const useQueryStore = create<QueryState>()(
         title: `${short(leftLabel)} ↔ ${short(rightLabel)}`,
         diff: { leftLabel, leftText, rightLabel, rightText },
       });
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql: "",
@@ -392,7 +447,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: null,
         result: null,
         error: null,
-      };
+      });
     }),
 
   openNotebook: (path, content) =>
@@ -400,14 +455,14 @@ export const useQueryStore = create<QueryState>()(
       const existing = state.tabs.find((t) => t.path === path);
       if (existing) {
         if (existing.id === state.activeTabId) return {};
-        return {
+        return dropStalePreview(state, {
           activeTabId: existing.id,
           sql: existing.sql,
           selectedSql: "",
           currentFile: existing.path,
           result: null,
           error: null,
-        };
+        });
       }
       const newTab = makeTab({
         kind: "notebook",
@@ -416,7 +471,7 @@ export const useQueryStore = create<QueryState>()(
         sql: content,
         savedSql: content,
       });
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql: content,
@@ -424,7 +479,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: path,
         result: null,
         error: null,
-      };
+      });
     }),
 
   openNotebookUnsaved: (title, content) =>
@@ -436,7 +491,7 @@ export const useQueryStore = create<QueryState>()(
         sql: content,
         savedSql: "",  // dirty from the start — no saved version
       });
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql: content,
@@ -444,7 +499,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: null,
         result: null,
         error: null,
-      };
+      });
     }),
 
   moveTab: (draggedId, targetId, before) =>
@@ -541,7 +596,10 @@ export const useQueryStore = create<QueryState>()(
       } else {
         // Closing the active tab — move to the nearest neighbour
         const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
-        next = {
+        // The neighbour we land on isn't the preview tab, so that peek is now
+        // navigated away from — drop it (#889). Only this branch moves the active
+        // tab; closing a *background* tab must leave the preview alone.
+        next = dropStalePreview(state, {
           tabs: newTabs,
           activeTabId: nextTab.id,
           sql: nextTab.sql,
@@ -550,7 +608,7 @@ export const useQueryStore = create<QueryState>()(
           result: nextTab.result,
           error: nextTab.error,
           isRunning: nextTab.isRunning ?? false,
-        };
+        });
       }
 
       if (state.splitTabId === id) {
@@ -656,7 +714,7 @@ export const useQueryStore = create<QueryState>()(
   executeInNewTab: (sql) => {
     set((state) => {
       const newTab = makeScratchTab(state.tabs, { sql });
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql,
@@ -665,7 +723,7 @@ export const useQueryStore = create<QueryState>()(
         result: null,
         error: null,
         isRunning: false,
-      };
+      });
     });
     // Ask QueryPage to run via its StartQuery/WaitForQueryResult path, which
     // is the only path that populates resultHistory and shows results in the UI.
@@ -676,7 +734,7 @@ export const useQueryStore = create<QueryState>()(
   loadInNewTab: (sql) => {
     set((state) => {
       const newTab = makeScratchTab(state.tabs, { sql });
-      return {
+      return dropStalePreview(state, {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
         sql,
@@ -685,7 +743,7 @@ export const useQueryStore = create<QueryState>()(
         result: null,
         error: null,
         isRunning: false,
-      };
+      });
     });
   },
 
@@ -694,7 +752,7 @@ export const useQueryStore = create<QueryState>()(
     // a close-confirmation dialog — intentional because MCP-delivered SQL is
     // not persisted to any file and should not be silently discarded.
     const newTab = makeTab({ title, sql, savedSql: "", mcpOrigin: true });
-    set((state) => ({
+    set((state) => dropStalePreview(state, {
       tabs: [...state.tabs, newTab],
       activeTabId: newTab.id,
       sql,
@@ -711,7 +769,7 @@ export const useQueryStore = create<QueryState>()(
     // Notebook tabs store nbformat JSON in the `sql` field — this is the
     // existing convention used by openNotebook/openNotebookUnsaved.
     const newTab = makeTab({ kind: "notebook", title, sql: content, savedSql: "", mcpOrigin: true });
-    set((state) => ({
+    set((state) => dropStalePreview(state, {
       tabs: [...state.tabs, newTab],
       activeTabId: newTab.id,
       sql: content,
