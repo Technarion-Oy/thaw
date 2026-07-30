@@ -238,6 +238,26 @@ export default function TabBar() {
     return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
   }, [tabsSig]);
 
+  // Keep the active tab visible. Every activation path other than arrow keys and
+  // startRenameFromPanel changes only store state (`activeTabId`), and nothing
+  // touched the strip's scroll position — so opening a file from the explorer,
+  // picking a hidden tab from the Active Files panel, pressing "+" while the
+  // strip is overflowed, or ⌘W-ing onto an off-screen neighbour left the active
+  // tab out of sight behind the edge fade. (#889)
+  //
+  // `inline: "nearest"` is a no-op for an already-visible tab, so plain clicks
+  // on visible tabs never nudge the strip; `block: "nearest"` keeps the vertical
+  // viewport still. The effect runs after the DOM commit, so a brand-new tab's
+  // ref is already populated (unlike startRenameFromPanel, which has to wait out
+  // a panel-close render and therefore keeps its rAF). Keyed on the active tab's
+  // *path* as well as its id, so the preview-tab recycle in `openFile` — same
+  // tab id, different file — re-reveals it; keying on `tabsSig` instead would
+  // yank the scroll position whenever a background tab's metadata changed.
+  const activePath = tabs.find((t) => t.id === activeTabId)?.path ?? null;
+  useEffect(() => {
+    tabRefs.current[activeTabId ?? ""]?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeTabId, activePath]);
+
   // Arrow-key navigation over the tablist (WAI-ARIA tabs pattern with automatic
   // activation: moving focus activates the tab, so focus and content never
   // disagree). Bound on the tablist, which holds only tabs — the "+" button is a
