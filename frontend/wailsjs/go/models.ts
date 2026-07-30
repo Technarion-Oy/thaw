@@ -5488,6 +5488,8 @@ export namespace snowpark {
 	    backend: string;
 	    venvPath: string;
 	    pythonPath: string;
+	    condaPythonVersion: string;
+	    condaPythonVersions: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SnowparkConfigResult(source);
@@ -5498,6 +5500,8 @@ export namespace snowpark {
 	        this.backend = source["backend"];
 	        this.venvPath = source["venvPath"];
 	        this.pythonPath = source["pythonPath"];
+	        this.condaPythonVersion = source["condaPythonVersion"];
+	        this.condaPythonVersions = source["condaPythonVersions"];
 	    }
 	}
 	export class StreamlitPreviewResult {

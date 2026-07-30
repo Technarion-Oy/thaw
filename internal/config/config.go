@@ -75,6 +75,11 @@ type SnowparkConfig struct {
 	Backend    string `json:"backend"`    // "conda" | "venv" | "" (empty = default to conda)
 	VenvPath   string `json:"venvPath"`   // custom venv path; empty = use computed default
 	PythonPath string `json:"pythonPath"` // explicit python binary for venv creation; empty = auto-detect
+	// CondaPythonVersion is the major.minor Python the conda env is created with
+	// ("3.11"); empty = the default. It exists so a project whose requirements
+	// pin releases that predate the default interpreter can still be installed —
+	// old pins ship no wheel for a newer CPython and fail to build from source.
+	CondaPythonVersion string `json:"condaPythonVersion"`
 }
 
 // PipRegistryCredential holds Basic Auth credentials for a single pip registry URL.

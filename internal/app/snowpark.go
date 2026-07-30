@@ -27,6 +27,10 @@ func (a *App) SaveSnowparkPythonPath(pythonPath string) error {
 	return a.snowparkSvc.SaveSnowparkPythonPath(pythonPath)
 }
 
+func (a *App) SaveSnowparkCondaPython(version string) error {
+	return a.snowparkSvc.SaveSnowparkCondaPython(version)
+}
+
 func (a *App) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
 	return a.snowparkSvc.GetPipRegistryConfig()
 }

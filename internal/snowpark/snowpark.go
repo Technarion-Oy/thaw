@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,33 @@ import (
 
 // SnowparkCondaEnv is the name of the conda environment used for Snowpark.
 const SnowparkCondaEnv = "thaw_snowpark"
+
+// DefaultCondaPython is the Python version a new conda environment gets when
+// the user has not chosen one.
+const DefaultCondaPython = "3.12"
+
+// CondaPythonVersions are the interpreter versions the setup wizard offers for
+// the conda backend, newest first. Older entries exist so requirement files
+// pinning pre-3.12 releases (which ship no wheel for a newer CPython and cannot
+// be built from source on it) remain installable — see internal/snowpark's
+// README on pip failure classification. 3.9 is the floor CheckSnowparkEnv
+// accepts.
+var CondaPythonVersions = []string{"3.12", "3.11", "3.10", "3.9"}
+
+// isSupportedCondaPython reports whether v is one of CondaPythonVersions.
+func isSupportedCondaPython(v string) bool {
+	return slices.Contains(CondaPythonVersions, v)
+}
+
+// condaPythonVersion returns the effective conda Python version for cfg,
+// falling back to DefaultCondaPython for an unset or (defensively) a
+// no-longer-supported persisted value.
+func condaPythonVersion(cfg *config.AppConfig) string {
+	if cfg != nil && isSupportedCondaPython(cfg.Snowpark.CondaPythonVersion) {
+		return cfg.Snowpark.CondaPythonVersion
+	}
+	return DefaultCondaPython
+}
 
 // Markers used by the embedded Python kernel to delimit cell execution.
 const kernelSentinel = "<<<THAW_CELL_DONE>>>"
@@ -651,6 +679,11 @@ type SnowparkConfigResult struct {
 	Backend    string `json:"backend"`    // "conda" | "venv"
 	VenvPath   string `json:"venvPath"`   // effective venv path (never empty)
 	PythonPath string `json:"pythonPath"` // saved python binary for venv (may be empty)
+	// CondaPythonVersion is the effective major.minor Python for a new conda env
+	// (never empty — falls back to DefaultCondaPython).
+	CondaPythonVersion string `json:"condaPythonVersion"`
+	// CondaPythonVersions lists the versions the wizard offers.
+	CondaPythonVersions []string `json:"condaPythonVersions"`
 }
 
 // PythonInfo describes a Python interpreter found on the system.
@@ -775,6 +808,18 @@ func NewService(ctx context.Context, syncTabContext SyncTabContextFunc) *Service
 // IsAppleSilicon reports whether the host is an Apple Silicon (arm64) Mac.
 func IsAppleSilicon() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+
+// rePythonVersionBanner matches the `python --version` banner ("Python 3.12.4").
+var rePythonVersionBanner = regexp.MustCompile(`Python (\d+\.\d+)`)
+
+// pythonVersionFromOutput extracts the major.minor version from a
+// `python --version` banner, or "" when the output does not contain one.
+func pythonVersionFromOutput(out string) string {
+	if m := rePythonVersionBanner.FindStringSubmatch(out); len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // pythonVersionAtLeast reports whether a "major.minor" version string satisfies
@@ -1049,7 +1094,29 @@ func (s *Service) GetSnowparkConfig() SnowparkConfigResult {
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	return SnowparkConfigResult{Backend: backend, VenvPath: venvPath, PythonPath: cfg.Snowpark.PythonPath}
+	return SnowparkConfigResult{
+		Backend:             backend,
+		VenvPath:            venvPath,
+		PythonPath:          cfg.Snowpark.PythonPath,
+		CondaPythonVersion:  condaPythonVersion(cfg),
+		CondaPythonVersions: append([]string(nil), CondaPythonVersions...),
+	}
+}
+
+// SaveSnowparkCondaPython persists the Python version used when creating the
+// conda environment. Only versions in CondaPythonVersions are accepted — the
+// value is interpolated into the `conda create` argument list, and an
+// unvalidated string there would be an argument-injection vector as well as a
+// guaranteed solver failure. An empty value resets to the default.
+func (s *Service) SaveSnowparkCondaPython(version string) error {
+	version = strings.TrimSpace(version)
+	if version != "" && !isSupportedCondaPython(version) {
+		return fmt.Errorf("unsupported Python version %q (supported: %s)", version, strings.Join(CondaPythonVersions, ", "))
+	}
+	return config.Update(func(cfg *config.AppConfig) error {
+		cfg.Snowpark.CondaPythonVersion = version
+		return nil
+	})
 }
 
 // SaveSnowparkConfig persists the backend choice.
@@ -1331,10 +1398,7 @@ func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult
 	result.HasEnv = true
 
 	verOut, _ := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv, "python", "--version").CombinedOutput()
-	re := regexp.MustCompile(`Python (\d+\.\d+)`)
-	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
-		result.Version = m[1]
-	}
+	result.Version = pythonVersionFromOutput(string(verOut))
 	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the env is too old (need 3.9+).", result.Version)
 		return *result
@@ -1376,10 +1440,7 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 	result.HasVenv = true
 
 	verOut, _ := exec.Command(python, "--version").CombinedOutput()
-	re := regexp.MustCompile(`Python (\d+\.\d+)`)
-	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
-		result.Version = m[1]
-	}
+	result.Version = pythonVersionFromOutput(string(verOut))
 	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the venv is too old (need 3.9+).", result.Version)
 		return *result
@@ -1406,12 +1467,22 @@ func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfi
 // ─── command streaming ────────────────────────────────────────────────────────
 
 // streamCommandTo runs cmd and emits each output line as the given event. It
-// delegates to streamAndCapture and discards the captured slice; the captured
-// stdout (a few KB of pip output at most) is allocated then dropped here, which
+// delegates to streamAndCapture and discards the captured slices; the captured
+// output (a few KB of pip output at most) is allocated then dropped here, which
 // is an accepted trade-off for keeping a single pipe-scan implementation.
 func (s *Service) streamCommandTo(cmd *exec.Cmd, eventName string) error {
-	_, err := s.streamAndCapture(cmd, eventName)
+	_, _, err := s.streamAndCapture(cmd, eventName)
 	return err
+}
+
+// streamCombined runs cmd like streamCommandTo but returns stdout+stderr lines
+// **even when cmd fails**, so callers can classify the failure from the tool's
+// own output (see describePipFailure). The two streams are concatenated rather
+// than interleaved: their relative order is not recoverable from separate pipes,
+// and no consumer depends on it.
+func (s *Service) streamCombined(cmd *exec.Cmd, eventName string) ([]string, error) {
+	out, errOut, err := s.streamAndCapture(cmd, eventName)
+	return append(out, errOut...), err
 }
 
 // streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
@@ -1420,25 +1491,30 @@ func (s *Service) streamCommand(cmd *exec.Cmd) error {
 }
 
 // streamAndCapture runs cmd, emits each stdout/stderr line as eventName (so the
-// UI gets live progress), and returns the collected stdout lines for callers
-// that also need the output (e.g. writing `pip freeze` to a file). Callers that
-// only need the streaming use streamCommandTo, which discards the slice.
+// UI gets live progress), and returns the collected stdout and stderr lines for
+// callers that also need the output — writing `pip freeze` to a file (stdout
+// only), or classifying a pip failure (both streams; pip's diagnostics go to
+// stderr while its progress lines go to stdout). Callers that only need the
+// streaming use streamCommandTo, which discards both slices.
 //
-// captured and scanErr are written only by the stdout goroutine and read by the
+// The captured lines are returned even when cmd exits non-zero: a failing pip
+// run is exactly when the output matters most.
+//
+// Each slice and scanErr are written only by their own goroutine and read by the
 // main goroutine after wg.Wait(), which establishes the happens-before edge — no
 // extra locking is needed.
-func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, error) {
+func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, []string, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		_ = stdout.Close() // StdoutPipe's read-end would otherwise leak (Wait never runs)
-		return nil, err
+		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	emit := func(line string) {
@@ -1446,8 +1522,9 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 	}
 
 	var (
-		captured []string
-		scanErr  error
+		captured    []string
+		capturedErr []string
+		scanErr     error
 	)
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -1469,7 +1546,9 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 		defer wg.Done()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			emit(sc.Text())
+			line := sc.Text()
+			capturedErr = append(capturedErr, line)
+			emit(line)
 		}
 		// Surface a truncated stderr stream too, so the user isn't shown only a
 		// fragment of pip's error output with no indication it was cut short.
@@ -1479,12 +1558,12 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, e
 	}()
 	wg.Wait()
 	if err := cmd.Wait(); err != nil {
-		return nil, err
+		return captured, capturedErr, err
 	}
 	if scanErr != nil {
-		return nil, scanErr
+		return captured, capturedErr, scanErr
 	}
-	return captured, nil
+	return captured, capturedErr, nil
 }
 
 // ─── pip/env helpers ──────────────────────────────────────────────────────────
@@ -1536,8 +1615,9 @@ func (s *Service) InstallEnvPackage(pkg string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
-		return fmt.Errorf("install %s failed: %w", pkg, err)
+	lines, err := s.streamCombined(cmd, "snowpark:package-output")
+	if err != nil {
+		return s.explainPipFailure(fmt.Errorf("install %s failed: %w", pkg, err), lines)
 	}
 	return nil
 }
@@ -1650,8 +1730,9 @@ func (s *Service) InstallRequirementsFile(path string) error {
 		return err
 	}
 	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install -r %s", path))
-	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
-		return fmt.Errorf("install from %s failed: %w", filepath.Base(path), err)
+	lines, err := s.streamCombined(cmd, "snowpark:package-output")
+	if err != nil {
+		return s.explainPipFailure(fmt.Errorf("install from %s failed: %w", filepath.Base(path), err), lines)
 	}
 	return nil
 }
@@ -1671,10 +1752,51 @@ func (s *Service) InstallPyprojectFile(path string) error {
 	// Emit the authoritative command so the UI never has to guess the directory
 	// pip actually receives (vs. the selected pyproject.toml file path).
 	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install %s", dir))
-	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
-		return fmt.Errorf("install from %s failed: %w", filepath.Base(dir), err)
+	lines, err := s.streamCombined(cmd, "snowpark:package-output")
+	if err != nil {
+		return s.explainPipFailure(fmt.Errorf("install from %s failed: %w", filepath.Base(dir), err), lines)
 	}
 	return nil
+}
+
+// explainPipFailure appends an actionable explanation to a failed pip install
+// when the captured output matches a known signature — most importantly a pin
+// with no wheel for the environment's interpreter, whose raw symptom (a source
+// build dying on `No module named 'pkg_resources'`) reads as an unrelated
+// conflict. Unrecognized failures are returned untouched so pip's own message
+// stays the whole story.
+//
+// The interpreter version is only probed on this path, so a successful install
+// never pays for the extra subprocess.
+func (s *Service) explainPipFailure(base error, lines []string) error {
+	advice := describePipFailure(lines, s.envPythonVersion())
+	if advice == "" {
+		return base
+	}
+	return fmt.Errorf("%w\n\n%s", base, advice)
+}
+
+// envPythonVersion returns the active Snowpark environment's Python version as
+// "3.12", or "" when it cannot be determined (no env yet, conda missing, …).
+func (s *Service) envPythonVersion() string {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return ""
+	}
+	if backend := cfg.Snowpark.Backend; backend == "venv" {
+		venvPath := cfg.Snowpark.VenvPath
+		if venvPath == "" {
+			venvPath = defaultVenvPath()
+		}
+		out, _ := exec.Command(venvPythonBin(venvPath), "--version").CombinedOutput()
+		return pythonVersionFromOutput(string(out))
+	}
+	condaPath, err := exec.LookPath("conda")
+	if err != nil {
+		return ""
+	}
+	out, _ := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv, "python", "--version").CombinedOutput()
+	return pythonVersionFromOutput(string(out))
 }
 
 // PickFreezeOutputFile opens a save dialog for the freeze target file. Returns
@@ -1711,7 +1833,7 @@ func (s *Service) freezeToFile(path string) error {
 		return err
 	}
 	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", "$ pip freeze")
-	lines, err := s.streamAndCapture(cmd, "snowpark:package-output")
+	lines, _, err := s.streamAndCapture(cmd, "snowpark:package-output")
 	if err != nil {
 		return fmt.Errorf("pip freeze: %w", err)
 	}
@@ -1759,12 +1881,17 @@ func isFreezeLine(line string) bool {
 
 // ─── conda install methods ────────────────────────────────────────────────────
 
-// InstallCondaEnv creates the thaw_snowpark conda environment.
+// InstallCondaEnv creates the thaw_snowpark conda environment with the
+// configured Python version (see SaveSnowparkCondaPython).
 // On Apple Silicon the CONDA_SUBDIR=osx-64 workaround is applied automatically.
 func (s *Service) InstallCondaEnv() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return fmt.Errorf("config unavailable: %w", err)
 	}
 
 	// Skip if already exists.
@@ -1778,7 +1905,7 @@ func (s *Service) InstallCondaEnv() error {
 		"create", "--name", SnowparkCondaEnv, "-y",
 		"--override-channels",
 		"-c", "https://repo.anaconda.com/pkgs/snowflake",
-		"python=3.12", "numpy", "pandas", "pyarrow",
+		"python=" + condaPythonVersion(cfg), "numpy", "pandas", "pyarrow",
 	}
 	cmd := exec.Command(condaPath, args...)
 	if IsAppleSilicon() {

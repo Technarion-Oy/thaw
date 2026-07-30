@@ -1006,11 +1006,12 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 - **Check Environment** (`Snowpark → Check Environment…`) — scans the local machine and shows the status of system Python, the selected backend (conda env or venv), `snowflake-snowpark-python`, `notebook`, `ipython-sql`, and `sqlalchemy`; offers a direct shortcut to the setup wizard when anything is missing
 - **Setup Environment** (`Snowpark → Setup Environment…`) — three-step guided wizard that streams command output line-by-line into a scrollable log:
-  1. Create a conda environment (`thaw_snowpark`, Python 3.12, Snowflake channel) **or** a Python venv
+  1. Create a conda environment (`thaw_snowpark`, Python 3.12 by default, Snowflake channel) **or** a Python venv
   2. Install `snowflake-snowpark-python` (with optional `[pandas]` extras for venv)
   3. Install `notebook`, `ipython-sql`, and `sqlalchemy`
 - **Backend choice** — radio group selects **conda** or **venv**; all commands adapt accordingly
 - **Python interpreter selector** (venv only) — dropdown lists every Python interpreter found on the system (`/usr/bin`, Homebrew, pyenv, etc.); duplicates are removed by resolving symlinks; the selection is saved to `config.json`
+- **Python version selector** (conda only) — dropdown chooses the interpreter a new `thaw_snowpark` environment is created with (3.12 · 3.11 · 3.10 · 3.9; default 3.12), saved to `config.json` and reflected in the previewed `conda create` command. Pick an older version when a project's `requirements.txt` pins releases that predate the default — such pins ship no wheel for a newer CPython and cannot be built from source
 - **Apple Silicon warning** (conda only) — `CONDA_SUBDIR=osx-64` is applied automatically on Apple M-series chips to work around a known `pyOpenSSL` incompatibility; a banner explains this
 - **Use Existing venv** (venv only) — point the wizard at a pre-existing virtual environment (project-specific, shared team env, pyenv-managed, etc.) instead of creating a new one:
   - **Browse** button opens a native directory picker; the path can also be typed manually
@@ -1027,6 +1028,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Install requirements.txt** — pick a pip requirements file via a native file picker and install every pinned package at once (`pip install -r`); output streams to the log and the package list refreshes on success
   - **Install pyproject.toml** — pick a `pyproject.toml` (or any TOML build file) and install the project it defines (`pip install <dir>`); honors the same registry settings
   - **Freeze to requirements.txt** — export the active environment's exact package set to a file via a native save dialog (`pip freeze`); disabled until at least one package is installed
+  - **Actionable install failures** — when pip fails, Thaw classifies its output and shows the diagnosis in a dedicated alert above the log instead of leaving it at the tail of a several-hundred-line build trace. The common case is a pin with no wheel for the environment's interpreter (e.g. `pandas==2.0.3` on Python 3.14): pip silently falls back to the source tarball and the build dies on something unrelated-looking like `No module named 'pkg_resources'`, which reads as a conflict with the packages already installed. Thaw names the offending requirement and the environment's Python version, states that it is *not* a conflict, and points at the two fixes (relax the pin, or recreate the environment on an older Python). Missing-from-the-index failures are distinguished from wheel gaps and point at the pip registry settings; unrecognised failures (network, permissions, genuine dependency conflicts) are passed through with pip's own message unchanged
   - Backed by `pip list --format=json` and `pip install` / `pip install -r` / `pip install <dir>` / `pip freeze` / `pip uninstall -y` inside the active conda or venv environment; all install paths apply the configured private pip registry settings
 - **Private Pip Registries** — configure corporate or private pip repositories (including credentials) in the Snowpark setup wizard; Thaw automatically injects them into all `pip install` commands.
 

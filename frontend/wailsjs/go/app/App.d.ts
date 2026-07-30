@@ -1107,6 +1107,8 @@ export function SaveProfile(arg1:sfconfig.Connection):Promise<void>;
 
 export function SaveSessionConfig(arg1:config.SessionConfig):Promise<void>;
 
+export function SaveSnowparkCondaPython(arg1:string):Promise<void>;
+
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 
 export function SaveSnowparkPythonPath(arg1:string):Promise<void>;
