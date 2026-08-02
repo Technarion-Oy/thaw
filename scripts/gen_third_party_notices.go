@@ -468,6 +468,10 @@ func render(goDeps, npmDeps []dep) string {
 	fmt.Fprintf(&b, "Thaw itself is free software licensed under the GNU General Public License v3.0\n")
 	fmt.Fprintf(&b, "or later. The licenses below apply only to the corresponding third-party packages.\n\n")
 
+	// Non-package credit. Kept as plain prose (no Markdown link) because the
+	// Acknowledgements modal renders the intro paragraphs as plain text.
+	fmt.Fprintf(&b, "The Thaw application icon was generated with AppLaunchFlow (https://applaunchflow.com).\n\n")
+
 	b.WriteString("## Contents\n\n")
 	fmt.Fprintf(&b, "- [Backend — Go modules](#backend--go-modules) (%d)\n", len(goDeps))
 	fmt.Fprintf(&b, "- [Frontend — npm packages](#frontend--npm-packages) (%d)\n\n", len(npmDeps))

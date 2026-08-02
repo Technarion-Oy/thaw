@@ -12,6 +12,8 @@ with each project's copyright notice and license text.
 Thaw itself is free software licensed under the GNU General Public License v3.0
 or later. The licenses below apply only to the corresponding third-party packages.
 
+The Thaw application icon was generated with AppLaunchFlow (https://applaunchflow.com).
+
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (93)
