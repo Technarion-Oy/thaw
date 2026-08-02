@@ -181,6 +181,16 @@ Contributions are welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and
 
 ---
 
+## Credits
+
+The Thaw application icon was generated with [AppLaunchFlow](https://applaunchflow.com).
+
+Thaw is built on many open-source projects; every bundled Go module and npm
+package is listed with its license in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md),
+also viewable in-app via **Help → About Thaw… → Acknowledgements**.
+
+---
+
 ## License
 
 Copyright © 2026 Technarion Oy and Thaw contributors.

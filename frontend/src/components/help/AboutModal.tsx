@@ -4,11 +4,16 @@ import { useEffect, useState } from "react";
 import { Modal, Button, Tooltip, message } from "antd";
 import { InfoCircleOutlined, CopyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { GetAppInfo } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 import type { app } from "../../../wailsjs/go/models";
 import ThirdPartyNoticesModal from "./ThirdPartyNoticesModal";
 
 interface Props { onClose: () => void; }
+
+// Credit for the application icon. Shown as a row in the dialog and included in
+// the copied info block.
+const ICON_CREDIT = "AppLaunchFlow";
+const ICON_CREDIT_URL = "https://applaunchflow.com";
 
 export default function AboutModal({ onClose }: Props) {
   const [info, setInfo] = useState<app.AppInfo | null>(null);
@@ -26,6 +31,7 @@ export default function AboutModal({ onClose }: Props) {
         `${info.comments}`,
         `${info.copyright}`,
         `${info.companyName}`,
+        `App icon by ${ICON_CREDIT} (${ICON_CREDIT_URL})`,
       ].join("\n")
     : "";
 
@@ -114,9 +120,24 @@ export default function AboutModal({ onClose }: Props) {
             <span style={labelStyle}>Company</span>
             <span style={valueStyle}>{info.companyName}</span>
           </div>
-          <div style={{ ...rowStyle, borderBottom: "none" }}>
+          <div style={rowStyle}>
             <span style={labelStyle}>Copyright</span>
             <span style={{ ...valueStyle, maxWidth: 240 }}>{info.copyright}</span>
+          </div>
+          <div style={{ ...rowStyle, borderBottom: "none" }}>
+            <span style={labelStyle}>App icon</span>
+            <span style={valueStyle}>
+              {/* BrowserOpenURL, not <a href>: WKWebView would navigate the app
+                  window itself out of the embedded frontend. */}
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: "auto", fontSize: 13 }}
+                onClick={() => BrowserOpenURL(ICON_CREDIT_URL)}
+              >
+                {ICON_CREDIT}
+              </Button>
+            </span>
           </div>
         </div>
       ) : (
