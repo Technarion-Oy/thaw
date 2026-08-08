@@ -59,7 +59,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/gabriel-vasile/mimetype` | v1.4.7 | MIT |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
 | `github.com/go-git/go-billy/v5` | v5.9.0 | Apache-2.0 |
-| `github.com/go-git/go-git/v5` | v5.19.1 | Apache-2.0 |
+| `github.com/go-git/go-git/v5` | v5.19.2 | Apache-2.0 |
 | `github.com/goccy/go-json` | v0.10.5 | MIT |
 | `github.com/godbus/dbus` | v0.0.0-20190726142602-4481cbc300e2 | BSD-2-Clause |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT |
@@ -5095,7 +5095,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### github.com/go-git/go-git/v5
 
-- **Version:** v5.19.1
+- **Version:** v5.19.2
 - **License:** Apache-2.0
 
 ```
