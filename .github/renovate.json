@@ -234,7 +234,9 @@
         "leaves the notices stale, so without this every Renovate PR would need a manual",
         "`go run scripts/gen_third_party_notices.go` commit. Only THIRD_PARTY_NOTICES.md is",
         "committed (fileFilters); the dist stub and node_modules stay in the workspace.",
-        "Requires self-hosted Renovate with these commands allow-listed — see .github/workflows/renovate.yml.",
+        "A single script, not a command chain: Renovate execs with shell: false and splits on",
+        "whitespace, so `cd x && y` tries to spawn a binary named `cd`.",
+        "Requires self-hosted Renovate with the command allow-listed — see .github/workflows/renovate.yml.",
         "Matched by manager rather than by manifest path so lockfile-only updates and the monthly",
         "lockFileMaintenance branch — which change go.sum / package-lock.json without touching go.mod",
         "or package.json — are covered too. The root package.json (semantic-release) is a harmless",
@@ -242,11 +244,7 @@
       ],
       "matchManagers": ["gomod", "npm"],
       "postUpgradeTasks": {
-        "commands": [
-          "mkdir -p frontend/dist && touch frontend/dist/.keep",
-          "cd frontend && npm ci",
-          "go run scripts/gen_third_party_notices.go"
-        ],
+        "commands": ["bash scripts/regen_third_party_notices.sh"],
         "fileFilters": ["THIRD_PARTY_NOTICES.md"],
         "executionMode": "branch"
       }
