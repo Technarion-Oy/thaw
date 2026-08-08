@@ -45,7 +45,11 @@ Wails events itself.
 mutates it) via `parseNotices`. `THIRD_PARTY_NOTICES.md` is produced by
 `scripts/gen_third_party_notices.go` — regenerate it after changing
 dependencies; the parser only relies on the `##`/`###`/bullet/fence shapes that
-generator emits. The intro paragraphs shown above the search box come from that
+generator emits. The Go section is the union across every shipped platform, so
+the modal lists a few packages (the macOS/Windows/Linux credential-store
+backends, the Windows webview) that are not in the binary the viewer is running
+— the file's intro prose says so, and no per-package platform filtering is
+applied here. The intro paragraphs shown above the search box come from that
 file's prose (including the AppLaunchFlow app-icon credit) and are rendered as
 plain text, so the generator writes bare URLs there rather than Markdown links. `TestThirdPartyNoticesUpToDate` (root Go package, run in
 `build-check.yml`) fails CI if the committed file drifts from the dependency

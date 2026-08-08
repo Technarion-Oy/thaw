@@ -5,9 +5,15 @@ third-party package that ships inside the Thaw binary — the Go modules compile
 into the backend and the npm packages bundled into the embedded frontend — along
 with each project's copyright notice and license text.
 
+The Go modules are the union across every platform Thaw ships for (macOS, Windows
+and Linux), since build constraints select different code per platform. A few
+entries — the platform-specific credential-store backends, for instance — are
+therefore compiled into some builds and not others.
+
 > **This file is generated.** Do not edit it by hand. Regenerate it with
-> `go run scripts/gen_third_party_notices.go` (or `go generate ./...`) after
-> changing dependencies in `go.mod` or `frontend/package.json`.
+> `scripts/regen_third_party_notices.sh` (or `go generate ./...`) after changing
+> dependencies in `go.mod` or `frontend/package.json`. The output does not depend
+> on the host it was generated on.
 
 Thaw itself is free software licensed under the GNU General Public License v3.0
 or later. The licenses below apply only to the corresponding third-party packages.
@@ -16,7 +22,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (93)
+- [Backend — Go modules](#backend--go-modules) (99)
 - [Frontend — npm packages](#frontend--npm-packages) (179)
 
 ## Backend — Go modules
@@ -24,6 +30,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | Package | Version | License |
 |---------|---------|---------|
 | `dario.cat/mergo` | v1.0.0 | BSD-3-Clause |
+| `github.com/99designs/go-keychain` | v0.0.0-20191008050251-8e49817e8af4 | MIT |
 | `github.com/99designs/keyring` | v1.2.2 | MIT |
 | `github.com/apache/arrow-go/v18` | v18.4.0 | Apache-2.0 |
 | `github.com/aws/aws-sdk-go-v2` | v1.41.5 | Apache-2.0 |
@@ -53,6 +60,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/cloudflare/circl` | v1.6.3 | BSD-3-Clause |
 | `github.com/creack/pty` | v1.1.24 | MIT |
 | `github.com/cyphar/filepath-securejoin` | v0.6.1 | BSD-3-Clause |
+| `github.com/danieljoos/wincred` | v1.2.2 | MIT |
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT |
 | `github.com/dvsekhvalnov/jose2go` | v1.7.0 | MIT |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
@@ -77,8 +85,11 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/leaanthony/slicer` | v1.6.0 | MIT |
 | `github.com/leaanthony/u` | v1.1.1 | MIT |
 | `github.com/mattn/go-ieproxy` | v0.0.12 | MIT |
+| `github.com/mattn/go-isatty` | v0.0.20 | MIT |
+| `github.com/Microsoft/go-winio` | v0.6.2 | MIT |
 | `github.com/modelcontextprotocol/go-sdk` | v1.6.1 | Apache-2.0 |
 | `github.com/mtibben/percent` | v0.2.1 | MIT |
+| `github.com/ncruces/go-strftime` | v1.0.0 | MIT |
 | `github.com/pierrec/lz4/v4` | v4.1.22 | BSD-3-Clause |
 | `github.com/pjbgf/sha1cd` | v0.6.0 | Apache-2.0 |
 | `github.com/pkg/browser` | v0.0.0-20240102092130-5ac0b6a4141c | BSD-2-Clause |
@@ -93,6 +104,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/skeema/knownhosts` | v1.3.1 | Apache-2.0 |
 | `github.com/snowflakedb/gosnowflake/v2` | v2.0.0 | Apache-2.0 |
 | `github.com/valyala/fastjson` | v1.6.10 | MIT |
+| `github.com/wailsapp/go-webview2` | v1.0.22 | MIT |
 | `github.com/wailsapp/wails/v2` | v2.11.0 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
@@ -151,6 +163,35 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### github.com/99designs/go-keychain
+
+- **Version:** v0.0.0-20191008050251-8e49817e8af4
+- **License:** MIT
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015 Keybase
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### github.com/99designs/keyring
@@ -4712,6 +4753,35 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### github.com/danieljoos/wincred
+
+- **Version:** v1.2.2
+- **License:** MIT
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2014 Daniel Joos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### github.com/dustin/go-humanize
 
 - **Version:** v1.0.1
@@ -6457,6 +6527,52 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### github.com/mattn/go-isatty
+
+- **Version:** v0.0.20
+- **License:** MIT
+
+```
+Copyright (c) Yasuhiro MATSUMOTO <mattn.jp@gmail.com>
+
+MIT License (Expat)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### github.com/Microsoft/go-winio
+
+- **Version:** v0.6.2
+- **License:** MIT
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015 Microsoft
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### github.com/modelcontextprotocol/go-sdk
 
 - **Version:** v1.6.1
@@ -6690,6 +6806,35 @@ the full license text.
 MIT License
 
 Copyright (c) 2020 Michael Tibben
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### github.com/ncruces/go-strftime
+
+- **Version:** v1.0.0
+- **License:** MIT
+
+```
+MIT License
+
+Copyright (c) 2022 Nuno Cruces
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -7674,6 +7819,36 @@ limitations under the License.
 The MIT License (MIT)
 
 Copyright (c) 2018 Aliaksandr Valialkin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### github.com/wailsapp/go-webview2
+
+- **Version:** v1.0.22
+- **License:** MIT
+
+```
+MIT License
+
+Copyright (c) 2020 John Chadwick
+Some portions Copyright (c) 2017 Serge Zaitsev
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

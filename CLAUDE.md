@@ -64,7 +64,9 @@ go generate ./internal/objectkind/   # → frontend/src/generated/objectKinds.ts
 go generate ./internal/snowflake/    # → frontend/src/generated/snowflakeDataTypes.ts
 
 # Third-party license notices (About → Acknowledgements)
-go run scripts/gen_third_party_notices.go   # regenerate THIRD_PARTY_NOTICES.md after dependency changes
+bash scripts/regen_third_party_notices.sh   # regenerate THIRD_PARTY_NOTICES.md after dependency changes
+                                            # (installs frontend/node_modules first; output is host-independent —
+                                            #  Go modules are unioned across darwin/linux/windows)
 ```
 
 See [`docs/concepts/testing.md`](docs/concepts/testing.md) for lint/security gates and [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.

@@ -14,10 +14,16 @@
 //	Go   — `go list -deps -json ./...` yields exactly the modules whose code is
 //	       compiled into the binary (not the full module graph), each with the
 //	       on-disk directory of its cached source, from which the LICENSE file is
-//	       read.
+//	       read. It is run once per shipped GOOS/GOARCH (see goPlatforms) and the
+//	       results are merged, because build constraints select different code per
+//	       platform — the keyring backends and the Windows webview, most visibly.
 //	npm  — `npm ls --omit=dev --all --json` (run in ./frontend) yields the
 //	       production dependency tree that Vite bundles into frontend/dist; each
-//	       package's version and LICENSE file are read from node_modules.
+//	       package's version and LICENSE file are read from node_modules. This half
+//	       is platform-independent.
+//
+// The output is therefore the same on any host: it describes the binaries Thaw
+// ships, not the machine that ran the generator.
 //
 // Usage:
 //
@@ -99,8 +105,8 @@ func main() {
 			missing++
 		}
 	}
-	fmt.Printf("wrote %s (%d Go modules, %d npm packages, %d without a license file)\n",
-		out, len(goDeps), len(npmDeps), missing)
+	fmt.Printf("wrote %s (%d Go modules across %d platforms, %d npm packages, %d without a license file)\n",
+		out, len(goDeps), len(goPlatforms), len(npmDeps), missing)
 }
 
 // repoRoot walks up from the working directory to the directory containing go.mod.
@@ -134,21 +140,57 @@ type goListPackage struct {
 	}
 }
 
+// goPlatforms are the OS/arch pairs Thaw ships binaries for — the matrix in
+// .github/workflows/build.yml. `go list` resolves build constraints for the
+// target platform, so a single run only describes one of these binaries: the
+// macOS build compiles in 99designs/go-keychain, the Windows build wincred /
+// go-winio / go-webview2, the Linux build godbus/dbus and gsterjov/go-libsecret.
+// Collecting every platform and merging the sets makes the notices cover all
+// shipped binaries and makes the output independent of the generator's host.
+//
+// No cross-compiler is needed: `go list` only resolves and reports packages, it
+// does not build them.
+var goPlatforms = []struct{ GOOS, GOARCH string }{
+	{"darwin", "amd64"},
+	{"darwin", "arm64"},
+	{"linux", "amd64"},
+	{"windows", "amd64"},
+	{"windows", "arm64"},
+}
+
 func collectGoDeps(root string) ([]dep, error) {
+	seen := map[string]dep{}
+	for _, p := range goPlatforms {
+		if err := collectGoDepsFor(root, p.GOOS, p.GOARCH, seen); err != nil {
+			return nil, fmt.Errorf("%s/%s: %w", p.GOOS, p.GOARCH, err)
+		}
+	}
+	return sortedDeps(seen), nil
+}
+
+// collectGoDepsFor lists the modules compiled into the binary for one target
+// platform and merges them into seen (keyed by module path). Module selection is
+// global, so a module resolves to the same version on every platform; the first
+// platform that reports it wins and later ones are no-ops.
+func collectGoDepsFor(root, goos, goarch string, seen map[string]dep) error {
 	cmd := exec.Command("go", "list", "-deps", "-json", "./...")
 	cmd.Dir = root
 	cmd.Stderr = os.Stderr
+	// CGO_ENABLED is pinned because Wails builds every platform with cgo and
+	// `go list` would otherwise default it to 0 when GOOS differs from the host —
+	// which drops cgo-gated dependencies (99designs/go-keychain on macOS) and
+	// would reintroduce the host dependence this loop exists to remove.
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=1")
 	stdout, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	seen := map[string]dep{}
 	decoder := json.NewDecoder(bytes.NewReader(stdout))
 	for decoder.More() {
 		var pkg goListPackage
 		if err := decoder.Decode(&pkg); err != nil {
-			return nil, err
+			return err
 		}
 		m := pkg.Module
 		if m == nil || m.Main || m.Dir == "" {
@@ -167,7 +209,7 @@ func collectGoDeps(root string) ([]dep, error) {
 		}
 	}
 
-	return sortedDeps(seen), nil
+	return nil
 }
 
 // ── npm packages ────────────────────────────────────────────────────────────
@@ -471,9 +513,14 @@ func render(goDeps, npmDeps []dep) string {
 	b.WriteString("third-party package that ships inside the Thaw binary — the Go modules compiled\n")
 	b.WriteString("into the backend and the npm packages bundled into the embedded frontend — along\n")
 	b.WriteString("with each project's copyright notice and license text.\n\n")
+	b.WriteString("The Go modules are the union across every platform Thaw ships for (macOS, Windows\n")
+	b.WriteString("and Linux), since build constraints select different code per platform. A few\n")
+	b.WriteString("entries — the platform-specific credential-store backends, for instance — are\n")
+	b.WriteString("therefore compiled into some builds and not others.\n\n")
 	b.WriteString("> **This file is generated.** Do not edit it by hand. Regenerate it with\n")
-	b.WriteString("> `go run scripts/gen_third_party_notices.go` (or `go generate ./...`) after\n")
-	b.WriteString("> changing dependencies in `go.mod` or `frontend/package.json`.\n\n")
+	b.WriteString("> `scripts/regen_third_party_notices.sh` (or `go generate ./...`) after changing\n")
+	b.WriteString("> dependencies in `go.mod` or `frontend/package.json`. The output does not depend\n")
+	b.WriteString("> on the host it was generated on.\n\n")
 
 	fmt.Fprintf(&b, "Thaw itself is free software licensed under the GNU General Public License v3.0\n")
 	fmt.Fprintf(&b, "or later. The licenses below apply only to the corresponding third-party packages.\n\n")

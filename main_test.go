@@ -21,11 +21,16 @@ import (
 // fails to run), the test skips rather than failing, so CI environments without
 // a full toolchain stay green. It only fails on an actual content mismatch.
 //
+// The comparison is host-agnostic: the generator collects Go modules once per
+// shipped platform and merges them (see goPlatforms in the generator), so it
+// emits the same bytes on macOS, Windows, and Linux. Regenerating locally on any
+// of them keeps this test green here and in CI.
+//
 // CI wiring: this runs in build-check.yml's Wails-build job (after the build,
 // which provides go + npm + frontend/node_modules + frontend/dist), not in
 // unit-tests.yml's pure-Go container, which lacks npm and would only skip.
 //
-// Regenerate with: go run scripts/gen_third_party_notices.go
+// Regenerate with: scripts/regen_third_party_notices.sh
 func TestThirdPartyNoticesUpToDate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping generator run in -short mode")
