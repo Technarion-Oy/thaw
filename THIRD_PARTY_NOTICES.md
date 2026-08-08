@@ -16,7 +16,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (92)
+- [Backend — Go modules](#backend--go-modules) (93)
 - [Frontend — npm packages](#frontend--npm-packages) (179)
 
 ## Backend — Go modules
@@ -98,8 +98,8 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
 | `github.com/zeebo/xxh3` | v1.0.2 | BSD-2-Clause |
-| `go.opentelemetry.io/otel` | v1.41.0 | Apache-2.0 |
-| `go.opentelemetry.io/otel/trace` | v1.41.0 | Apache-2.0 |
+| `go.opentelemetry.io/otel` | v1.42.0 | Apache-2.0 |
+| `go.opentelemetry.io/otel/trace` | v1.42.0 | Apache-2.0 |
 | `golang.org/x/crypto` | v0.53.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
 | `golang.org/x/mod` | v0.37.0 | BSD-3-Clause |
@@ -8029,7 +8029,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### go.opentelemetry.io/otel
 
-- **Version:** v1.41.0
+- **Version:** v1.42.0
 - **License:** Apache-2.0
 
 ```
@@ -8268,7 +8268,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### go.opentelemetry.io/otel/trace
 
-- **Version:** v1.41.0
+- **Version:** v1.42.0
 - **License:** Apache-2.0
 
 ```
