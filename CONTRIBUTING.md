@@ -177,6 +177,12 @@ gosec -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
 
 These also run in CI on every pull request and on pushes to `main` (plus a weekly cron). A Wails build check (`build-check.yml`) likewise verifies the app compiles, links, and bundles on each PR and `main` push — it builds `linux/amd64` on the self-hosted runners with the frontend obfuscation/minify passes skipped (`THAW_FAST_BUILD=1`) for speed. The Snowflake integration tests run weekly or on manual dispatch only. See `.github/workflows/`.
 
+### Dependency updates (Renovate)
+
+Dependency PRs are opened by Renovate, run self-hosted from [`.github/workflows/renovate.yml`](.github/workflows/renovate.yml) on our own runners (twice daily, plus manual dispatch with a dry-run option). Behaviour is configured in [`.github/renovate.json`](.github/renovate.json); the open/queued list lives on the **Dependency Dashboard** issue. Updates arrive batched (Go modules, frontend dev tooling, GitHub Actions, …) on Monday mornings, titled `chore: …` so they do not trigger a release. Security fixes are exempt from the schedule and are titled `fix:` so the patched build actually ships. Framework-level bumps — the `go` directive, React, Ant Design, CI Node/Python versions — wait for approval on the dashboard instead of opening a PR. Review a Renovate PR like any other: CI must be green, and a Wails bump additionally needs `wails generate module` plus a check that `frontend/wailsjs/` is unchanged or committed. `THIRD_PARTY_NOTICES.md` is regenerated inside the update branch automatically (a Renovate post-upgrade task), so `TestThirdPartyNoticesUpToDate` stays green without a manual commit.
+
+A PR touching `.github/renovate.json` or the workflow runs `renovate-config-validator --strict` automatically; locally, `npx --package renovate@latest renovate-config-validator --strict` from the repo root does the same. The bot authenticates as the release GitHub App (`APP_ID` / `APP_PRIVATE_KEY`) — see the permission list in the workflow header before enabling it.
+
 ---
 
 ## Security
