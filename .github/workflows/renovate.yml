@@ -1,0 +1,231 @@
+name: Renovate
+
+# Runs Renovate as a self-hosted job instead of the hosted Mend app, so
+# dependency updates use OUR runners and OUR bot identity. The behaviour (what
+# gets grouped, scheduled, batched or held for approval) is configured in
+# .github/renovate.json — this workflow only decides *when* Renovate looks.
+#
+# IMPORTANT: if the hosted Renovate app (https://github.com/apps/renovate) is
+# also installed on this repo, uninstall it — otherwise both bots read the same
+# config and race to open the same PRs.
+#
+# TOKEN: the job authenticates as the existing release GitHub App (APP_ID /
+# APP_PRIVATE_KEY, same secrets manual-release.yml uses). That app installation
+# needs these repository permissions:
+#   contents: write        — push branches
+#   pull-requests: write   — open/update PRs
+#   issues: write          — maintain the Dependency Dashboard issue
+#   workflows: write       — required because renovate.json pins GitHub Actions
+#                            to digests, which edits files under .github/workflows/.
+#                            Without it those pushes fail with "refusing to allow
+#                            a GitHub App to create or update workflow ...".
+#   dependabot alerts: read — required for vulnerabilityAlerts / security PRs.
+# If granting `workflows: write` is unwanted, drop the pinDigests rule from
+# .github/renovate.json instead.
+
+# Least-privilege default: read-only token unless a job opts into more. Renovate
+# itself does not use GITHUB_TOKEN — it uses the App token generated below.
+permissions:
+  contents: read
+
+on:
+  schedule:
+    # Twice a day (03:00 / 15:00 UTC). Renovate's own `schedule` in
+    # .github/renovate.json still gates routine updates to Monday mornings, so
+    # most runs are a no-op extract; the extra runs exist so security fixes
+    # (which are exempt from that schedule) are picked up within ~12h.
+    - cron: "0 3,15 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run — log what would happen, create nothing"
+        type: boolean
+        default: false
+      log-level:
+        description: "Renovate log level"
+        type: choice
+        default: info
+        options: [info, debug]
+  # Config changes are validated on the PR that makes them, so a typo can't
+  # silently disable the bot after merge.
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/renovate.json"
+      - ".github/workflows/renovate.yml"
+
+# Concurrency is set per job, not workflow-wide: a shared group would make the
+# required "Validate config" check on a PR queue behind a full Renovate pass
+# (many minutes of clone + extract + lookups) even though the two share nothing.
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
+jobs:
+  # ── The bot itself ────────────────────────────────────────────────────────
+  renovate:
+    name: Renovate
+    if: github.event_name != 'pull_request'
+    runs-on: self-hosted
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+
+    # Never run two Renovate passes over the repo at once — the second would
+    # fight the first over branches. Queue instead of cancelling: a half-finished
+    # run can leave a branch without its PR.
+    concurrency:
+      group: renovate-bot
+      cancel-in-progress: false
+
+    # A hung pass would otherwise hold the concurrency group for GitHub's 6h
+    # default, silently swallowing several scheduled runs. Well above a normal
+    # pass (a few minutes, plus `npm ci` per branch for the notices task).
+    timeout-minutes: 45
+
+    steps:
+      # Identical to the prelude in validate-config below — keep them in sync.
+      # It cannot be factored into a local composite action: `uses: ./...`
+      # resolves from the workspace, so it requires a checkout, which in turn
+      # requires the git installed here. Every other workflow in this repo
+      # repeats these steps for the same reason.
+      #
+      # git: checkout, and Renovate's own clone/push. jq: parse the bot user id.
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget jq ca-certificates
+
+      - name: Generate Bot Token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Commits must be authored by the App's bot user, otherwise GitHub shows
+      # them as an unverified/unknown author and branch protection that requires
+      # a known committer rejects the push. The numeric id is part of the
+      # noreply address, so look it up rather than hardcoding it.
+      - name: Resolve bot identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          APP_SLUG: ${{ steps.generate-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          user_id=$(curl -sSf \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/users/${APP_SLUG}%5Bbot%5D" | jq -r .id)
+          echo "user=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "author=${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
+
+      # Renovate clones the repo itself; this checkout is what setup-go reads
+      # go.mod from (and keeps the run reproducible if a step needs the tree).
+      - uses: actions/checkout@v4
+
+      # binarySource=global (below) means Renovate shells out to whatever go /
+      # npm are on PATH instead of downloading its own toolchains — so both must
+      # be installed here. Go is needed for postUpdateOptions: gomodTidy.
+      #
+      # cache: false — the self-hosted runners' cache backend is slow for large
+      # caches; matches every other workflow in this repo.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Node 22, not the "20" the app builds with: Renovate 41+ requires Node
+      # >= 22. It is only the bot's own runtime plus the npm that regenerates
+      # package-lock.json (lockfileVersion 3 either way).
+      #
+      # No `cache:` input — this job never runs `npm ci` against the repo's own
+      # lockfile, and setup-node rejects `cache: false` outright (unlike
+      # setup-go, whose `cache: false` above is valid).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Renovate
+        run: npm install -g renovate@44.14.10
+
+      - name: Run Renovate
+        env:
+          RENOVATE_TOKEN: ${{ steps.generate-token.outputs.token }}
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_AUTODISCOVER: "false"
+          # The repo is already configured — never open an onboarding PR, and
+          # fail loudly rather than running with defaults if the config vanishes.
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          RENOVATE_BINARY_SOURCE: global
+          RENOVATE_BASE_DIR: ${{ runner.temp }}/renovate
+          # postUpgradeTasks in renovate.json regenerate THIRD_PARTY_NOTICES.md
+          # in the branch (otherwise TestThirdPartyNoticesUpToDate fails every
+          # dependency PR). Post-upgrade commands only run when explicitly
+          # allow-listed here, which is why they cannot be used with the hosted
+          # app. Entries are regexes matched against the command string — keep
+          # them in sync with the `commands` array in .github/renovate.json.
+          RENOVATE_ALLOWED_COMMANDS: >-
+            ["^mkdir -p frontend/dist && touch frontend/dist/\\.keep$",
+             "^cd frontend && npm ci$",
+             "^go run scripts/gen_third_party_notices\\.go$"]
+          RENOVATE_USERNAME: ${{ steps.bot.outputs.user }}
+          RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            args+=(--dry-run=full)
+          fi
+          renovate "${args[@]}"
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 "$GITHUB_WORKSPACE/../../_actions" || true
+
+  # ── Config linting on PRs that touch the config ───────────────────────────
+  validate-config:
+    name: Validate config
+    if: github.event_name == 'pull_request'
+    runs-on: self-hosted
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+
+    # Independent of the bot's group, and cancelled on a new push like the other
+    # PR workflows — this check takes seconds and blocks merge.
+    concurrency:
+      group: renovate-config-${{ github.ref }}
+      cancel-in-progress: true
+
+    timeout-minutes: 15
+
+    steps:
+      # Kept byte-identical to the renovate job's prelude (jq included, though
+      # unused here) so the two cannot drift unnoticed — see the note there for
+      # why a composite action can't cover pre-checkout steps.
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget jq ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # --strict also fails on deprecated/migratable options, so config drift
+      # surfaces here instead of as a silent migration PR later. Keep the
+      # version in sync with the Renovate job above (Renovate updates both).
+      - name: Validate renovate.json
+        run: npx --yes --package renovate@44.14.10 renovate-config-validator --strict
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 "$GITHUB_WORKSPACE/../../_actions" || true

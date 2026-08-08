@@ -1,0 +1,260 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommitsDisabled"],
+  "timezone": "Europe/Helsinki",
+  "schedule": ["before 6am on monday"],
+  "configMigration": true,
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard",
+  "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
+  "osvVulnerabilityAlerts": true,
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 4,
+  "prHourlyLimit": 2,
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"],
+  "commitMessagePrefix": "chore:",
+  "commitBodyTable": true,
+  "description": [
+    "Renovate configuration for Thaw (Wails v2: Go backend + React/TS frontend).",
+    "Commit/PR titles use a bare `chore:` prefix because .github/workflows/pr-title-check.yml",
+    "requires a conventional type followed immediately by a colon — `chore(deps):` would fail it.",
+    "`chore:` also means routine dependency PRs do not trigger a semantic-release version bump;",
+    "security fixes deliberately use `fix:` so a patched binary actually ships (see vulnerabilityAlerts)."
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"],
+    "commitMessagePrefix": "chore:"
+  },
+  "vulnerabilityAlerts": {
+    "description": "Security fixes bypass the batching/scheduling rules and ship as a released patch.",
+    "enabled": true,
+    "labels": ["dependencies", "security"],
+    "commitMessagePrefix": "fix:",
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null,
+    "prConcurrentLimit": 0,
+    "dependencyDashboardApproval": false
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Node.js version pinned inline in actions/setup-node steps. The two pins in renovate.yml are the bot's own runtime, not the project's build toolchain, so a packageRule below re-groups them into the Renovate group — they stay tracked, they just don't ride along in the CI-toolchain PR. It has to be done there rather than by excluding the file here, because RE2 has no lookahead.",
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+      "matchStrings": [
+        "node-version:\\s*[\"']?(?<currentValue>\\d+(?:\\.\\d+)*)[\"']?"
+      ],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
+    },
+    {
+      "customType": "regex",
+      "description": "Python version pinned inline in actions/setup-python steps (dbt integration test).",
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+      "matchStrings": [
+        "python-version:\\s*[\"']?(?<currentValue>\\d+(?:\\.\\d+)*)[\"']?"
+      ],
+      "depNameTemplate": "python",
+      "datasourceTemplate": "python-version",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "description": [
+        "The Wails CLI pinned in `go install .../cmd/wails@vX.Y.Z` steps (build-check, build,",
+        "manual-release, macos-sign-test). Same depName as the go.mod requirement, so the Wails",
+        "packageRule groups all five into one PR — the CLI and the library must not skew apart."
+      ],
+      "customType": "regex",
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+      "matchStrings": [
+        "go install github\\.com/wailsapp/wails/v2/cmd/wails@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "github.com/wailsapp/wails/v2",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "Renovate's own pinned version — the bot and the config validator in renovate.yml, plus the version CONTRIBUTING.md tells contributors to validate with, so the docs cannot drift from CI.",
+      "managerFilePatterns": [".github/workflows/renovate.yml", "CONTRIBUTING.md"],
+      "matchStrings": ["renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "renovate",
+      "datasourceTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Go indirect requirements are a side effect of `go mod tidy`, not something to bump directly.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": false
+    },
+    {
+      "description": "Batch all non-major Go module updates into a single PR — one CI run covers them.",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Go dependencies",
+      "groupSlug": "go-deps"
+    },
+    {
+      "description": "Bumping the go directive/toolchain changes every CI job (go-version-file: go.mod) — decide it manually.",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go", "toolchain"],
+      "groupName": null,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated. Covers both managers, so the go.mod requirement and the four pinned `go install .../cmd/wails@` CLI versions move in the same PR.",
+      "matchPackageNames": ["github.com/wailsapp/**"],
+      "groupName": "Wails",
+      "addLabels": ["wails"]
+    },
+    {
+      "description": "The Snowflake driver is the core runtime dependency — keep it alone so it can be run against a live account (integration tests).",
+      "matchPackageNames": [
+        "github.com/snowflakedb/gosnowflake/**",
+        "github.com/apache/arrow-go/**"
+      ],
+      "groupName": "Snowflake driver",
+      "addLabels": ["snowflake"]
+    },
+    {
+      "description": "Frontend build/test tooling — covered by `npx tsc --noEmit`, `npm run build` and vitest, so batch the non-majors.",
+      "matchFileNames": ["frontend/package.json"],
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "frontend dev tooling",
+      "groupSlug": "frontend-dev"
+    },
+    {
+      "description": "semantic-release toolchain in the root package.json — release-only, never shipped in the binary.",
+      "matchFileNames": ["package.json"],
+      "groupName": "release toolchain",
+      "groupSlug": "semantic-release"
+    },
+    {
+      "description": "React runtime and its type packages must move together — a mismatched @types/react breaks the TS build.",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "React"
+    },
+    {
+      "description": "A React major (19+) needs Ant Design / Wails compatibility work — surface it on the dashboard first.",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Ant Design and its icon package share a release cadence.",
+      "matchPackageNames": ["antd", "@ant-design/**"],
+      "groupName": "Ant Design"
+    },
+    {
+      "description": "An Ant Design major touches nearly every component — approve it deliberately.",
+      "matchPackageNames": ["antd", "@ant-design/**"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Monaco editor stack (SQL editor, notebook, YAML support).",
+      "matchPackageNames": ["monaco-editor", "@monaco-editor/**", "monaco-yaml"],
+      "groupName": "Monaco"
+    },
+    {
+      "description": "Vite/Vitest toolchain is version-coupled — upgrade it as one unit, majors included.",
+      "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"],
+      "groupName": "Vite"
+    },
+    {
+      "matchPackageNames": ["@xterm/**"],
+      "groupName": "xterm.js"
+    },
+    {
+      "matchPackageNames": ["@tanstack/**"],
+      "groupName": "TanStack"
+    },
+    {
+      "description": "TypeDoc and its markdown plugin must stay in lockstep (`make docs`).",
+      "matchPackageNames": ["typedoc", "typedoc-plugin-**"],
+      "groupName": "TypeDoc"
+    },
+    {
+      "description": "Pin actions to commit digests (supply-chain hardening) and batch workflow updates into one PR.",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions",
+      "pinDigests": true,
+      "addLabels": ["ci"]
+    },
+    {
+      "description": "Node/Python versions pinned inside workflow files — one PR, approved deliberately since they change every job.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["node", "python"],
+      "groupName": "CI toolchains",
+      "groupSlug": "ci-toolchains",
+      "addLabels": ["ci"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": [
+        "renovate.yml pins Node 22 for the bot's own runtime (Renovate 41+ requires it), which is",
+        "unrelated to the Node the app builds with — move it into the Renovate group rather than the",
+        "CI-toolchain one, so the bot's version and the runtime it needs travel in the same PR.",
+        "Still tracked, and not dashboard-gated: a Renovate release that requires a newer Node must be",
+        "able to surface that bump on its own, or the self-hosted job starts failing with no PR to fix it."
+      ],
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["node"],
+      "matchFileNames": [".github/workflows/renovate.yml"],
+      "groupName": "Renovate",
+      "dependencyDashboardApproval": false
+    },
+    {
+      "description": "Renovate keeps its own self-hosted pin (.github/workflows/renovate.yml) current.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["renovate"],
+      "groupName": "Renovate",
+      "addLabels": ["ci"]
+    },
+    {
+      "description": [
+        "Regenerate THIRD_PARTY_NOTICES.md inside the update branch.",
+        "TestThirdPartyNoticesUpToDate (run by build-check.yml) fails any dependency PR that",
+        "leaves the notices stale, so without this every Renovate PR would need a manual",
+        "`go run scripts/gen_third_party_notices.go` commit. Only THIRD_PARTY_NOTICES.md is",
+        "committed (fileFilters); the dist stub and node_modules stay in the workspace.",
+        "Requires self-hosted Renovate with these commands allow-listed — see .github/workflows/renovate.yml.",
+        "Matched by manager rather than by manifest path so lockfile-only updates and the monthly",
+        "lockFileMaintenance branch — which change go.sum / package-lock.json without touching go.mod",
+        "or package.json — are covered too. The root package.json (semantic-release) is a harmless",
+        "no-op: its devDependencies are not shipped, so the generator produces no diff to commit."
+      ],
+      "matchManagers": ["gomod", "npm"],
+      "postUpgradeTasks": {
+        "commands": [
+          "mkdir -p frontend/dist && touch frontend/dist/.keep",
+          "cd frontend && npm ci",
+          "go run scripts/gen_third_party_notices.go"
+        ],
+        "fileFilters": ["THIRD_PARTY_NOTICES.md"],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "SheetJS stopped publishing to the npm registry after 0.18.5 — updates come from their own CDN, not Renovate.",
+      "matchPackageNames": ["xlsx"],
+      "enabled": false
+    }
+  ]
+}
