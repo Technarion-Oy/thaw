@@ -42,7 +42,7 @@
     "typedoc": "^0.28.17",
     "typedoc-plugin-markdown": "^4.10.0",
     "typescript": "^5.6.0",
-    "vite": "^5.4.0",
+    "vite": "^6.0.0",
     "vitest": "^4.1.2"
   }
 }
