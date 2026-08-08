@@ -105,7 +105,9 @@ jobs:
       # present after the Wails build above) — the pure-Go container lacks npm,
       # so the test would silently skip there. Fails if THIRD_PARTY_NOTICES.md is
       # stale relative to go.mod / frontend dependencies (regenerate with
-      # `go run scripts/gen_third_party_notices.go`).
+      # `bash scripts/regen_third_party_notices.sh`). The generator lists the Go
+      # modules for every shipped platform and merges them, so this Linux job
+      # accepts a file regenerated on macOS or Windows too.
       - name: Verify third-party notices are up to date
         run: go test -run TestThirdPartyNoticesUpToDate -count=1 ./.
 

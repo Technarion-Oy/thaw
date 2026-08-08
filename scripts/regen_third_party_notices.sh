@@ -2,6 +2,10 @@
 # Regenerate THIRD_PARTY_NOTICES.md, installing everything the generator needs
 # first. Run it after changing dependencies in go.mod or frontend/package.json.
 #
+# Safe to run on any OS: the generator lists the Go modules once per shipped
+# platform (darwin/linux/windows) and merges them, so the file it writes is
+# byte-identical everywhere and matches what CI verifies.
+#
 # Renovate invokes this as a postUpgradeTasks command (see .github/renovate.json)
 # so dependency PRs keep the notices in sync. It has to be a script rather than a
 # chain of commands in the config: Renovate executes post-upgrade commands with
