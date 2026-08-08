@@ -73,6 +73,16 @@ func main() {
 		fatal(fmt.Errorf("collecting npm packages: %w", err))
 	}
 
+	// An empty npm section is always wrong — the frontend bundles dependencies.
+	// Without frontend/node_modules, `npm ls` still succeeds but reports every
+	// dependency as missing, and walk() skips those, so the collection comes back
+	// empty rather than erroring. Writing the file at that point would silently
+	// drop every frontend license notice, so refuse instead.
+	if len(npmDeps) == 0 {
+		fatal(fmt.Errorf("no npm packages resolved: is frontend/node_modules installed and in sync? " +
+			"run scripts/regen_third_party_notices.sh, which installs it first"))
+	}
+
 	md := render(goDeps, npmDeps)
 
 	out := *outFlag

@@ -143,16 +143,17 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Node 22, not the "20" the app builds with: Renovate 41+ requires Node
-      # >= 22. It is only the bot's own runtime plus the npm that regenerates
-      # package-lock.json (lockfileVersion 3 either way).
+      # Node 24, not the "20" the app builds with: renovate 44 declares
+      # `engines.node ^24.11.0` and logs "Unsupported node environment detected"
+      # on anything older. This is the bot's own runtime, plus the npm that
+      # regenerates package-lock.json (lockfileVersion 3 either way).
       #
       # No `cache:` input — this job never runs `npm ci` against the repo's own
       # lockfile, and setup-node rejects `cache: false` outright (unlike
       # setup-go, whose `cache: false` above is valid).
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Install Renovate
         run: npm install -g renovate@44.14.10
@@ -169,16 +170,13 @@ jobs:
           RENOVATE_REQUIRE_CONFIG: required
           RENOVATE_BINARY_SOURCE: global
           RENOVATE_BASE_DIR: ${{ runner.temp }}/renovate
-          # postUpgradeTasks in renovate.json regenerate THIRD_PARTY_NOTICES.md
+          # postUpgradeTasks in renovate.json regenerates THIRD_PARTY_NOTICES.md
           # in the branch (otherwise TestThirdPartyNoticesUpToDate fails every
           # dependency PR). Post-upgrade commands only run when explicitly
           # allow-listed here, which is why they cannot be used with the hosted
           # app. Entries are regexes matched against the command string — keep
-          # them in sync with the `commands` array in .github/renovate.json.
-          RENOVATE_ALLOWED_COMMANDS: >-
-            ["^mkdir -p frontend/dist && touch frontend/dist/\\.keep$",
-             "^cd frontend && npm ci$",
-             "^go run scripts/gen_third_party_notices\\.go$"]
+          # in sync with the `commands` array in .github/renovate.json.
+          RENOVATE_ALLOWED_COMMANDS: '["^bash scripts/regen_third_party_notices\\.sh$"]'
           RENOVATE_USERNAME: ${{ steps.bot.outputs.user }}
           RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
@@ -230,9 +228,11 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Matches the bot job: the validator ships in the same package, which
+      # requires Node >= 24.11.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       # --strict also fails on deprecated/migratable options, so config drift
       # surfaces here instead of as a silent migration PR later. Keep the
