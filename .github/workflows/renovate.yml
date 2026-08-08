@@ -155,6 +155,21 @@ jobs:
         with:
           node-version: "24"
 
+      # Node 24 bundles npm 11, but every build job here runs Node 20 / npm 10,
+      # and the two majors resolve nested dependencies differently: for
+      # vitest's `vite: ^6 || ^7 || ^8`, npm 11 nests vite 8 (no esbuild
+      # dependency) while npm 10 nests vite 7 (needs esbuild ^0.27). A lockfile
+      # written by npm 11 then fails `npm ci` on every Node 20 job with
+      # "Missing: esbuild@… from lock file" (PR #899).
+      #
+      # Renovate shells out to whatever npm is on PATH (binarySource: global),
+      # so pinning it here is what makes the lockfiles it writes consumable by
+      # the toolchain the app actually builds with. Keep this in step with the
+      # npm bundled in the `node-version` used by build.yml et al; drop it if
+      # those jobs ever move to Node 24.
+      - name: Pin npm to the project's major
+        run: npm install -g npm@10.9.8
+
       - name: Install Renovate
         run: npm install -g renovate@44.14.10
 
