@@ -54,12 +54,9 @@ on:
       - ".github/renovate.json"
       - ".github/workflows/renovate.yml"
 
-# Never run two Renovate passes over the same repo at once — the second would
-# fight the first over branches. Queue instead of cancelling: a half-finished
-# run can leave a branch without its PR.
-concurrency:
-  group: renovate
-  cancel-in-progress: false
+# Concurrency is set per job, not workflow-wide: a shared group would make the
+# required "Validate config" check on a PR queue behind a full Renovate pass
+# (many minutes of clone + extract + lookups) even though the two share nothing.
 
 env:
   PYTHONDONTWRITEBYTECODE: 1
@@ -73,6 +70,13 @@ jobs:
     container: ubuntu:24.04
     permissions:
       contents: read
+
+    # Never run two Renovate passes over the repo at once — the second would
+    # fight the first over branches. Queue instead of cancelling: a half-finished
+    # run can leave a branch without its PR.
+    concurrency:
+      group: renovate-bot
+      cancel-in-progress: false
 
     steps:
       # git: Renovate clones and pushes. jq: parse the bot user id below.
@@ -181,6 +185,12 @@ jobs:
     container: ubuntu:24.04
     permissions:
       contents: read
+
+    # Independent of the bot's group, and cancelled on a new push like the other
+    # PR workflows — this check takes seconds and blocks merge.
+    concurrency:
+      group: renovate-config-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - name: Install base tools

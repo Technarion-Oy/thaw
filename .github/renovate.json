@@ -41,7 +41,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Node.js version pinned inline in actions/setup-node steps.",
+      "description": "Node.js version pinned inline in actions/setup-node steps. The two pins in renovate.yml are the bot's own runtime, not the project's build toolchain — a packageRule below disables them (RE2 has no lookahead, so they cannot be excluded by pattern).",
       "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
       "matchStrings": [
         "node-version:\\s*[\"']?(?<currentValue>\\d+(?:\\.\\d+)*)[\"']?"
@@ -63,8 +63,8 @@
     },
     {
       "customType": "regex",
-      "description": "Renovate's own pinned version in the self-hosted workflow (both the bot and the config validator).",
-      "managerFilePatterns": [".github/workflows/renovate.yml"],
+      "description": "Renovate's own pinned version — the bot and the config validator in renovate.yml, plus the version CONTRIBUTING.md tells contributors to validate with, so the docs cannot drift from CI.",
+      "managerFilePatterns": [".github/workflows/renovate.yml", "CONTRIBUTING.md"],
       "matchStrings": ["renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       "depNameTemplate": "renovate",
       "datasourceTemplate": "npm"
@@ -193,6 +193,13 @@
       "dependencyDashboardApproval": true
     },
     {
+      "description": "renovate.yml pins Node 22 for the bot's own runtime (Renovate 41+ requires it), which is unrelated to the Node the app builds with — keep it out of the CI-toolchain group so that PR isn't a misleading mix of the two.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["node"],
+      "matchFileNames": [".github/workflows/renovate.yml"],
+      "enabled": false
+    },
+    {
       "description": "Renovate keeps its own self-hosted pin (.github/workflows/renovate.yml) current.",
       "matchManagers": ["custom.regex"],
       "matchDepNames": ["renovate"],
@@ -206,9 +213,13 @@
         "leaves the notices stale, so without this every Renovate PR would need a manual",
         "`go run scripts/gen_third_party_notices.go` commit. Only THIRD_PARTY_NOTICES.md is",
         "committed (fileFilters); the dist stub and node_modules stay in the workspace.",
-        "Requires self-hosted Renovate with these commands allow-listed — see .github/workflows/renovate.yml."
+        "Requires self-hosted Renovate with these commands allow-listed — see .github/workflows/renovate.yml.",
+        "Matched by manager rather than by manifest path so lockfile-only updates and the monthly",
+        "lockFileMaintenance branch — which change go.sum / package-lock.json without touching go.mod",
+        "or package.json — are covered too. The root package.json (semantic-release) is a harmless",
+        "no-op: its devDependencies are not shipped, so the generator produces no diff to commit."
       ],
-      "matchFileNames": ["go.mod", "frontend/package.json"],
+      "matchManagers": ["gomod", "npm"],
       "postUpgradeTasks": {
         "commands": [
           "mkdir -p frontend/dist && touch frontend/dist/.keep",
