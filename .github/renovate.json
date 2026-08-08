@@ -193,11 +193,18 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "renovate.yml pins Node 22 for the bot's own runtime (Renovate 41+ requires it), which is unrelated to the Node the app builds with — keep it out of the CI-toolchain group so that PR isn't a misleading mix of the two.",
+      "description": [
+        "renovate.yml pins Node 22 for the bot's own runtime (Renovate 41+ requires it), which is",
+        "unrelated to the Node the app builds with — move it into the Renovate group rather than the",
+        "CI-toolchain one, so the bot's version and the runtime it needs travel in the same PR.",
+        "Still tracked, and not dashboard-gated: a Renovate release that requires a newer Node must be",
+        "able to surface that bump on its own, or the self-hosted job starts failing with no PR to fix it."
+      ],
       "matchManagers": ["custom.regex"],
       "matchDepNames": ["node"],
       "matchFileNames": [".github/workflows/renovate.yml"],
-      "enabled": false
+      "groupName": "Renovate",
+      "dependencyDashboardApproval": false
     },
     {
       "description": "Renovate keeps its own self-hosted pin (.github/workflows/renovate.yml) current.",

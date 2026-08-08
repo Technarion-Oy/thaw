@@ -78,8 +78,19 @@ jobs:
       group: renovate-bot
       cancel-in-progress: false
 
+    # A hung pass would otherwise hold the concurrency group for GitHub's 6h
+    # default, silently swallowing several scheduled runs. Well above a normal
+    # pass (a few minutes, plus `npm ci` per branch for the notices task).
+    timeout-minutes: 45
+
     steps:
-      # git: Renovate clones and pushes. jq: parse the bot user id below.
+      # Identical to the prelude in validate-config below — keep them in sync.
+      # It cannot be factored into a local composite action: `uses: ./...`
+      # resolves from the workspace, so it requires a checkout, which in turn
+      # requires the git installed here. Every other workflow in this repo
+      # repeats these steps for the same reason.
+      #
+      # git: checkout, and Renovate's own clone/push. jq: parse the bot user id.
       - name: Install base tools
         run: |
           apt-get update
@@ -192,11 +203,16 @@ jobs:
       group: renovate-config-${{ github.ref }}
       cancel-in-progress: true
 
+    timeout-minutes: 15
+
     steps:
+      # Kept byte-identical to the renovate job's prelude (jq included, though
+      # unused here) so the two cannot drift unnoticed — see the note there for
+      # why a composite action can't cover pre-checkout steps.
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget
+          apt-get install -y git curl wget jq ca-certificates
 
       - uses: actions/checkout@v4
 
