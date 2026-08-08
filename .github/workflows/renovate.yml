@@ -83,6 +83,13 @@ jobs:
     # pass (a few minutes, plus `npm ci` per branch for the notices task).
     timeout-minutes: 45
 
+    # The runner picks `sh -e {0}` for steps in this container, and the scripts
+    # below use `pipefail` and arrays — both bash-only. Same reason
+    # unit-tests.yml and frontend-tests.yml pin the shell.
+    defaults:
+      run:
+        shell: bash
+
     steps:
       # Identical to the prelude in validate-config below — keep them in sync.
       # It cannot be factored into a local composite action: `uses: ./...`
@@ -178,11 +185,14 @@ jobs:
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
-          args=()
+          # Two explicit branches rather than building an argv array: expanding
+          # an empty array under `set -u` is only safe on bash >= 4.4, and this
+          # is not worth making version-dependent for one optional flag.
           if [ "${DRY_RUN:-false}" = "true" ]; then
-            args+=(--dry-run=full)
+            renovate --dry-run=full
+          else
+            renovate
           fi
-          renovate "${args[@]}"
 
       - name: Unlock permissions for host runner agent
         if: always()
@@ -204,6 +214,10 @@ jobs:
       cancel-in-progress: true
 
     timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       # Kept byte-identical to the renovate job's prelude (jq included, though
