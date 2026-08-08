@@ -41,7 +41,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Node.js version pinned inline in actions/setup-node steps. The two pins in renovate.yml are the bot's own runtime, not the project's build toolchain — a packageRule below disables them (RE2 has no lookahead, so they cannot be excluded by pattern).",
+      "description": "Node.js version pinned inline in actions/setup-node steps. The two pins in renovate.yml are the bot's own runtime, not the project's build toolchain, so a packageRule below re-groups them into the Renovate group — they stay tracked, they just don't ride along in the CI-toolchain PR. It has to be done there rather than by excluding the file here, because RE2 has no lookahead.",
       "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
       "matchStrings": [
         "node-version:\\s*[\"']?(?<currentValue>\\d+(?:\\.\\d+)*)[\"']?"
@@ -60,6 +60,20 @@
       "depNameTemplate": "python",
       "datasourceTemplate": "python-version",
       "versioningTemplate": "pep440"
+    },
+    {
+      "description": [
+        "The Wails CLI pinned in `go install .../cmd/wails@vX.Y.Z` steps (build-check, build,",
+        "manual-release, macos-sign-test). Same depName as the go.mod requirement, so the Wails",
+        "packageRule groups all five into one PR — the CLI and the library must not skew apart."
+      ],
+      "customType": "regex",
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+      "matchStrings": [
+        "go install github\\.com/wailsapp/wails/v2/cmd/wails@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "github.com/wailsapp/wails/v2",
+      "datasourceTemplate": "go"
     },
     {
       "customType": "regex",
@@ -92,7 +106,7 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated.",
+      "description": "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated. Covers both managers, so the go.mod requirement and the four pinned `go install .../cmd/wails@` CLI versions move in the same PR.",
       "matchPackageNames": ["github.com/wailsapp/**"],
       "groupName": "Wails",
       "addLabels": ["wails"]

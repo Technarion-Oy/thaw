@@ -186,7 +186,7 @@ jobs:
 
       - name: Unlock permissions for host runner agent
         if: always()
-        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
+        run: chmod -R 777 "$GITHUB_WORKSPACE/../../_actions" || true
 
   # ── Config linting on PRs that touch the config ───────────────────────────
   validate-config:
@@ -228,4 +228,4 @@ jobs:
 
       - name: Unlock permissions for host runner agent
         if: always()
-        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
+        run: chmod -R 777 "$GITHUB_WORKSPACE/../../_actions" || true
