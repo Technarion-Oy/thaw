@@ -124,10 +124,13 @@ jobs:
       # Node 22, not the "20" the app builds with: Renovate 41+ requires Node
       # >= 22. It is only the bot's own runtime plus the npm that regenerates
       # package-lock.json (lockfileVersion 3 either way).
+      #
+      # No `cache:` input — this job never runs `npm ci` against the repo's own
+      # lockfile, and setup-node rejects `cache: false` outright (unlike
+      # setup-go, whose `cache: false` above is valid).
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: false
 
       - name: Install Renovate
         run: npm install -g renovate@44.14.10
@@ -190,7 +193,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: false
 
       # --strict also fails on deprecated/migratable options, so config drift
       # surfaces here instead of as a silent migration PR later. Keep the
