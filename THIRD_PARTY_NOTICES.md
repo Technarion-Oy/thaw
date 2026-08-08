@@ -16,7 +16,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (93)
+- [Backend — Go modules](#backend--go-modules) (92)
 - [Frontend — npm packages](#frontend--npm-packages) (179)
 
 ## Backend — Go modules
@@ -71,7 +71,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/jbenet/go-context` | v0.0.0-20150711004518-d14ea06fba99 | MIT |
 | `github.com/joho/godotenv` | v1.5.1 | MIT |
 | `github.com/kevinburke/ssh_config` | v1.2.0 | MIT |
-| `github.com/klauspost/compress` | v1.18.0 | Apache-2.0 |
+| `github.com/klauspost/compress` | v1.18.7 | Apache-2.0 |
 | `github.com/klauspost/cpuid/v2` | v2.3.0 | MIT |
 | `github.com/leaanthony/go-ansi-parser` | v1.6.1 | MIT |
 | `github.com/leaanthony/slicer` | v1.6.0 | MIT |
@@ -6000,7 +6000,7 @@ SOFTWARE.
 
 ### github.com/klauspost/compress
 
-- **Version:** v1.18.0
+- **Version:** v1.18.7
 - **License:** Apache-2.0
 
 ```
