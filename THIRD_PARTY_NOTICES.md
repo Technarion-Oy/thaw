@@ -112,15 +112,15 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/zeebo/xxh3` | v1.0.2 | BSD-2-Clause |
 | `go.opentelemetry.io/otel` | v1.42.0 | Apache-2.0 |
 | `go.opentelemetry.io/otel/trace` | v1.42.0 | Apache-2.0 |
-| `golang.org/x/crypto` | v0.53.0 | BSD-3-Clause |
+| `golang.org/x/crypto` | v0.55.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
-| `golang.org/x/mod` | v0.37.0 | BSD-3-Clause |
-| `golang.org/x/net` | v0.56.0 | BSD-3-Clause |
+| `golang.org/x/mod` | v0.40.0 | BSD-3-Clause |
+| `golang.org/x/net` | v0.58.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.35.0 | BSD-3-Clause |
-| `golang.org/x/sync` | v0.21.0 | BSD-3-Clause |
-| `golang.org/x/sys` | v0.46.0 | BSD-3-Clause |
-| `golang.org/x/term` | v0.44.0 | BSD-3-Clause |
-| `golang.org/x/text` | v0.39.0 | BSD-3-Clause |
+| `golang.org/x/sync` | v0.22.0 | BSD-3-Clause |
+| `golang.org/x/sys` | v0.47.0 | BSD-3-Clause |
+| `golang.org/x/term` | v0.45.0 | BSD-3-Clause |
+| `golang.org/x/text` | v0.41.0 | BSD-3-Clause |
 | `golang.org/x/xerrors` | v0.0.0-20240903120638-7835f813f4da | BSD-3-Clause |
 | `gopkg.in/lumberjack.v2` | v2.0.0 | MIT |
 | `gopkg.in/warnings.v0` | v0.1.2 | BSD-2-Clause |
@@ -8682,7 +8682,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/crypto
 
-- **Version:** v0.53.0
+- **Version:** v0.55.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8752,7 +8752,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/mod
 
-- **Version:** v0.37.0
+- **Version:** v0.40.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8787,7 +8787,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/net
 
-- **Version:** v0.56.0
+- **Version:** v0.58.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8857,7 +8857,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sync
 
-- **Version:** v0.21.0
+- **Version:** v0.22.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8892,7 +8892,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sys
 
-- **Version:** v0.46.0
+- **Version:** v0.47.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8927,7 +8927,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/term
 
-- **Version:** v0.44.0
+- **Version:** v0.45.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8962,7 +8962,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/text
 
-- **Version:** v0.39.0
+- **Version:** v0.41.0
 - **License:** BSD-3-Clause
 
 ```
