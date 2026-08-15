@@ -32,7 +32,7 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 ## 💡 Critical Context
 - **Nature of App**: This is a **Snowflake SQL Editor** and management tool.
 - **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration. Profiles can be **created, saved, renamed, cloned, set as default, and deleted** directly from the connection dialog via `internal/sfconfig/writer.go` (text-level TOML manipulation that preserves comments and unknown keys). The profile management UI is gated behind the `snowflakeCLIProfileManager` feature flag (toggleable via **View → Enabled Features…**).
-- **Tech Stack**: Go 1.22, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5, TanStack Table v8.
+- **Tech Stack**: Go 1.26, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5, TanStack Table v8.
 
 ## 🏗 Architecture Overview
 - **Go Backend**: Wails IPC bindings (all on `*App`, `package app`) live in `internal/app/`, split across `app.go` (struct, lifecycle, session management), `run.go` (`Run(assets)` entry point + wails.Run wiring), `menu.go` (native menu), and per-domain files (e.g. `query.go`, `objects.go`, `backup.go`); business logic lives in the other `internal/` packages. The root `main.go` is a thin entry point that owns `//go:embed all:frontend/dist` and calls `app.Run(assets)`.
