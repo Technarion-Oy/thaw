@@ -108,4 +108,4 @@ When you add, remove, or modify a user-facing feature, internal package, fronten
 
 ## Tech stack
 
-Wails v2.11 · Go 1.22 · gosnowflake v2.0 · React 18 + TypeScript 5.6 · Vite 5 · Ant Design 5 · Monaco · TanStack Table v8 · Zustand 5 · xterm.js.
+Wails v2.11 · Go 1.26 · gosnowflake v2.0 · React 18 + TypeScript 5.6 · Vite 6 · Ant Design 5 · Monaco · TanStack Table v8 · Zustand 5 · xterm.js.

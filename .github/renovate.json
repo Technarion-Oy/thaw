@@ -99,7 +99,16 @@
       "groupSlug": "go-deps"
     },
     {
-      "description": "Bumping the go directive/toolchain changes every CI job (go-version-file: go.mod) — decide it manually.",
+      "description": [
+        "Bumping the go directive/toolchain changes every CI job (go-version-file: go.mod) — decide it manually.",
+        "The `toolchain` line is what actually pins the compiler: actions/setup-go prefers it over the `go`",
+        "directive, and Renovate maps it (datasource golang-version, depType toolchain) to the OSV `stdlib`",
+        "package, so Go standard-library CVEs surface as a real update. The `go` directive is deliberately",
+        "excluded from that lookup upstream — it declares source compatibility, not the build toolchain — so",
+        "without the toolchain line govulncheck fails on stdlib advisories with no Renovate PR to fix them.",
+        "Dashboard approval only gates routine patch bumps; the vulnerabilityAlerts block above overrides it",
+        "to false, so a stdlib CVE still ships as an unattended `fix:` PR."
+      ],
       "matchManagers": ["gomod"],
       "matchDepNames": ["go", "toolchain"],
       "groupName": null,
