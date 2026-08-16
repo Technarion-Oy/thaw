@@ -1,3 +1,19 @@
+## [0.6.2](https://github.com/Technarion-Oy/thaw/compare/v0.6.1...v0.6.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* make THIRD_PARTY_NOTICES.md cover every shipped platform ([#904](https://github.com/Technarion-Oy/thaw/issues/904)) ([96f1662](https://github.com/Technarion-Oy/thaw/commit/96f1662d77ed83cac9e396290e92dbe29a13b75d)), closes [#903](https://github.com/Technarion-Oy/thaw/issues/903)
+* pin npm 10 in the Renovate job to match the build toolchain ([#901](https://github.com/Technarion-Oy/thaw/issues/901)) ([6409980](https://github.com/Technarion-Oy/thaw/commit/64099808d81a330901c90541aae391eebe91ea29)), closes [#899](https://github.com/Technarion-Oy/thaw/issues/899) [#895](https://github.com/Technarion-Oy/thaw/issues/895)
+* pin the Go toolchain to 1.26.6 to clear six stdlib CVEs ([#906](https://github.com/Technarion-Oy/thaw/issues/906)) ([a8b5eb1](https://github.com/Technarion-Oy/thaw/commit/a8b5eb1d22b9fa8f5366803a65aa91b27b4ce7de)), closes [#900](https://github.com/Technarion-Oy/thaw/issues/900) [#899](https://github.com/Technarion-Oy/thaw/issues/899)
+* repair the notices regeneration in Renovate branches ([#895](https://github.com/Technarion-Oy/thaw/issues/895)) ([99bd150](https://github.com/Technarion-Oy/thaw/commit/99bd15035fe76be7d43eff2ee18dc486fe7e6376))
+* Update dependency vite to v6 [SECURITY] ([#899](https://github.com/Technarion-Oy/thaw/issues/899)) ([f9473a5](https://github.com/Technarion-Oy/thaw/commit/f9473a5cf23bed50bf7fcb03a48eca3abe8404d2))
+* Update module github.com/go-git/go-git/v5 to v5.19.2 [SECURITY] ([#896](https://github.com/Technarion-Oy/thaw/issues/896)) ([3a0d300](https://github.com/Technarion-Oy/thaw/commit/3a0d3005c640619c694b1c24f2847bcf2caa6700))
+* Update module github.com/klauspost/compress to v1.18.7 [SECURITY] ([#897](https://github.com/Technarion-Oy/thaw/issues/897)) ([95776fd](https://github.com/Technarion-Oy/thaw/commit/95776fdd9c8bfc538d007fe772263fa9f471f645))
+* Update module go.opentelemetry.io/otel to v1.41.0 [SECURITY] ([#898](https://github.com/Technarion-Oy/thaw/issues/898)) ([6ea4207](https://github.com/Technarion-Oy/thaw/commit/6ea42079ac29728bf83bab634bd531436227adec))
+* Update module go.opentelemetry.io/otel to v1.42.0 [SECURITY] ([#902](https://github.com/Technarion-Oy/thaw/issues/902)) ([ec5e34b](https://github.com/Technarion-Oy/thaw/commit/ec5e34b98600c4a0996c83db990580c138b74001))
+* Update module golang.org/x/mod to v0.40.0 [SECURITY] ([#905](https://github.com/Technarion-Oy/thaw/issues/905)) ([e1e79ba](https://github.com/Technarion-Oy/thaw/commit/e1e79ba7e8c618ec9ad2a51120f7327036958764))
+
 ## [0.6.1](https://github.com/Technarion-Oy/thaw/compare/v0.6.0...v0.6.1) (2026-08-02)
 
 
