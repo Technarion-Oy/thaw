@@ -51,9 +51,6 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble
-        run: go install mvdan.cc/garble@latest
-
       # Runs before the (slow) build so broken signing secrets fail in seconds.
       - name: Set up signing keychain (macOS)
         env:
@@ -114,7 +111,7 @@ jobs:
           rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate-repacked.p12"
 
       - name: Build (macOS)
-        run: wails build -obfuscated -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
+        run: wails build -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 

@@ -37,9 +37,7 @@ env:
 jobs:
   # Verifies the Wails app compiles and links (Go backend + embedded frontend).
   # Builds linux/amd64 only — the self-hosted runners are Linux containers.
-  # No -obfuscated/garble here: this is a build-verification check, not a
-  # release artifact, so we skip the slow obfuscation pass. Cross-platform
-  # release binaries are produced by build.yml / manual-release.yml.
+  # Cross-platform release binaries are produced by build.yml / manual-release.yml.
   #
   # The "Install base tools" + "Install system dependencies" + "Install Wails
   # CLI" steps below re-run on every build (~3-7 min total). These could be

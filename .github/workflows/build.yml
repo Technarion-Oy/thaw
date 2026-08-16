@@ -63,12 +63,6 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble
-        # Only macOS/Linux build with -obfuscated; the Windows build dropped it
-        # (issue #820), so skip the garble install on Windows runners.
-        if: matrix.platform != 'windows'
-        run: go install mvdan.cc/garble@latest
-
       - name: Install NSIS (Windows only)
         if: matrix.platform == 'windows'
         shell: bash
@@ -91,13 +85,11 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-      # ── Wails Builds (macOS/Linux obfuscated via garble) ──────────────────
-      # -obfuscated: invokes garble as the Go compiler toolchain within the
-      #   Wails build pipeline, producing an obfuscated binary without a
-      #   separate post-build step.  This preserves macOS ad-hoc signing
-      #   (no binary replacement after codesign).  The Windows build below
-      #   deliberately omits it (issue #820): obfuscated Go binaries trigger
-      #   Defender heuristics that hurt SmartScreen download reputation.
+      # ── Wails Builds ──────────────────────────────────────────────────────
+      # No -obfuscated/garble: the source is public, so binary obfuscation buys
+      #   nothing — and it broke once Go toolchain downloads moved under
+      #   GOMODCACHE (garble's linker overlay is rejected there). Windows had
+      #   already dropped it (issue #820, Defender/SmartScreen heuristics).
       # -platform:   explicit target to avoid implicit runner-architecture deps.
       # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
       #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
@@ -105,15 +97,13 @@ jobs:
 
       - name: Build (macOS & Linux)
         if: matrix.platform != 'windows'
-        run: wails build -obfuscated -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        # NOTE (issue #820): no -obfuscated here. Garble-obfuscated Go binaries
-        # are a known Microsoft Defender heuristic trigger that hurts SmartScreen
-        # download reputation; macOS/Linux stay obfuscated above. This first pass
+        # This first pass
         # compiles thaw.exe, generates build/windows/installer/wails_tools.nsh,
         # and produces a throwaway installer whose packed thaw.exe is still
         # unsigned — it is rebuilt below after the binary is signed.
