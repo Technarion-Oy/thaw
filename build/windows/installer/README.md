@@ -32,8 +32,7 @@ The output artifact is still `thaw-<arch>-installer.exe`.
 The release workflows (`build.yml` and `manual-release.yml`) sign in the
 correct order so the binary embedded in the installer is signed too:
 
-1. `wails build --nsis` (no `-obfuscated` on Windows — garble obfuscation
-   trips Defender heuristics that hurt SmartScreen reputation) compiles
+1. `wails build --nsis` compiles
    `thaw.exe`, generates `wails_tools.nsh`, and produces a throwaway installer.
 2. **Azure Trusted Signing** signs `build/bin/thaw.exe`.
 3. `makensis` re-runs over `project.nsi` (passing only
