@@ -1,3 +1,10 @@
+## [0.6.3](https://github.com/Technarion-Oy/thaw/compare/v0.6.2...v0.6.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* drop garble binary obfuscation from all builds ([#907](https://github.com/Technarion-Oy/thaw/issues/907)) ([083185b](https://github.com/Technarion-Oy/thaw/commit/083185b07220f8d5d335dd3b93e393082ae64cff)), closes [#906](https://github.com/Technarion-Oy/thaw/issues/906) [#820](https://github.com/Technarion-Oy/thaw/issues/820)
+
 ## [0.6.2](https://github.com/Technarion-Oy/thaw/compare/v0.6.1...v0.6.2) (2026-08-16)
 
 
