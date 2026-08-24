@@ -5,27 +5,40 @@ import type { table } from "../../../wailsjs/go/models";
 
 /**
  * Every TABLE_TYPE INFORMATION_SCHEMA.TABLES can return, plus TRANSIENT, which
- * the backend folds in from the separate IS_TRANSIENT flag.
+ * the backend folds in from the separate IS_TRANSIENT flag. The set is fixed by
+ * Snowflake's documented TABLE_TYPE domain, not by our object-kind registry, and
+ * the raw value doubles as the option label so it always reads exactly like the
+ * Type tag in the same row — there is no second label to drift.
  */
 export const KIND_FILTERS = [
-  { text: "Base Table", value: "BASE TABLE" },
-  { text: "Transient", value: "TRANSIENT" },
-  { text: "Temporary Table", value: "TEMPORARY TABLE" },
-  { text: "External Table", value: "EXTERNAL TABLE" },
-  { text: "Event Table", value: "EVENT TABLE" },
-  { text: "View", value: "VIEW" },
-  { text: "Materialized View", value: "MATERIALIZED VIEW" },
-];
+  "BASE TABLE",
+  "TRANSIENT",
+  "TEMPORARY TABLE",
+  "EXTERNAL TABLE",
+  "EVENT TABLE",
+  "VIEW",
+  "MATERIALIZED VIEW",
+].map((k) => ({ text: k, value: k }));
 
-/** Tag colour per kind; anything unlisted falls back to blue. */
-export const KIND_COLORS: Record<string, string> = {
-  TRANSIENT: "orange",
-  "TEMPORARY TABLE": "purple",
-  "EXTERNAL TABLE": "cyan",
-  "EVENT TABLE": "gold",
-  VIEW: "green",
-  "MATERIALIZED VIEW": "geekblue",
-};
+/**
+ * The canonical object-kind name (`frontend/src/generated/objectKinds.ts`, from
+ * `internal/objectkind`) for a TABLE_TYPE, so the Type tag can take its colour
+ * from the sidebar's `KIND_VAR` palette instead of a second hand-rolled map.
+ * The three table variants have no registry entry of their own — the registry
+ * models them all as TABLE — so they share the table colour and are told apart
+ * by the tag text.
+ */
+export function registryKind(tableType: string) {
+  switch (tableType) {
+    case "VIEW":
+    case "MATERIALIZED VIEW":
+    case "EXTERNAL TABLE":
+    case "EVENT TABLE":
+      return tableType;
+    default:
+      return "TABLE";
+  }
+}
 
 export const ROW_FILTERS = [
   { text: "Empty", value: "empty" },
@@ -39,7 +52,13 @@ export function schemaFilters(data: table.TableSummary[]) {
     .map((s) => ({ text: s, value: s }));
 }
 
+/**
+ * `rows` is `table.UnknownCount` (-1) when Snowflake reports no row count at all
+ * — it does not for views — which is neither empty nor non-empty, so such a row
+ * matches neither option rather than being counted as empty.
+ */
 export function matchesRowFilter(value: string, rows: number) {
+  if (rows < 0) return false;
   return value === "empty" ? rows === 0 : rows > 0;
 }
 
@@ -51,19 +70,18 @@ export type SummaryFilters = Record<string, readonly (string | number | bigint |
  * rendered rows and the "Found N" caption always come from the same array — an
  * antd-internal filter selection survives a `dataSource` swap on Reload, which
  * a count captured in `onChange` would not (issue #908 review).
+ *
+ * Values OR within a column, columns AND with each other.
  */
 export function applyFilters(data: table.TableSummary[], filters: SummaryFilters) {
-  const selected = (key: string) => filters[key] ?? [];
-  const matches = (key: string, value: string) => {
-    const sel = selected(key);
-    return sel.length === 0 || sel.includes(value);
+  const matches = (key: string, predicate: (value: string) => boolean) => {
+    const selected = filters[key] ?? [];
+    return selected.length === 0 || selected.some((v) => predicate(String(v)));
   };
-  return data.filter((t) => {
-    const rowSel = selected("rows");
-    return (
-      matches("name", t.schema) &&
-      matches("kind", t.kind) &&
-      (rowSel.length === 0 || rowSel.some((v) => matchesRowFilter(String(v), t.rows)))
-    );
-  });
+  return data.filter(
+    (t) =>
+      matches("name", (v) => v === t.schema) &&
+      matches("kind", (v) => v === t.kind) &&
+      matches("rows", (v) => matchesRowFilter(v, t.rows)),
+  );
 }

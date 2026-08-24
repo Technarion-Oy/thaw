@@ -16,9 +16,9 @@ import (
 type TableSummary struct {
 	Name          string `json:"name"`
 	Schema        string `json:"schema"`
-	Kind          string `json:"kind"` // BASE TABLE, VIEW, etc.
-	Rows          int64  `json:"rows"`
-	Bytes         int64  `json:"bytes"`
+	Kind          string `json:"kind"`  // BASE TABLE, VIEW, etc.
+	Rows          int64  `json:"rows"`  // UnknownCount when Snowflake reports none (views)
+	Bytes         int64  `json:"bytes"` // UnknownCount when Snowflake reports none (views)
 	Owner         string `json:"owner"`
 	RetentionTime int    `json:"retentionTime"`
 	// Use string for Wails binding compatibility with time.Time
@@ -43,7 +43,7 @@ type TableSettings struct {
 // that lists every table and view in the given database. TABLE_TYPE is one of
 // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW or
 // MATERIALIZED VIEW — all of them are listed, and the report filters client
-// side. ROW_COUNT / BYTES are NULL for views and read back as 0.
+// side. ROW_COUNT / BYTES are NULL for views and read back as UnknownCount.
 func BuildDatabaseTableSummaryQuery(database string) string {
 	return fmt.Sprintf(`
 		SELECT
@@ -63,6 +63,32 @@ func BuildDatabaseTableSummaryQuery(database string) string {
 	`, snowflake.QuoteIdent(database))
 }
 
+// UnknownCount is the Rows / Bytes value for an object Snowflake reports no
+// count for — INFORMATION_SCHEMA.TABLES leaves ROW_COUNT and BYTES NULL for
+// views. Distinct from 0, which means the object really is empty.
+const UnknownCount int64 = -1
+
+// cell renders a result cell as a string, mapping NULL to "" rather than to
+// Go's "<nil>". TABLE_OWNER and COMMENT are both NULL-able.
+func cell(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// count parses a NULL-able numeric cell, returning UnknownCount for NULL.
+func count(v interface{}) int64 {
+	if v == nil {
+		return UnknownCount
+	}
+	n, err := strconv.ParseInt(fmt.Sprintf("%v", v), 10, 64)
+	if err != nil {
+		return UnknownCount
+	}
+	return n
+}
+
 // ParseDatabaseTableSummary projects a table-summary query result into
 // TableSummary rows.
 func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
@@ -71,33 +97,32 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 	}
 	var tables []TableSummary
 	for _, row := range res.Rows {
-		if len(row) < 10 {
+		// The query selects a fixed 11 columns; anything shorter is malformed.
+		if len(row) < 11 {
 			continue
 		}
 		t := TableSummary{
-			Name:   fmt.Sprintf("%v", row[0]),
-			Schema: fmt.Sprintf("%v", row[1]),
-			Kind:   fmt.Sprintf("%v", row[2]),
-			Owner:  fmt.Sprintf("%v", row[5]),
-		}
-
-		if row[9] != nil {
-			t.Comment = fmt.Sprintf("%v", row[9])
+			Name:    cell(row[0]),
+			Schema:  cell(row[1]),
+			Kind:    cell(row[2]),
+			Owner:   cell(row[5]),
+			Comment: cell(row[9]),
 		}
 
 		// Transient is not a TABLE_TYPE value — it is the separate IS_TRANSIENT
 		// flag — so fold it into Kind the way SHOW TABLES reports it. Only a
 		// BASE TABLE is reclassified: any other TABLE_TYPE keeps its own kind so
 		// a transient temporary table is not mislabelled.
-		if strings.EqualFold(t.Kind, "BASE TABLE") && len(row) > 10 &&
-			strings.EqualFold(fmt.Sprintf("%v", row[10]), "YES") {
+		if strings.EqualFold(t.Kind, "BASE TABLE") && strings.EqualFold(cell(row[10]), "YES") {
 			t.Kind = "TRANSIENT"
 		}
 
-		// Parsing numeric values
-		t.Rows, _ = strconv.ParseInt(fmt.Sprintf("%v", row[3]), 10, 64)
-		t.Bytes, _ = strconv.ParseInt(fmt.Sprintf("%v", row[4]), 10, 64)
-		retTime, _ := strconv.Atoi(fmt.Sprintf("%v", row[6]))
+		// Parsing numeric values. ROW_COUNT / BYTES are NULL for views, which have
+		// neither — reported as UnknownCount so the report can tell "no rows" apart
+		// from "not applicable" rather than calling every view empty.
+		t.Rows = count(row[3])
+		t.Bytes = count(row[4])
+		retTime, _ := strconv.Atoi(cell(row[6]))
 		t.RetentionTime = retTime
 
 		// Parsing times and converting to string for Wails compatibility
@@ -117,8 +142,8 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 	return tables
 }
 
-// GetDatabaseTableSummary returns detailed information about all tables in the
-// specified database.
+// GetDatabaseTableSummary returns detailed information about every table and
+// view in the specified database.
 func GetDatabaseTableSummary(ctx context.Context, client *snowflake.Client, database string) ([]TableSummary, error) {
 	res, err := client.QuerySingle(ctx, BuildDatabaseTableSummaryQuery(database))
 	if err != nil {

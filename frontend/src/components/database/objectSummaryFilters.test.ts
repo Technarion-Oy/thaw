@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { describe, it, expect } from "vitest";
-import { KIND_FILTERS, schemaFilters, matchesRowFilter, applyFilters } from "./objectSummaryFilters";
+import { KIND_FILTERS, schemaFilters, matchesRowFilter, applyFilters, registryKind } from "./objectSummaryFilters";
+import { KIND_VAR } from "../sidebar/objectIcons";
+import { OBJECT_KINDS } from "../../generated/objectKinds";
 import type { table } from "../../../wailsjs/go/models";
 
 const row = (schema: string) => ({ schema } as table.TableSummary);
@@ -9,9 +11,10 @@ const row = (schema: string) => ({ schema } as table.TableSummary);
 const t = (name: string, schema: string, kind: string, rows: number) =>
   ({ name, schema, kind, rows } as table.TableSummary);
 
+// -1 is the backend's table.UnknownCount: Snowflake reports no ROW_COUNT for views.
 const DATA = [
   t("A", "PUBLIC", "BASE TABLE", 10),
-  t("B", "PUBLIC", "VIEW", 0),
+  t("B", "PUBLIC", "VIEW", -1),
   t("C", "ANALYTICS", "BASE TABLE", 0),
   t("D", "ANALYTICS", "TRANSIENT", 5),
 ];
@@ -31,8 +34,14 @@ describe("applyFilters", () => {
   });
 
   it("filters empty vs non-empty rows", () => {
-    expect(names({ rows: ["empty"] })).toEqual(["B", "C"]);
-    expect(names({ rows: ["empty", "nonempty"] })).toEqual(["A", "B", "C", "D"]);
+    expect(names({ rows: ["empty"] })).toEqual(["C"]);
+    expect(names({ rows: ["nonempty"] })).toEqual(["A", "D"]);
+  });
+
+  it("never calls a view empty — it has no row count to judge", () => {
+    expect(names({ rows: ["empty", "nonempty"] })).toEqual(["A", "C", "D"]);
+    expect(names({ kind: ["VIEW"], rows: ["nonempty"] })).toEqual([]);
+    expect(names({ kind: ["VIEW"], rows: ["empty"] })).toEqual([]);
   });
 });
 
@@ -70,5 +79,29 @@ describe("matchesRowFilter", () => {
     expect(matchesRowFilter("empty", 5)).toBe(false);
     expect(matchesRowFilter("nonempty", 0)).toBe(false);
     expect(matchesRowFilter("nonempty", 5)).toBe(true);
+  });
+
+  it("matches neither option when the count is unknown", () => {
+    expect(matchesRowFilter("empty", -1)).toBe(false);
+    expect(matchesRowFilter("nonempty", -1)).toBe(false);
+  });
+});
+
+describe("registryKind", () => {
+  it("maps every filterable TABLE_TYPE onto a canonical object kind with a colour", () => {
+    const known = new Set(OBJECT_KINDS.map((k) => k.name));
+    for (const { value } of KIND_FILTERS) {
+      const kind = registryKind(String(value));
+      expect(known).toContain(kind);
+      expect(KIND_VAR[kind]).toBeDefined();
+    }
+  });
+
+  it("folds the table variants onto TABLE and keeps view/external kinds", () => {
+    expect(registryKind("BASE TABLE")).toBe("TABLE");
+    expect(registryKind("TRANSIENT")).toBe("TABLE");
+    expect(registryKind("TEMPORARY TABLE")).toBe("TABLE");
+    expect(registryKind("MATERIALIZED VIEW")).toBe("MATERIALIZED VIEW");
+    expect(registryKind("EXTERNAL TABLE")).toBe("EXTERNAL TABLE");
   });
 });

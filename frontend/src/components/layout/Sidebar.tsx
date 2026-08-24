@@ -5723,7 +5723,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         />
       )}
 
-      {/* Object Summaries modal */}
+      {/* Tables & Views report modal */}
       {objectSummariesModal && (
         <ObjectSummariesModal
           db={objectSummariesModal}

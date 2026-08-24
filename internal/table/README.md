@@ -157,7 +157,13 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
   `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
   filter matched only base tables and hid every view — issue #908); filtering is done
   client side in the report.
-- `ROW_COUNT` / `BYTES` are `NULL` for views and parse to `0`.
+- `ROW_COUNT` / `BYTES` are `NULL` for views, which have neither. They parse to
+  `UnknownCount` (`-1`), *not* `0`, so the report can tell "empty" apart from "not
+  applicable" — otherwise the Empty/Non-empty filter calls every view empty. The UI
+  renders `UnknownCount` as an em dash.
+- `TABLE_OWNER` and `COMMENT` are `NULL`-able (restricted or shared objects), so
+  every string cell goes through `cell()`, which maps `NULL` to `""` rather than to
+  Go's literal `"<nil>"`.
 - `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–10)
   rather than name lookup. If the `INFORMATION_SCHEMA.TABLES` column set ever
   changes, this parser will silently misread values. `GetTableSettings` uses a

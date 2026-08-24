@@ -77,21 +77,26 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 		Rows: [][]interface{}{
 			{"T1", "PUBLIC", "BASE TABLE", int64(100), int64(4096), "SYSADMIN", 1, created, altered, "hi", "NO"},
 			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES"},
-			{"V1", "PUBLIC", "VIEW", nil, nil, "SYSADMIN", 0, created, altered, "", "NO"},
+			{"V1", "PUBLIC", "VIEW", nil, nil, nil, 0, created, altered, nil, "NO"},
 			{"T3", "PUBLIC", "TEMPORARY TABLE", int64(2), int64(16), "SYSADMIN", 1, created, altered, "", "YES"},
-			{"too", "short"}, // skipped: < 10 columns
+			{"too", "short"}, // skipped: fewer than the query's 11 columns
 		},
 	}
 	tables := ParseDatabaseTableSummary(res)
 	if len(tables) != 4 {
 		t.Fatalf("expected 4 rows, got %d", len(tables))
 	}
-	// IS_TRANSIENT = YES is folded into Kind; views keep theirs and report 0 rows.
+	// IS_TRANSIENT = YES is folded into Kind.
 	if tables[1].Kind != "TRANSIENT" {
 		t.Errorf("expected transient table kind TRANSIENT, got %q", tables[1].Kind)
 	}
-	if tables[2].Kind != "VIEW" || tables[2].Rows != 0 || tables[2].Bytes != 0 {
+	// A view keeps its kind, has no counts to report, and must not render NULL
+	// TABLE_OWNER / COMMENT as the literal "<nil>".
+	if tables[2].Kind != "VIEW" || tables[2].Rows != UnknownCount || tables[2].Bytes != UnknownCount {
 		t.Errorf("unexpected view projection: %+v", tables[2])
+	}
+	if tables[2].Owner != "" || tables[2].Comment != "" {
+		t.Errorf("expected NULL owner/comment to project as empty, got %+v", tables[2])
 	}
 	// A non-BASE TABLE type keeps its own kind even when IS_TRANSIENT = YES.
 	if tables[3].Kind != "TEMPORARY TABLE" {

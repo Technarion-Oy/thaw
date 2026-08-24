@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
 import type { FilterValue } from "antd/es/table/interface";
-import { KIND_FILTERS, KIND_COLORS, ROW_FILTERS, schemaFilters, applyFilters } from "./objectSummaryFilters";
+import { KIND_VAR } from "../sidebar/objectIcons";
+import { KIND_FILTERS, ROW_FILTERS, schemaFilters, applyFilters, registryKind } from "./objectSummaryFilters";
 
 const { Text } = Typography;
+
+// Views carry no BYTES; "—" keeps that apart from a genuinely empty 0 B object.
+const formatBytes = (bytes: number) => {
+  if (bytes < 0) return "—";
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+};
 
 interface ObjectSummariesModalProps {
   db: string;
@@ -40,17 +51,9 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
 
   // Filtering is done here, not by antd, so the caption below can never disagree
   // with the rendered rows (an antd filter selection outlives a Reload).
-  const rows = applyFilters(data, filters);
+  const rows = useMemo(() => applyFilters(data, filters), [data, filters]);
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  };
-
-  const columns = [
+  const columns = useMemo(() => [
     {
       title: "Table Name",
       dataIndex: "name",
@@ -74,9 +77,12 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       width: 120,
       filters: KIND_FILTERS,
       filteredValue: filters.kind ?? null,
-      render: (kind: string) => (
-        <Tag color={KIND_COLORS[kind] ?? "blue"} style={{ fontSize: 10 }}>{kind}</Tag>
-      ),
+      // Colour comes from the sidebar's canonical kind palette so a kind looks
+      // the same here as it does in the object tree.
+      render: (kind: string) => {
+        const color = `var(${KIND_VAR[registryKind(kind)] ?? "--text-muted"})`;
+        return <Tag style={{ fontSize: 10, color, borderColor: color }}>{kind}</Tag>;
+      },
     },
     {
       title: "Rows",
@@ -86,7 +92,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.rows - b.rows,
       filters: ROW_FILTERS,
       filteredValue: filters.rows ?? null,
-      render: (num: number) => <Text>{num.toLocaleString()}</Text>,
+      // Snowflake reports no row count for views; "—" keeps that apart from 0.
+      render: (num: number) => <Text>{num < 0 ? "—" : num.toLocaleString()}</Text>,
     },
     {
       title: "Size",
@@ -136,7 +143,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
         <Text type="secondary" italic style={{ fontSize: 11, opacity: 0.5 }}>NULL</Text>
       ),
     },
-  ];
+  ], [data, filters]);
 
   return (
     <Modal
