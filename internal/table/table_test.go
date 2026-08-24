@@ -78,12 +78,13 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 			{"T1", "PUBLIC", "BASE TABLE", int64(100), int64(4096), "SYSADMIN", 1, created, altered, "hi", "NO"},
 			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES"},
 			{"V1", "PUBLIC", "VIEW", nil, nil, "SYSADMIN", 0, created, altered, "", "NO"},
+			{"T3", "PUBLIC", "TEMPORARY TABLE", int64(2), int64(16), "SYSADMIN", 1, created, altered, "", "YES"},
 			{"too", "short"}, // skipped: < 10 columns
 		},
 	}
 	tables := ParseDatabaseTableSummary(res)
-	if len(tables) != 3 {
-		t.Fatalf("expected 3 rows, got %d", len(tables))
+	if len(tables) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(tables))
 	}
 	// IS_TRANSIENT = YES is folded into Kind; views keep theirs and report 0 rows.
 	if tables[1].Kind != "TRANSIENT" {
@@ -91,6 +92,10 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 	}
 	if tables[2].Kind != "VIEW" || tables[2].Rows != 0 || tables[2].Bytes != 0 {
 		t.Errorf("unexpected view projection: %+v", tables[2])
+	}
+	// A non-BASE TABLE type keeps its own kind even when IS_TRANSIENT = YES.
+	if tables[3].Kind != "TEMPORARY TABLE" {
+		t.Errorf("expected TEMPORARY TABLE to survive the transient fold, got %q", tables[3].Kind)
 	}
 	got := tables[0]
 	if got.Name != "T1" || got.Schema != "PUBLIC" || got.Kind != "BASE TABLE" || got.Owner != "SYSADMIN" {

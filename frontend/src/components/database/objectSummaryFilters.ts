@@ -42,3 +42,28 @@ export function schemaFilters(data: table.TableSummary[]) {
 export function matchesRowFilter(value: string, rows: number) {
   return value === "empty" ? rows === 0 : rows > 0;
 }
+
+/** Selected filter values per column key, as antd's Table `onChange` reports them. */
+export type SummaryFilters = Record<string, readonly (string | number | bigint | boolean)[] | null | undefined>;
+
+/**
+ * Applies the column filters ourselves rather than via antd's `onFilter`, so the
+ * rendered rows and the "Found N" caption always come from the same array — an
+ * antd-internal filter selection survives a `dataSource` swap on Reload, which
+ * a count captured in `onChange` would not (issue #908 review).
+ */
+export function applyFilters(data: table.TableSummary[], filters: SummaryFilters) {
+  const selected = (key: string) => filters[key] ?? [];
+  const matches = (key: string, value: string) => {
+    const sel = selected(key);
+    return sel.length === 0 || sel.includes(value);
+  };
+  return data.filter((t) => {
+    const rowSel = selected("rows");
+    return (
+      matches("name", t.schema) &&
+      matches("kind", t.kind) &&
+      (rowSel.length === 0 || rowSel.some((v) => matchesRowFilter(String(v), t.rows)))
+    );
+  });
+}

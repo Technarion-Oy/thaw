@@ -86,8 +86,11 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 		}
 
 		// Transient is not a TABLE_TYPE value — it is the separate IS_TRANSIENT
-		// flag — so fold it into Kind the way SHOW TABLES reports it.
-		if len(row) > 10 && strings.EqualFold(fmt.Sprintf("%v", row[10]), "YES") {
+		// flag — so fold it into Kind the way SHOW TABLES reports it. Only a
+		// BASE TABLE is reclassified: any other TABLE_TYPE keeps its own kind so
+		// a transient temporary table is not mislabelled.
+		if strings.EqualFold(t.Kind, "BASE TABLE") && len(row) > 10 &&
+			strings.EqualFold(fmt.Sprintf("%v", row[10]), "YES") {
 			t.Kind = "TRANSIENT"
 		}
 

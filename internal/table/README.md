@@ -152,7 +152,8 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 
 - `TABLE_TYPE` has no transient value — transient-ness is the separate
   `IS_TRANSIENT` column — so `ParseDatabaseTableSummary` folds `IS_TRANSIENT = YES`
-  into `Kind` as `TRANSIENT`, the way `SHOW TABLES` reports it. The query carries no
+  into `Kind` as `TRANSIENT`, the way `SHOW TABLES` reports it — but only for a
+  `BASE TABLE`, so a transient temporary table keeps its `TEMPORARY TABLE` kind. The query carries no
   `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
   filter matched only base tables and hid every view — issue #908); filtering is done
   client side in the report.

@@ -5,7 +5,8 @@ import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
-import { KIND_FILTERS, KIND_COLORS, ROW_FILTERS, schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
+import type { FilterValue } from "antd/es/table/interface";
+import { KIND_FILTERS, KIND_COLORS, ROW_FILTERS, schemaFilters, applyFilters } from "./objectSummaryFilters";
 
 const { Text } = Typography;
 
@@ -18,13 +19,11 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<table.TableSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  // null = no filter applied, so the caption falls back to the full row count
-  const [filteredCount, setFilteredCount] = useState<number | null>(null);
+  const [filters, setFilters] = useState<Record<string, FilterValue | null>>({});
 
   const fetchSummary = async () => {
     setLoading(true);
     setError(null);
-    setFilteredCount(null);
     try {
       const tables = await GetDatabaseTableSummary(db);
       setData(tables);
@@ -38,6 +37,10 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   useEffect(() => {
     fetchSummary();
   }, [db]);
+
+  // Filtering is done here, not by antd, so the caption below can never disagree
+  // with the rendered rows (an antd filter selection outlives a Reload).
+  const rows = applyFilters(data, filters);
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 B";
@@ -56,7 +59,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       width: 200,
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.name.localeCompare(b.name),
       filters: schemaFilters(data),
-      onFilter: (value: React.Key | boolean, record: table.TableSummary) => record.schema === value,
+      filteredValue: filters.name ?? null,
       render: (name: string, record: table.TableSummary) => (
         <Space direction="vertical" size={0}>
           <Text strong>{name}</Text>
@@ -70,7 +73,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       key: "kind",
       width: 120,
       filters: KIND_FILTERS,
-      onFilter: (value: React.Key | boolean, record: table.TableSummary) => record.kind === value,
+      filteredValue: filters.kind ?? null,
       render: (kind: string) => (
         <Tag color={KIND_COLORS[kind] ?? "blue"} style={{ fontSize: 10 }}>{kind}</Tag>
       ),
@@ -82,8 +85,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       align: "right" as const,
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.rows - b.rows,
       filters: ROW_FILTERS,
-      onFilter: (value: React.Key | boolean, record: table.TableSummary) =>
-        matchesRowFilter(String(value), record.rows),
+      filteredValue: filters.rows ?? null,
       render: (num: number) => <Text>{num.toLocaleString()}</Text>,
     },
     {
@@ -154,7 +156,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       <Space direction="vertical" style={{ width: "100%" }} size={16}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Found {filteredCount ?? data.length} tables &amp; views in {db}
+            Found {rows.length} tables &amp; views in {db}
           </Text>
           <ReloadOutlined 
             style={{ cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }} 
@@ -166,14 +168,14 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
         {error && <Alert type="error" message={error} showIcon />}
 
         <Table
-          dataSource={data}
+          dataSource={rows}
           columns={columns}
           pagination={false}
           size="small"
           loading={loading}
           rowKey={(r) => `${r.schema}.${r.name}`}
           scroll={{ x: 1200, y: "60vh" }}
-          onChange={(_p, _f, _s, extra) => setFilteredCount(extra.currentDataSource.length)}
+          onChange={(_pagination, nextFilters) => setFilters(nextFilters)}
           bordered
         />
       </Space>
