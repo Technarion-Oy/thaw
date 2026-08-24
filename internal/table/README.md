@@ -6,8 +6,9 @@
 
 Provides four related capabilities for managing Snowflake tables:
 
-1. **Database-wide table summaries** — queries `INFORMATION_SCHEMA.TABLES` for all
-   physical tables in a database and parses the result into typed `TableSummary` rows.
+1. **Database-wide table & view summaries** — queries `INFORMATION_SCHEMA.TABLES` for
+   every table *and* view in a database and parses the result into typed
+   `TableSummary` rows (the **Reports → Tables & Views…** report).
 2. **Table settings retrieval** — reads the current values of modifiable table
    properties via `SHOW TABLES` (with a `SHOW PARAMETERS` fallback for
    `DEFAULT_DDL_COLLATION`) and returns a typed `TableSettings` struct.
@@ -35,7 +36,8 @@ Provides four related capabilities for managing Snowflake tables:
 type TableSummary struct {
     Name          string `json:"name"`
     Schema        string `json:"schema"`
-    Kind          string `json:"kind"`      // BASE TABLE, TRANSIENT, TEMPORARY
+    Kind          string `json:"kind"`      // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE,
+                                        // EVENT TABLE, VIEW, MATERIALIZED VIEW, TRANSIENT
     Rows          int64  `json:"rows"`
     Bytes         int64  `json:"bytes"`
     Owner         string `json:"owner"`
@@ -111,7 +113,7 @@ implicitly casts, and the statement keeps the `VALUES` form.
 | Function | Description |
 |----------|-------------|
 | `BuildInsertRowsSql(db, schema, tableName string, cfg InsertRowsConfig) (string, error)` | Builds a multi-row `INSERT INTO … (cols) VALUES (…), (…)`; always returns a nil error (IPC symmetry) |
-| `BuildDatabaseTableSummaryQuery(database string) string` | Returns `INFORMATION_SCHEMA.TABLES` SELECT for all physical tables |
+| `BuildDatabaseTableSummaryQuery(database string) string` | Returns the unfiltered `INFORMATION_SCHEMA.TABLES` SELECT (every table and view) |
 | `ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary` | Projects query result into `[]TableSummary` by positional column index |
 | `GetDatabaseTableSummary(ctx, client, database) ([]TableSummary, error)` | Convenience wrapper: build + query + parse |
 | `GetTableSettings(ctx, client, database, schema, tbl) (TableSettings, error)` | `SHOW TABLES LIKE '...' IN SCHEMA` + optional `SHOW PARAMETERS` fallback |
@@ -148,7 +150,14 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 
 ## Gotchas
 
-- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–9)
+- `TABLE_TYPE` has no transient value — transient-ness is the separate
+  `IS_TRANSIENT` column — so `ParseDatabaseTableSummary` folds `IS_TRANSIENT = YES`
+  into `Kind` as `TRANSIENT`, the way `SHOW TABLES` reports it. The query carries no
+  `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
+  filter matched only base tables and hid every view — issue #908); filtering is done
+  client side in the report.
+- `ROW_COUNT` / `BYTES` are `NULL` for views and parse to `0`.
+- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–10)
   rather than name lookup. If the `INFORMATION_SCHEMA.TABLES` column set ever
   changes, this parser will silently misread values. `GetTableSettings` uses a
   name-keyed map and is immune to this issue.

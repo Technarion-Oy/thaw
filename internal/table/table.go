@@ -40,7 +40,10 @@ type TableSettings struct {
 }
 
 // BuildDatabaseTableSummaryQuery returns the INFORMATION_SCHEMA.TABLES query
-// that lists all physical tables in the given database.
+// that lists every table and view in the given database. TABLE_TYPE is one of
+// BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW or
+// MATERIALIZED VIEW — all of them are listed, and the report filters client
+// side. ROW_COUNT / BYTES are NULL for views and read back as 0.
 func BuildDatabaseTableSummaryQuery(database string) string {
 	return fmt.Sprintf(`
 		SELECT
@@ -53,9 +56,9 @@ func BuildDatabaseTableSummaryQuery(database string) string {
 			RETENTION_TIME,
 			CREATED,
 			LAST_ALTERED,
-			COMMENT
+			COMMENT,
+			IS_TRANSIENT
 		FROM %s.INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_TYPE IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')
 		ORDER BY TABLE_SCHEMA, TABLE_NAME
 	`, snowflake.QuoteIdent(database))
 }
@@ -80,6 +83,12 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 
 		if row[9] != nil {
 			t.Comment = fmt.Sprintf("%v", row[9])
+		}
+
+		// Transient is not a TABLE_TYPE value — it is the separate IS_TRANSIENT
+		// flag — so fold it into Kind the way SHOW TABLES reports it.
+		if len(row) > 10 && strings.EqualFold(fmt.Sprintf("%v", row[10]), "YES") {
+			t.Kind = "TRANSIENT"
 		}
 
 		// Parsing numeric values

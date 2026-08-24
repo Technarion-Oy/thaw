@@ -5,7 +5,7 @@ import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
-import { KIND_FILTERS, ROW_FILTERS, schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
+import { KIND_FILTERS, KIND_COLORS, ROW_FILTERS, schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
 
 const { Text } = Typography;
 
@@ -71,12 +71,9 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       width: 120,
       filters: KIND_FILTERS,
       onFilter: (value: React.Key | boolean, record: table.TableSummary) => record.kind === value,
-      render: (kind: string) => {
-        let color = "blue";
-        if (kind === "TRANSIENT") color = "orange";
-        if (kind === "TEMPORARY") color = "purple";
-        return <Tag color={color} style={{ fontSize: 10 }}>{kind}</Tag>;
-      },
+      render: (kind: string) => (
+        <Tag color={KIND_COLORS[kind] ?? "blue"} style={{ fontSize: 10 }}>{kind}</Tag>
+      ),
     },
     {
       title: "Rows",
@@ -144,7 +141,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       title={
         <Space>
           <DashboardOutlined />
-          <span>Table Summary: {db}</span>
+          <span>Tables &amp; Views: {db}</span>
         </Space>
       }
       open={!!db}
@@ -157,7 +154,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       <Space direction="vertical" style={{ width: "100%" }} size={16}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Found {filteredCount ?? data.length} tables in {db}
+            Found {filteredCount ?? data.length} tables &amp; views in {db}
           </Text>
           <ReloadOutlined 
             style={{ cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }} 

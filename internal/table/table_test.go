@@ -52,12 +52,16 @@ func TestBuildDatabaseTableSummaryQuery(t *testing.T) {
 	sql := BuildDatabaseTableSummaryQuery("MYDB")
 	for _, want := range []string{
 		`"MYDB".INFORMATION_SCHEMA.TABLES`,
-		"TABLE_TYPE IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')",
+		"IS_TRANSIENT",
 		"ORDER BY TABLE_SCHEMA, TABLE_NAME",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("expected %q in SQL:\n%s", want, sql)
 		}
+	}
+	// Views and the non-base table types must not be filtered out (#908).
+	if strings.Contains(sql, "WHERE") {
+		t.Errorf("expected no TABLE_TYPE restriction:\n%s", sql)
 	}
 }
 
@@ -68,15 +72,25 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 		Columns: []string{
 			"TABLE_NAME", "TABLE_SCHEMA", "TABLE_TYPE", "ROW_COUNT", "BYTES",
 			"TABLE_OWNER", "RETENTION_TIME", "CREATED", "LAST_ALTERED", "COMMENT",
+			"IS_TRANSIENT",
 		},
 		Rows: [][]interface{}{
-			{"T1", "PUBLIC", "BASE TABLE", int64(100), int64(4096), "SYSADMIN", 1, created, altered, "hi"},
+			{"T1", "PUBLIC", "BASE TABLE", int64(100), int64(4096), "SYSADMIN", 1, created, altered, "hi", "NO"},
+			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES"},
+			{"V1", "PUBLIC", "VIEW", nil, nil, "SYSADMIN", 0, created, altered, "", "NO"},
 			{"too", "short"}, // skipped: < 10 columns
 		},
 	}
 	tables := ParseDatabaseTableSummary(res)
-	if len(tables) != 1 {
-		t.Fatalf("expected 1 table, got %d", len(tables))
+	if len(tables) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(tables))
+	}
+	// IS_TRANSIENT = YES is folded into Kind; views keep theirs and report 0 rows.
+	if tables[1].Kind != "TRANSIENT" {
+		t.Errorf("expected transient table kind TRANSIENT, got %q", tables[1].Kind)
+	}
+	if tables[2].Kind != "VIEW" || tables[2].Rows != 0 || tables[2].Bytes != 0 {
+		t.Errorf("unexpected view projection: %+v", tables[2])
 	}
 	got := tables[0]
 	if got.Name != "T1" || got.Schema != "PUBLIC" || got.Kind != "BASE TABLE" || got.Owner != "SYSADMIN" {

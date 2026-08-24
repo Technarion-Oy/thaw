@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { describe, it, expect } from "vitest";
-import { schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
+import { KIND_FILTERS, schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
 import type { table } from "../../../wailsjs/go/models";
 
 const row = (schema: string) => ({ schema } as table.TableSummary);
+
+describe("KIND_FILTERS", () => {
+  it("covers every TABLE_TYPE INFORMATION_SCHEMA.TABLES can return", () => {
+    expect(KIND_FILTERS.map((f) => f.value)).toEqual(
+      expect.arrayContaining([
+        "BASE TABLE",
+        "TEMPORARY TABLE",
+        "EXTERNAL TABLE",
+        "EVENT TABLE",
+        "VIEW",
+        "MATERIALIZED VIEW",
+      ]),
+    );
+  });
+});
 
 describe("schemaFilters", () => {
   it("returns distinct schemas sorted", () => {
