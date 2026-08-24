@@ -164,6 +164,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/database/InsertRowModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/database/insertCellTypes.ts",
+        "frontend/src/components/database/objectSummaryFilters.ts",
         "frontend/src/components/datametricfunction/CreateDataMetricFunctionModal.tsx",
         "frontend/src/components/datametricfunction/DataMetricFunctionPropertiesModal.tsx",
         "frontend/src/components/dataset/CreateDatasetModal.tsx",

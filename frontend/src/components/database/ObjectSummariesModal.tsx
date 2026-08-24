@@ -5,6 +5,7 @@ import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
+import { KIND_FILTERS, ROW_FILTERS, schemaFilters, matchesRowFilter } from "./objectSummaryFilters";
 
 const { Text } = Typography;
 
@@ -17,10 +18,13 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<table.TableSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // null = no filter applied, so the caption falls back to the full row count
+  const [filteredCount, setFilteredCount] = useState<number | null>(null);
 
   const fetchSummary = async () => {
     setLoading(true);
     setError(null);
+    setFilteredCount(null);
     try {
       const tables = await GetDatabaseTableSummary(db);
       setData(tables);
@@ -51,6 +55,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       fixed: "left" as const,
       width: 200,
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.name.localeCompare(b.name),
+      filters: schemaFilters(data),
+      onFilter: (value: React.Key | boolean, record: table.TableSummary) => record.schema === value,
       render: (name: string, record: table.TableSummary) => (
         <Space direction="vertical" size={0}>
           <Text strong>{name}</Text>
@@ -63,6 +69,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "kind",
       key: "kind",
       width: 120,
+      filters: KIND_FILTERS,
+      onFilter: (value: React.Key | boolean, record: table.TableSummary) => record.kind === value,
       render: (kind: string) => {
         let color = "blue";
         if (kind === "TRANSIENT") color = "orange";
@@ -76,6 +84,9 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       key: "rows",
       align: "right" as const,
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.rows - b.rows,
+      filters: ROW_FILTERS,
+      onFilter: (value: React.Key | boolean, record: table.TableSummary) =>
+        matchesRowFilter(String(value), record.rows),
       render: (num: number) => <Text>{num.toLocaleString()}</Text>,
     },
     {
@@ -146,7 +157,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       <Space direction="vertical" style={{ width: "100%" }} size={16}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Found {data.length} tables in {db}
+            Found {filteredCount ?? data.length} tables in {db}
           </Text>
           <ReloadOutlined 
             style={{ cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }} 
@@ -165,6 +176,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
           loading={loading}
           rowKey={(r) => `${r.schema}.${r.name}`}
           scroll={{ x: 1200, y: "60vh" }}
+          onChange={(_p, _f, _s, extra) => setFilteredCount(extra.currentDataSource.length)}
           bordered
         />
       </Space>
