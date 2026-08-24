@@ -586,7 +586,10 @@ func NewClient(ctx context.Context, p ConnectParams, opts ...ClientOption) (*Cli
 		Schema:        p.Schema,
 		Authenticator: auth,
 		Passcode:      p.Passcode,
-		LoginTimeout:  loginTimeout,
+		// staticcheck SA1019: the field is documented "Deprecated: timeouts may be
+		// reorganized in a future release" — but the whole Config timeout family
+		// carries that same notice and no replacement API exists yet.
+		LoginTimeout: loginTimeout, //nolint:staticcheck
 		// ServerSessionKeepAlive prevents the driver from sending DELETE /session
 		// when the pool recycles a connection, which would invalidate the
 		// shared Snowflake session and break all other pool connections.
