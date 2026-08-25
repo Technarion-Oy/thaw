@@ -92,16 +92,19 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 		// BASE TABLE and are told apart only by their own flag, so fold the flag
 		// into Kind the way SHOW TABLES reports it. Only a BASE TABLE is
 		// reclassified: any other TABLE_TYPE keeps its own kind, so a transient
-		// temporary table is not mislabelled. The first flag set wins — a dynamic
-		// table reads as such even when it is also transient.
+		// temporary table is not mislabelled. The flags are not mutually exclusive
+		// — a dynamic iceberg table sets both, a dynamic table can be transient —
+		// so the first match wins and they are ordered by how the object behaves
+		// over what it is stored as: dynamic (auto-refreshing) beats iceberg /
+		// hybrid storage, which beats transient retention.
 		if strings.EqualFold(t.Kind, "BASE TABLE") {
 			for _, f := range []struct {
 				col  int
 				kind string
 			}{
+				{11, "DYNAMIC TABLE"},
 				{12, "ICEBERG TABLE"},
 				{13, "HYBRID TABLE"},
-				{11, "DYNAMIC TABLE"},
 				{10, "TRANSIENT"},
 			} {
 				if snowflake.CellBool(row[f.col]) {

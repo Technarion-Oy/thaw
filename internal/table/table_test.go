@@ -87,13 +87,15 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 			// A dynamic table reports TABLE_TYPE = BASE TABLE; its flag wins over IS_TRANSIENT.
 			{"D1", "PUBLIC", "BASE TABLE", int64(3), int64(24), "SYSADMIN", 1, created, altered, "", "YES", "YES", "NO", "NO"},
 			{"I1", "PUBLIC", "BASE TABLE", int64(4), int64(32), "SYSADMIN", 1, created, altered, "", "NO", "NO", "YES", "NO"},
+			// A dynamic iceberg table sets both flags; dynamic wins.
+			{"DI1", "PUBLIC", "BASE TABLE", int64(6), int64(48), "SYSADMIN", 1, created, altered, "", "NO", "YES", "YES", "NO"},
 			{"H1", "PUBLIC", "BASE TABLE", int64(5), int64(40), "SYSADMIN", 1, created, altered, "", "NO", "NO", "NO", "YES"},
 			{"too", "short"}, // skipped: fewer than the query's 14 columns
 		},
 	}
 	tables := ParseDatabaseTableSummary(res)
-	if len(tables) != 7 {
-		t.Fatalf("expected 7 rows, got %d", len(tables))
+	if len(tables) != 8 {
+		t.Fatalf("expected 8 rows, got %d", len(tables))
 	}
 	// IS_TRANSIENT = YES is folded into Kind.
 	if tables[1].Kind != "TRANSIENT" {
@@ -122,7 +124,7 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 		t.Errorf("expected TEMPORARY TABLE to survive the transient fold, got %q", tables[3].Kind)
 	}
 	// The IS_DYNAMIC / IS_ICEBERG / IS_HYBRID flags are folded in the same way.
-	for i, want := range map[int]string{4: "DYNAMIC TABLE", 5: "ICEBERG TABLE", 6: "HYBRID TABLE"} {
+	for i, want := range map[int]string{4: "DYNAMIC TABLE", 5: "ICEBERG TABLE", 6: "DYNAMIC TABLE", 7: "HYBRID TABLE"} {
 		if tables[i].Kind != want {
 			t.Errorf("expected %s for row %d, got %q", want, i, tables[i].Kind)
 		}

@@ -535,7 +535,7 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
 - **Database Reports** — right-click a database node to access a **Reports** cascading menu:
   - **Tables & Views…** — a quick, high-level snapshot of the selected database's contents; lists every table **and** view in the database, showing:
     - **Name & Schema**
-    - **Type** — every `INFORMATION_SCHEMA.TABLES` type: BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW, MATERIALIZED VIEW, plus TRANSIENT, DYNAMIC TABLE, ICEBERG TABLE and HYBRID TABLE (all four report `TABLE_TYPE = BASE TABLE` and are folded in from their separate `IS_*` flag), each tagged in the same colour the object tree uses
+    - **Type** — every `INFORMATION_SCHEMA.TABLES` type: BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW, MATERIALIZED VIEW, plus TRANSIENT, DYNAMIC TABLE, ICEBERG TABLE and HYBRID TABLE (all four report `TABLE_TYPE = BASE TABLE` and are folded in from their separate `IS_*` flag; an object with more than one flag — a dynamic iceberg table, a transient dynamic table — is reported by behaviour over storage, so it reads as DYNAMIC TABLE), each tagged in the same colour the object tree uses
     - **Owner** role — a restricted or shared object with no owner is flagged as NULL rather than shown as a blank tag
     - **Row Count** and **Physical Size** (B, KB, MB, GB, TB) — shown as an em dash whenever Snowflake reports no count (views, and a freshly created or just-truncated table), and sorted last in both directions
     - **Time Travel Retention** (days) — an em dash for views, which have no retention setting

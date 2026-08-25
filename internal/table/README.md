@@ -157,8 +157,11 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
   `BASE TABLE`, so a transient temporary table keeps its `TEMPORARY TABLE` kind.
   `IS_DYNAMIC` / `IS_ICEBERG` / `IS_HYBRID` work the same way (dynamic, iceberg and
   hybrid tables all report `TABLE_TYPE = BASE TABLE`) and are folded in as
-  `DYNAMIC TABLE` / `ICEBERG TABLE` / `HYBRID TABLE`; the first flag set wins, so a
-  transient dynamic table reads as `DYNAMIC TABLE`. The query carries no
+  `DYNAMIC TABLE` / `ICEBERG TABLE` / `HYBRID TABLE`. The flags are not mutually
+  exclusive — a `CREATE DYNAMIC ICEBERG TABLE` sets both `IS_DYNAMIC` and
+  `IS_ICEBERG`, a dynamic table can be transient — so the first match wins, ordered
+  by behaviour over storage: dynamic, then iceberg / hybrid, then transient. A
+  dynamic iceberg table therefore reads as `DYNAMIC TABLE`. The query carries no
   `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
   filter matched only base tables and hid every view — issue #908); filtering is done
   client side in the report.
