@@ -3,6 +3,7 @@
 package table
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,13 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 	// TABLE_OWNER / COMMENT as the literal "<nil>".
 	if tables[2].Kind != "VIEW" || tables[2].Rows != nil || tables[2].Bytes != nil {
 		t.Errorf("unexpected view projection: %+v", tables[2])
+	}
+	// The nil counts must marshal as omitted keys, not JSON null: the frontend
+	// reads them as `field?: number` and only checks for undefined.
+	if b, err := json.Marshal(tables[2]); err != nil {
+		t.Fatalf("marshal: %v", err)
+	} else if strings.Contains(string(b), "null") {
+		t.Errorf("expected nil counts to be omitted, got %s", b)
 	}
 	if tables[2].RetentionTime != nil {
 		t.Errorf("expected NULL RETENTION_TIME to project as nil, got %v", *tables[2].RetentionTime)

@@ -39,10 +39,10 @@ type TableSummary struct {
     Kind          string `json:"kind"`      // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE,
                                         // EVENT TABLE, VIEW, MATERIALIZED VIEW, TRANSIENT,
                                         // DYNAMIC TABLE, ICEBERG TABLE, HYBRID TABLE
-    Rows          *int64 `json:"rows"`   // nil when Snowflake reports no count
-    Bytes         *int64 `json:"bytes"`  // nil when Snowflake reports no count
+    Rows          *int64 `json:"rows,omitempty"`   // nil when Snowflake reports no count
+    Bytes         *int64 `json:"bytes,omitempty"`  // nil when Snowflake reports no count
     Owner         string `json:"owner"`
-    RetentionTime *int64 `json:"retentionTime"` // nil when Snowflake reports none
+    RetentionTime *int64 `json:"retentionTime,omitempty"` // nil when Snowflake reports none
     Created       string `json:"created"`   // RFC3339 string
     LastAltered   string `json:"lastAltered"` // RFC3339 string
     Comment       string `json:"comment"`

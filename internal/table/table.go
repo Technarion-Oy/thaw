@@ -15,11 +15,11 @@ import (
 type TableSummary struct {
 	Name          string `json:"name"`
 	Schema        string `json:"schema"`
-	Kind          string `json:"kind"`  // BASE TABLE, VIEW, DYNAMIC TABLE, etc.
-	Rows          *int64 `json:"rows"`  // nil when Snowflake reports no count
-	Bytes         *int64 `json:"bytes"` // nil when Snowflake reports no count
+	Kind          string `json:"kind"`            // BASE TABLE, VIEW, DYNAMIC TABLE, etc.
+	Rows          *int64 `json:"rows,omitempty"`  // nil when Snowflake reports no count
+	Bytes         *int64 `json:"bytes,omitempty"` // nil when Snowflake reports no count
 	Owner         string `json:"owner"`
-	RetentionTime *int64 `json:"retentionTime"` // nil when Snowflake reports none
+	RetentionTime *int64 `json:"retentionTime,omitempty"` // nil when Snowflake reports none
 	// Use string for Wails binding compatibility with time.Time
 	Created     string `json:"created"`
 	LastAltered string `json:"lastAltered"`
