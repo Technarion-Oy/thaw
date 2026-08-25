@@ -8,13 +8,13 @@ import type { table } from "../../../wailsjs/go/models";
 
 const row = (schema: string) => ({ schema } as table.TableSummary);
 
-const t = (name: string, schema: string, kind: string, rows: number) =>
+const t = (name: string, schema: string, kind: string, rows?: number) =>
   ({ name, schema, kind, rows } as table.TableSummary);
 
-// -1 is the backend's table.UnknownCount: Snowflake reports no ROW_COUNT for views.
+// rows is undefined when Snowflake reports no ROW_COUNT — e.g. for a view.
 const DATA = [
   t("A", "PUBLIC", "BASE TABLE", 10),
-  t("B", "PUBLIC", "VIEW", -1),
+  t("B", "PUBLIC", "VIEW"),
   t("C", "ANALYTICS", "BASE TABLE", 0),
   t("D", "ANALYTICS", "TRANSIENT", 5),
 ];
@@ -24,7 +24,7 @@ describe("applyFilters", () => {
 
   it("returns everything when nothing is selected", () => {
     expect(names({})).toEqual(["A", "B", "C", "D"]);
-    expect(names({ name: null, kind: [], rows: undefined })).toEqual(["A", "B", "C", "D"]);
+    expect(names({ name: null, kind: [] })).toEqual(["A", "B", "C", "D"]);
   });
 
   it("ORs values within a column and ANDs across columns", () => {
@@ -51,6 +51,9 @@ describe("KIND_FILTERS", () => {
       expect.arrayContaining([
         "BASE TABLE",
         "TEMPORARY TABLE",
+        "DYNAMIC TABLE",
+        "ICEBERG TABLE",
+        "HYBRID TABLE",
         "EXTERNAL TABLE",
         "EVENT TABLE",
         "VIEW",
@@ -82,20 +85,27 @@ describe("matchesRowFilter", () => {
   });
 
   it("matches neither option when the count is unknown", () => {
-    expect(matchesRowFilter("empty", -1)).toBe(false);
-    expect(matchesRowFilter("nonempty", -1)).toBe(false);
+    expect(matchesRowFilter("empty", undefined)).toBe(false);
+    expect(matchesRowFilter("nonempty", undefined)).toBe(false);
   });
 });
 
 describe("compareCounts", () => {
-  it("sorts unknown counts after every known value", () => {
-    expect([5, -1, 0, 2].sort(compareCounts)).toEqual([0, 2, 5, -1]);
+  // antd negates the comparator for a descending sort, so mirror that here.
+  const sorted = (order: "ascend" | "descend") =>
+    [5, undefined, 0, 2]
+      .sort((a, b) => (order === "ascend" ? 1 : -1) * compareCounts(a, b, order))
+      .map((n) => n ?? "—");
+
+  it("keeps unknown counts last in both sort directions", () => {
+    expect(sorted("ascend")).toEqual([0, 2, 5, "—"]);
+    expect(sorted("descend")).toEqual([5, 2, 0, "—"]);
   });
 
   it("orders known counts numerically", () => {
     expect(compareCounts(1, 2)).toBeLessThan(0);
     expect(compareCounts(2, 1)).toBeGreaterThan(0);
-    expect(compareCounts(-1, -1)).toBe(0);
+    expect(compareCounts(undefined, undefined)).toBe(0);
   });
 });
 
@@ -114,6 +124,7 @@ describe("registryKind", () => {
     expect(registryKind("TRANSIENT")).toBe("TABLE");
     expect(registryKind("TEMPORARY TABLE")).toBe("TABLE");
     expect(registryKind("MATERIALIZED VIEW")).toBe("MATERIALIZED VIEW");
+    expect(registryKind("DYNAMIC TABLE")).toBe("DYNAMIC TABLE");
     expect(registryKind("EXTERNAL TABLE")).toBe("EXTERNAL TABLE");
   });
 });

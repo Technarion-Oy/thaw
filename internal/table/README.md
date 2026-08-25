@@ -37,11 +37,12 @@ type TableSummary struct {
     Name          string `json:"name"`
     Schema        string `json:"schema"`
     Kind          string `json:"kind"`      // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE,
-                                        // EVENT TABLE, VIEW, MATERIALIZED VIEW, TRANSIENT
-    Rows          int64  `json:"rows"`
-    Bytes         int64  `json:"bytes"`
+                                        // EVENT TABLE, VIEW, MATERIALIZED VIEW, TRANSIENT,
+                                        // DYNAMIC TABLE, ICEBERG TABLE, HYBRID TABLE
+    Rows          *int64 `json:"rows"`   // nil when Snowflake reports no count
+    Bytes         *int64 `json:"bytes"`  // nil when Snowflake reports no count
     Owner         string `json:"owner"`
-    RetentionTime int    `json:"retentionTime"` // UnknownCount when Snowflake reports none (views)
+    RetentionTime *int64 `json:"retentionTime"` // nil when Snowflake reports none
     Created       string `json:"created"`   // RFC3339 string
     LastAltered   string `json:"lastAltered"` // RFC3339 string
     Comment       string `json:"comment"`
@@ -153,22 +154,28 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 - `TABLE_TYPE` has no transient value — transient-ness is the separate
   `IS_TRANSIENT` column — so `ParseDatabaseTableSummary` folds `IS_TRANSIENT = YES`
   into `Kind` as `TRANSIENT`, the way `SHOW TABLES` reports it — but only for a
-  `BASE TABLE`, so a transient temporary table keeps its `TEMPORARY TABLE` kind. The query carries no
+  `BASE TABLE`, so a transient temporary table keeps its `TEMPORARY TABLE` kind.
+  `IS_DYNAMIC` / `IS_ICEBERG` / `IS_HYBRID` work the same way (dynamic, iceberg and
+  hybrid tables all report `TABLE_TYPE = BASE TABLE`) and are folded in as
+  `DYNAMIC TABLE` / `ICEBERG TABLE` / `HYBRID TABLE`; the first flag set wins, so a
+  transient dynamic table reads as `DYNAMIC TABLE`. The query carries no
   `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
   filter matched only base tables and hid every view — issue #908); filtering is done
   client side in the report.
-- `ROW_COUNT` / `BYTES` are `NULL` for views, which have neither. They parse to
-  `UnknownCount` (`-1`), *not* `0`, so the report can tell "empty" apart from "not
-  applicable" — otherwise the Empty/Non-empty filter calls every view empty. The UI
-  renders `UnknownCount` as an em dash and sorts it after every known count.
-  `RETENTION_TIME` is `NULL` for views too and gets the same sentinel, so a view is
-  not reported as a deliberate 0-day retention.
+- `ROW_COUNT` / `BYTES` / `RETENTION_TIME` are `NULL` whenever Snowflake keeps no
+  statistics — for views, which have none, and for a freshly created or just
+  truncated table until they are recomputed. They project to a nil `*int64`, *not*
+  `0`, so the report can tell "empty" apart from "not known": the UI renders nil as
+  an em dash, sorts it last in both directions, and matches it against neither the
+  Empty nor the Non-empty filter. A nil `RetentionTime` likewise avoids reporting a
+  view as a deliberate 0-day retention.
 - `TABLE_OWNER` and `COMMENT` are `NULL`-able (restricted or shared objects), so
   every string cell goes through `snowflake.CellString`, which maps `NULL` to `""`
-  rather than to Go's literal `"<nil>"`. Numeric cells go through `count()`, a thin
-  `NULL` → `UnknownCount` wrapper over `snowflake.CellInt64` (which also handles the
-  exponential notation the driver can return for large `BYTES` / `ROW_COUNT`).
-- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–10)
+  rather than to Go's literal `"<nil>"` (the report flags an empty owner as `NULL`).
+  Numeric cells go through `snowflake.CellInt64Ptr`, which maps `NULL` to nil and
+  otherwise parses via `CellInt64` (so the exponential notation the driver can
+  return for a large `BYTES` / `ROW_COUNT` is handled too).
+- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–13)
   rather than name lookup. If the `INFORMATION_SCHEMA.TABLES` column set ever
   changes, this parser will silently misread values. `GetTableSettings` uses a
   name-keyed map and is immune to this issue.

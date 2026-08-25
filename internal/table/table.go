@@ -15,11 +15,11 @@ import (
 type TableSummary struct {
 	Name          string `json:"name"`
 	Schema        string `json:"schema"`
-	Kind          string `json:"kind"`  // BASE TABLE, VIEW, etc.
-	Rows          int64  `json:"rows"`  // UnknownCount when Snowflake reports none (views)
-	Bytes         int64  `json:"bytes"` // UnknownCount when Snowflake reports none (views)
+	Kind          string `json:"kind"`  // BASE TABLE, VIEW, DYNAMIC TABLE, etc.
+	Rows          *int64 `json:"rows"`  // nil when Snowflake reports no count
+	Bytes         *int64 `json:"bytes"` // nil when Snowflake reports no count
 	Owner         string `json:"owner"`
-	RetentionTime int    `json:"retentionTime"` // UnknownCount when Snowflake reports none (views)
+	RetentionTime *int64 `json:"retentionTime"` // nil when Snowflake reports none
 	// Use string for Wails binding compatibility with time.Time
 	Created     string `json:"created"`
 	LastAltered string `json:"lastAltered"`
@@ -42,7 +42,10 @@ type TableSettings struct {
 // that lists every table and view in the given database. TABLE_TYPE is one of
 // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW or
 // MATERIALIZED VIEW — all of them are listed, and the report filters client
-// side. ROW_COUNT / BYTES are NULL for views and read back as UnknownCount.
+// side. Transient, dynamic, iceberg and hybrid tables all report TABLE_TYPE =
+// BASE TABLE and are told apart only by the IS_* flags, so those are selected
+// too. ROW_COUNT / BYTES / RETENTION_TIME are NULL whenever Snowflake keeps no
+// statistics (views, and a freshly created or truncated table).
 func BuildDatabaseTableSummaryQuery(database string) string {
 	return fmt.Sprintf(`
 		SELECT
@@ -56,25 +59,13 @@ func BuildDatabaseTableSummaryQuery(database string) string {
 			CREATED,
 			LAST_ALTERED,
 			COMMENT,
-			IS_TRANSIENT
+			IS_TRANSIENT,
+			IS_DYNAMIC,
+			IS_ICEBERG,
+			IS_HYBRID
 		FROM %s.INFORMATION_SCHEMA.TABLES
 		ORDER BY TABLE_SCHEMA, TABLE_NAME
 	`, snowflake.QuoteIdent(database))
-}
-
-// UnknownCount is the Rows / Bytes value for an object Snowflake reports no
-// count for — INFORMATION_SCHEMA.TABLES leaves ROW_COUNT and BYTES NULL for
-// views. Distinct from 0, which means the object really is empty.
-const UnknownCount int64 = -1
-
-// count parses a NULL-able numeric cell, returning UnknownCount for NULL.
-// Non-NULL values go through snowflake.CellInt64, which also handles the
-// exponential notation the driver can return for large BYTES / ROW_COUNT.
-func count(v interface{}) int64 {
-	if v == nil {
-		return UnknownCount
-	}
-	return snowflake.CellInt64(v)
 }
 
 // ParseDatabaseTableSummary projects a table-summary query result into
@@ -85,8 +76,8 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 	}
 	var tables []TableSummary
 	for _, row := range res.Rows {
-		// The query selects a fixed 11 columns; anything shorter is malformed.
-		if len(row) < 11 {
+		// The query selects a fixed 14 columns; anything shorter is malformed.
+		if len(row) < 14 {
 			continue
 		}
 		t := TableSummary{
@@ -97,22 +88,35 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 			Comment: snowflake.CellString(row[9]),
 		}
 
-		// Transient is not a TABLE_TYPE value — it is the separate IS_TRANSIENT
-		// flag — so fold it into Kind the way SHOW TABLES reports it. Only a
-		// BASE TABLE is reclassified: any other TABLE_TYPE keeps its own kind so
-		// a transient temporary table is not mislabelled.
-		if strings.EqualFold(t.Kind, "BASE TABLE") && strings.EqualFold(snowflake.CellString(row[10]), "YES") {
-			t.Kind = "TRANSIENT"
+		// Dynamic, iceberg, hybrid and transient tables all report TABLE_TYPE =
+		// BASE TABLE and are told apart only by their own flag, so fold the flag
+		// into Kind the way SHOW TABLES reports it. Only a BASE TABLE is
+		// reclassified: any other TABLE_TYPE keeps its own kind, so a transient
+		// temporary table is not mislabelled. The first flag set wins — a dynamic
+		// table reads as such even when it is also transient.
+		if strings.EqualFold(t.Kind, "BASE TABLE") {
+			for _, f := range []struct {
+				col  int
+				kind string
+			}{
+				{12, "ICEBERG TABLE"},
+				{13, "HYBRID TABLE"},
+				{11, "DYNAMIC TABLE"},
+				{10, "TRANSIENT"},
+			} {
+				if snowflake.CellBool(row[f.col]) {
+					t.Kind = f.kind
+					break
+				}
+			}
 		}
 
-		// Parsing numeric values. ROW_COUNT / BYTES are NULL for views, which have
-		// neither — reported as UnknownCount so the report can tell "no rows" apart
-		// from "not applicable" rather than calling every view empty.
-		t.Rows = count(row[3])
-		t.Bytes = count(row[4])
-		// RETENTION_TIME is NULL for views too — same sentinel, so "not applicable"
-		// is not rendered as a deliberate 0-day retention.
-		t.RetentionTime = int(count(row[6]))
+		// ROW_COUNT / BYTES / RETENTION_TIME are NULL whenever Snowflake keeps no
+		// statistics — for views, and for a freshly created or truncated table — so
+		// they stay nil rather than reading back as a real 0.
+		t.Rows = snowflake.CellInt64Ptr(row[3])
+		t.Bytes = snowflake.CellInt64Ptr(row[4])
+		t.RetentionTime = snowflake.CellInt64Ptr(row[6])
 
 		// Parsing times and converting to string for Wails compatibility
 		if row[7] != nil {

@@ -53,6 +53,9 @@ func TestBuildDatabaseTableSummaryQuery(t *testing.T) {
 	for _, want := range []string{
 		`"MYDB".INFORMATION_SCHEMA.TABLES`,
 		"IS_TRANSIENT",
+		"IS_DYNAMIC",
+		"IS_ICEBERG",
+		"IS_HYBRID",
 		"ORDER BY TABLE_SCHEMA, TABLE_NAME",
 	} {
 		if !strings.Contains(sql, want) {
@@ -72,20 +75,24 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 		Columns: []string{
 			"TABLE_NAME", "TABLE_SCHEMA", "TABLE_TYPE", "ROW_COUNT", "BYTES",
 			"TABLE_OWNER", "RETENTION_TIME", "CREATED", "LAST_ALTERED", "COMMENT",
-			"IS_TRANSIENT",
+			"IS_TRANSIENT", "IS_DYNAMIC", "IS_ICEBERG", "IS_HYBRID",
 		},
 		Rows: [][]interface{}{
 			// BYTES in exponential notation, as the driver can return it for large values.
-			{"T1", "PUBLIC", "BASE TABLE", int64(100), "4.096e+03", "SYSADMIN", 1, created, altered, "hi", "NO"},
-			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES"},
-			{"V1", "PUBLIC", "VIEW", nil, nil, nil, nil, created, altered, nil, "NO"},
-			{"T3", "PUBLIC", "TEMPORARY TABLE", int64(2), int64(16), "SYSADMIN", 1, created, altered, "", "YES"},
-			{"too", "short"}, // skipped: fewer than the query's 11 columns
+			{"T1", "PUBLIC", "BASE TABLE", int64(100), "4.096e+03", "SYSADMIN", 1, created, altered, "hi", "NO", "NO", "NO", "NO"},
+			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES", "NO", "NO", "NO"},
+			{"V1", "PUBLIC", "VIEW", nil, nil, nil, nil, created, altered, nil, "NO", "NO", "NO", "NO"},
+			{"T3", "PUBLIC", "TEMPORARY TABLE", int64(2), int64(16), "SYSADMIN", 1, created, altered, "", "YES", "NO", "NO", "NO"},
+			// A dynamic table reports TABLE_TYPE = BASE TABLE; its flag wins over IS_TRANSIENT.
+			{"D1", "PUBLIC", "BASE TABLE", int64(3), int64(24), "SYSADMIN", 1, created, altered, "", "YES", "YES", "NO", "NO"},
+			{"I1", "PUBLIC", "BASE TABLE", int64(4), int64(32), "SYSADMIN", 1, created, altered, "", "NO", "NO", "YES", "NO"},
+			{"H1", "PUBLIC", "BASE TABLE", int64(5), int64(40), "SYSADMIN", 1, created, altered, "", "NO", "NO", "NO", "YES"},
+			{"too", "short"}, // skipped: fewer than the query's 14 columns
 		},
 	}
 	tables := ParseDatabaseTableSummary(res)
-	if len(tables) != 4 {
-		t.Fatalf("expected 4 rows, got %d", len(tables))
+	if len(tables) != 7 {
+		t.Fatalf("expected 7 rows, got %d", len(tables))
 	}
 	// IS_TRANSIENT = YES is folded into Kind.
 	if tables[1].Kind != "TRANSIENT" {
@@ -93,11 +100,11 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 	}
 	// A view keeps its kind, has no counts to report, and must not render NULL
 	// TABLE_OWNER / COMMENT as the literal "<nil>".
-	if tables[2].Kind != "VIEW" || tables[2].Rows != UnknownCount || tables[2].Bytes != UnknownCount {
+	if tables[2].Kind != "VIEW" || tables[2].Rows != nil || tables[2].Bytes != nil {
 		t.Errorf("unexpected view projection: %+v", tables[2])
 	}
-	if tables[2].RetentionTime != int(UnknownCount) {
-		t.Errorf("expected NULL RETENTION_TIME to project as UnknownCount, got %d", tables[2].RetentionTime)
+	if tables[2].RetentionTime != nil {
+		t.Errorf("expected NULL RETENTION_TIME to project as nil, got %v", *tables[2].RetentionTime)
 	}
 	if tables[2].Owner != "" || tables[2].Comment != "" {
 		t.Errorf("expected NULL owner/comment to project as empty, got %+v", tables[2])
@@ -106,11 +113,18 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 	if tables[3].Kind != "TEMPORARY TABLE" {
 		t.Errorf("expected TEMPORARY TABLE to survive the transient fold, got %q", tables[3].Kind)
 	}
+	// The IS_DYNAMIC / IS_ICEBERG / IS_HYBRID flags are folded in the same way.
+	for i, want := range map[int]string{4: "DYNAMIC TABLE", 5: "ICEBERG TABLE", 6: "HYBRID TABLE"} {
+		if tables[i].Kind != want {
+			t.Errorf("expected %s for row %d, got %q", want, i, tables[i].Kind)
+		}
+	}
 	got := tables[0]
 	if got.Name != "T1" || got.Schema != "PUBLIC" || got.Kind != "BASE TABLE" || got.Owner != "SYSADMIN" {
 		t.Errorf("unexpected string projection: %+v", got)
 	}
-	if got.Rows != 100 || got.Bytes != 4096 || got.RetentionTime != 1 || got.Comment != "hi" {
+	if got.Rows == nil || *got.Rows != 100 || got.Bytes == nil || *got.Bytes != 4096 ||
+		got.RetentionTime == nil || *got.RetentionTime != 1 || got.Comment != "hi" {
 		t.Errorf("unexpected numeric projection: %+v", got)
 	}
 	if got.Created != created.Format(time.RFC3339) || got.LastAltered != altered.Format(time.RFC3339) {

@@ -5,15 +5,17 @@ import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
-import type { FilterValue } from "antd/es/table/interface";
+import type { SortOrder } from "antd/es/table/interface";
 import { KIND_VAR } from "../sidebar/objectIcons";
+import type { SummaryFilters } from "./objectSummaryFilters";
 import { KIND_FILTERS, ROW_FILTERS, schemaFilters, applyFilters, registryKind, compareCounts } from "./objectSummaryFilters";
 
 const { Text } = Typography;
 
-// Views carry no BYTES; "—" keeps that apart from a genuinely empty 0 B object.
-const formatBytes = (bytes: number) => {
-  if (bytes < 0) return "—";
+// Snowflake reports no BYTES for views, or for a table whose statistics are not
+// computed yet; "—" keeps that apart from a genuinely empty 0 B object.
+const formatBytes = (bytes?: number) => {
+  if (bytes === undefined) return "—";
   if (bytes === 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
@@ -30,7 +32,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<table.TableSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Record<string, FilterValue | null>>({});
+  const [filters, setFilters] = useState<SummaryFilters>({});
 
   const fetchSummary = async () => {
     setLoading(true);
@@ -46,6 +48,9 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   };
 
   useEffect(() => {
+    // A filter picked for the previous database (a schema it alone has) would
+    // otherwise silently hide every row of the new one.
+    setFilters({});
     fetchSummary();
   }, [db]);
 
@@ -90,26 +95,33 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "rows",
       key: "rows",
       align: "right" as const,
-      sorter: (a: table.TableSummary, b: table.TableSummary) => compareCounts(a.rows, b.rows),
+      sorter: (a: table.TableSummary, b: table.TableSummary, order?: SortOrder) => compareCounts(a.rows, b.rows, order),
       filters: ROW_FILTERS,
       filteredValue: filters.rows ?? null,
-      // Snowflake reports no row count for views; "—" keeps that apart from 0.
-      render: (num: number) => <Text>{num < 0 ? "—" : num.toLocaleString()}</Text>,
+      // No row count for views, or for a table with stale statistics; "—" keeps
+      // that apart from a real 0.
+      render: (num?: number) => <Text>{num === undefined ? "—" : num.toLocaleString()}</Text>,
     },
     {
       title: "Size",
       dataIndex: "bytes",
       key: "bytes",
       align: "right" as const,
-      sorter: (a: table.TableSummary, b: table.TableSummary) => compareCounts(a.bytes, b.bytes),
-      render: (bytes: number) => <Text>{formatBytes(bytes)}</Text>,
+      sorter: (a: table.TableSummary, b: table.TableSummary, order?: SortOrder) => compareCounts(a.bytes, b.bytes, order),
+      render: (bytes?: number) => <Text>{formatBytes(bytes)}</Text>,
     },
     {
       title: "Owner",
       dataIndex: "owner",
       key: "owner",
       width: 120,
-      render: (owner: string) => <Tag style={{ fontSize: 10 }}>{owner}</Tag>,
+      // TABLE_OWNER is NULL for restricted or shared objects — flagged like an
+      // empty Comment, not rendered as a blank pill.
+      render: (owner: string) => owner ? (
+        <Tag style={{ fontSize: 10 }}>{owner}</Tag>
+      ) : (
+        <Text type="secondary" italic style={{ fontSize: 11, opacity: 0.5 }}>NULL</Text>
+      ),
     },
     {
       title: "Retention",
@@ -118,7 +130,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       width: 90,
       align: "center" as const,
       // NULL for views, which have no retention setting — "—", not a real "0 d".
-      render: (days: number) => <Text>{days < 0 ? "—" : `${days} d`}</Text>,
+      render: (days?: number) => <Text>{days === undefined ? "—" : `${days} d`}</Text>,
     },
     {
       title: "Created",
@@ -184,7 +196,12 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
           loading={loading}
           rowKey={(r) => `${r.schema}.${r.name}`}
           scroll={{ x: 1200, y: "60vh" }}
-          onChange={(_pagination, nextFilters) => setFilters(nextFilters)}
+          // onChange also fires for sorts and pagination, each time with a freshly
+          // allocated filters object — taking those would bust the memos below for
+          // no semantic change.
+          onChange={(_pagination, nextFilters, _sorter, { action }) => {
+            if (action === "filter") setFilters(nextFilters);
+          }}
           bordered
         />
       </Space>
