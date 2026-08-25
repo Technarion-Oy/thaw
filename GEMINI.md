@@ -140,7 +140,8 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 
 ### Database Reports
 - Cascading menu in sidebar for database nodes.
-- `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `internal/app/table.go`.
+- **Tables & Views…** (`ObjectSummariesModal`) fetches metadata for every table *and* view via `GetDatabaseTableSummary` in `internal/app/table.go` — the `INFORMATION_SCHEMA.TABLES` query carries no `TABLE_TYPE` restriction, and `IS_TRANSIENT` / `IS_DYNAMIC` / `IS_ICEBERG` / `IS_HYBRID` are folded into `Kind` for base tables only, since all four report `TABLE_TYPE = BASE TABLE` (#908).
+- Schema / type / empty-row filters are applied client side by `objectSummaryFilters.ts` (not antd's `onFilter`), so the rendered rows and the "Found N" caption come from one array. `ROW_COUNT` / `BYTES` / `RETENTION_TIME` are `NULL` whenever Snowflake keeps no statistics (views, freshly created or truncated tables) and project to a nil `*int64` — Wails exposes that as an optional `field?: number` — rendered as an em dash, sorted last, and matching neither row filter.
 - **Wails v2 Gotcha**: `time.Time` fields are formatted as RFC3339 strings in Go before being passed to the frontend to avoid "Not found: time.Time" build warnings and ensure clean TypeScript `any` -> `string` bindings.
 
 ### Insert Mapping

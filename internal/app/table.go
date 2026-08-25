@@ -8,8 +8,10 @@ import (
 	"thaw/internal/table"
 )
 
-// GetDatabaseTableSummary returns detailed information about all tables in the
-// specified database.
+// GetDatabaseTableSummary returns detailed information about every table *and
+// view* in the specified database — one row per INFORMATION_SCHEMA.TABLES entry,
+// so BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW and
+// MATERIALIZED VIEW are all included. The report filters them client side.
 func (a *App) GetDatabaseTableSummary(dbName string) ([]table.TableSummary, error) {
 	client := a.currentClient()
 	if client == nil {

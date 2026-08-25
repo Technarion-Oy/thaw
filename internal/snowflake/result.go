@@ -91,6 +91,18 @@ func CellInt64(v any) int64 {
 	return 0
 }
 
+// CellInt64Ptr converts a NULL-able numeric cell to an *int64, returning nil
+// for a SQL NULL so callers can tell "no value" apart from a real 0 — Snowflake
+// leaves ROW_COUNT / BYTES / RETENTION_TIME NULL for objects it keeps no
+// statistics for. Non-NULL values parse via CellInt64.
+func CellInt64Ptr(v any) *int64 {
+	if v == nil {
+		return nil
+	}
+	n := CellInt64(v)
+	return &n
+}
+
 // CellBool interprets a query-result cell value as a boolean. It returns true
 // for the common Snowflake truthy spellings: TRUE, YES, Y, ON, 1 (any case).
 func CellBool(v any) bool {

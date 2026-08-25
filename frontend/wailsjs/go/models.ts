@@ -6687,10 +6687,10 @@ export namespace table {
 	    name: string;
 	    schema: string;
 	    kind: string;
-	    rows: number;
-	    bytes: number;
+	    rows?: number;
+	    bytes?: number;
 	    owner: string;
-	    retentionTime: number;
+	    retentionTime?: number;
 	    created: string;
 	    lastAltered: string;
 	    comment: string;

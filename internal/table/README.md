@@ -6,8 +6,9 @@
 
 Provides four related capabilities for managing Snowflake tables:
 
-1. **Database-wide table summaries** — queries `INFORMATION_SCHEMA.TABLES` for all
-   physical tables in a database and parses the result into typed `TableSummary` rows.
+1. **Database-wide table & view summaries** — queries `INFORMATION_SCHEMA.TABLES` for
+   every table *and* view in a database and parses the result into typed
+   `TableSummary` rows (the **Reports → Tables & Views…** report).
 2. **Table settings retrieval** — reads the current values of modifiable table
    properties via `SHOW TABLES` (with a `SHOW PARAMETERS` fallback for
    `DEFAULT_DDL_COLLATION`) and returns a typed `TableSettings` struct.
@@ -35,11 +36,13 @@ Provides four related capabilities for managing Snowflake tables:
 type TableSummary struct {
     Name          string `json:"name"`
     Schema        string `json:"schema"`
-    Kind          string `json:"kind"`      // BASE TABLE, TRANSIENT, TEMPORARY
-    Rows          int64  `json:"rows"`
-    Bytes         int64  `json:"bytes"`
+    Kind          string `json:"kind"`      // BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE,
+                                        // EVENT TABLE, VIEW, MATERIALIZED VIEW, TRANSIENT,
+                                        // DYNAMIC TABLE, ICEBERG TABLE, HYBRID TABLE
+    Rows          *int64 `json:"rows,omitempty"`   // nil when Snowflake reports no count
+    Bytes         *int64 `json:"bytes,omitempty"`  // nil when Snowflake reports no count
     Owner         string `json:"owner"`
-    RetentionTime int    `json:"retentionTime"`
+    RetentionTime *int64 `json:"retentionTime,omitempty"` // nil when Snowflake reports none
     Created       string `json:"created"`   // RFC3339 string
     LastAltered   string `json:"lastAltered"` // RFC3339 string
     Comment       string `json:"comment"`
@@ -111,7 +114,7 @@ implicitly casts, and the statement keeps the `VALUES` form.
 | Function | Description |
 |----------|-------------|
 | `BuildInsertRowsSql(db, schema, tableName string, cfg InsertRowsConfig) (string, error)` | Builds a multi-row `INSERT INTO … (cols) VALUES (…), (…)`; always returns a nil error (IPC symmetry) |
-| `BuildDatabaseTableSummaryQuery(database string) string` | Returns `INFORMATION_SCHEMA.TABLES` SELECT for all physical tables |
+| `BuildDatabaseTableSummaryQuery(database string) string` | Returns the unfiltered `INFORMATION_SCHEMA.TABLES` SELECT (every table and view) |
 | `ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary` | Projects query result into `[]TableSummary` by positional column index |
 | `GetDatabaseTableSummary(ctx, client, database) ([]TableSummary, error)` | Convenience wrapper: build + query + parse |
 | `GetTableSettings(ctx, client, database, schema, tbl) (TableSettings, error)` | `SHOW TABLES LIKE '...' IN SCHEMA` + optional `SHOW PARAMETERS` fallback |
@@ -148,7 +151,34 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 
 ## Gotchas
 
-- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–9)
+- `TABLE_TYPE` has no transient value — transient-ness is the separate
+  `IS_TRANSIENT` column — so `ParseDatabaseTableSummary` folds `IS_TRANSIENT = YES`
+  into `Kind` as `TRANSIENT`, the way `SHOW TABLES` reports it — but only for a
+  `BASE TABLE`, so a transient temporary table keeps its `TEMPORARY TABLE` kind.
+  `IS_DYNAMIC` / `IS_ICEBERG` / `IS_HYBRID` work the same way (dynamic, iceberg and
+  hybrid tables all report `TABLE_TYPE = BASE TABLE`) and are folded in as
+  `DYNAMIC TABLE` / `ICEBERG TABLE` / `HYBRID TABLE`. The flags are not mutually
+  exclusive — a `CREATE DYNAMIC ICEBERG TABLE` sets both `IS_DYNAMIC` and
+  `IS_ICEBERG`, a dynamic table can be transient — so the first match wins, ordered
+  by behaviour over storage: dynamic, then iceberg / hybrid, then transient. A
+  dynamic iceberg table therefore reads as `DYNAMIC TABLE`. The query carries no
+  `TABLE_TYPE` restriction (an earlier `IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')`
+  filter matched only base tables and hid every view — issue #908); filtering is done
+  client side in the report.
+- `ROW_COUNT` / `BYTES` / `RETENTION_TIME` are `NULL` whenever Snowflake keeps no
+  statistics — for views, which have none, and for a freshly created or just
+  truncated table until they are recomputed. They project to a nil `*int64`, *not*
+  `0`, so the report can tell "empty" apart from "not known": the UI renders nil as
+  an em dash, sorts it last in both directions, and matches it against neither the
+  Empty nor the Non-empty filter. A nil `RetentionTime` likewise avoids reporting a
+  view as a deliberate 0-day retention.
+- `TABLE_OWNER` and `COMMENT` are `NULL`-able (restricted or shared objects), so
+  every string cell goes through `snowflake.CellString`, which maps `NULL` to `""`
+  rather than to Go's literal `"<nil>"` (the report flags an empty owner as `NULL`).
+  Numeric cells go through `snowflake.CellInt64Ptr`, which maps `NULL` to nil and
+  otherwise parses via `CellInt64` (so the exponential notation the driver can
+  return for a large `BYTES` / `ROW_COUNT` is handled too).
+- `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–13)
   rather than name lookup. If the `INFORMATION_SCHEMA.TABLES` column set ever
   changes, this parser will silently misread values. `GetTableSettings` uses a
   name-keyed map and is immune to this issue.

@@ -5,7 +5,6 @@ package table
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,11 +15,11 @@ import (
 type TableSummary struct {
 	Name          string `json:"name"`
 	Schema        string `json:"schema"`
-	Kind          string `json:"kind"` // BASE TABLE, VIEW, etc.
-	Rows          int64  `json:"rows"`
-	Bytes         int64  `json:"bytes"`
+	Kind          string `json:"kind"`            // BASE TABLE, VIEW, DYNAMIC TABLE, etc.
+	Rows          *int64 `json:"rows,omitempty"`  // nil when Snowflake reports no count
+	Bytes         *int64 `json:"bytes,omitempty"` // nil when Snowflake reports no count
 	Owner         string `json:"owner"`
-	RetentionTime int    `json:"retentionTime"`
+	RetentionTime *int64 `json:"retentionTime,omitempty"` // nil when Snowflake reports none
 	// Use string for Wails binding compatibility with time.Time
 	Created     string `json:"created"`
 	LastAltered string `json:"lastAltered"`
@@ -40,7 +39,13 @@ type TableSettings struct {
 }
 
 // BuildDatabaseTableSummaryQuery returns the INFORMATION_SCHEMA.TABLES query
-// that lists all physical tables in the given database.
+// that lists every table and view in the given database. TABLE_TYPE is one of
+// BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW or
+// MATERIALIZED VIEW — all of them are listed, and the report filters client
+// side. Transient, dynamic, iceberg and hybrid tables all report TABLE_TYPE =
+// BASE TABLE and are told apart only by the IS_* flags, so those are selected
+// too. ROW_COUNT / BYTES / RETENTION_TIME are NULL whenever Snowflake keeps no
+// statistics (views, and a freshly created or truncated table).
 func BuildDatabaseTableSummaryQuery(database string) string {
 	return fmt.Sprintf(`
 		SELECT
@@ -53,9 +58,12 @@ func BuildDatabaseTableSummaryQuery(database string) string {
 			RETENTION_TIME,
 			CREATED,
 			LAST_ALTERED,
-			COMMENT
+			COMMENT,
+			IS_TRANSIENT,
+			IS_DYNAMIC,
+			IS_ICEBERG,
+			IS_HYBRID
 		FROM %s.INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_TYPE IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')
 		ORDER BY TABLE_SCHEMA, TABLE_NAME
 	`, snowflake.QuoteIdent(database))
 }
@@ -68,25 +76,50 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 	}
 	var tables []TableSummary
 	for _, row := range res.Rows {
-		if len(row) < 10 {
+		// The query selects a fixed 14 columns; anything shorter is malformed.
+		if len(row) < 14 {
 			continue
 		}
 		t := TableSummary{
-			Name:   fmt.Sprintf("%v", row[0]),
-			Schema: fmt.Sprintf("%v", row[1]),
-			Kind:   fmt.Sprintf("%v", row[2]),
-			Owner:  fmt.Sprintf("%v", row[5]),
+			Name:    snowflake.CellString(row[0]),
+			Schema:  snowflake.CellString(row[1]),
+			Kind:    snowflake.CellString(row[2]),
+			Owner:   snowflake.CellString(row[5]),
+			Comment: snowflake.CellString(row[9]),
 		}
 
-		if row[9] != nil {
-			t.Comment = fmt.Sprintf("%v", row[9])
+		// Dynamic, iceberg, hybrid and transient tables all report TABLE_TYPE =
+		// BASE TABLE and are told apart only by their own flag, so fold the flag
+		// into Kind the way SHOW TABLES reports it. Only a BASE TABLE is
+		// reclassified: any other TABLE_TYPE keeps its own kind, so a transient
+		// temporary table is not mislabelled. The flags are not mutually exclusive
+		// — a dynamic iceberg table sets both, a dynamic table can be transient —
+		// so the first match wins and they are ordered by how the object behaves
+		// over what it is stored as: dynamic (auto-refreshing) beats iceberg /
+		// hybrid storage, which beats transient retention.
+		if strings.EqualFold(t.Kind, "BASE TABLE") {
+			for _, f := range []struct {
+				col  int
+				kind string
+			}{
+				{11, "DYNAMIC TABLE"},
+				{12, "ICEBERG TABLE"},
+				{13, "HYBRID TABLE"},
+				{10, "TRANSIENT"},
+			} {
+				if snowflake.CellBool(row[f.col]) {
+					t.Kind = f.kind
+					break
+				}
+			}
 		}
 
-		// Parsing numeric values
-		t.Rows, _ = strconv.ParseInt(fmt.Sprintf("%v", row[3]), 10, 64)
-		t.Bytes, _ = strconv.ParseInt(fmt.Sprintf("%v", row[4]), 10, 64)
-		retTime, _ := strconv.Atoi(fmt.Sprintf("%v", row[6]))
-		t.RetentionTime = retTime
+		// ROW_COUNT / BYTES / RETENTION_TIME are NULL whenever Snowflake keeps no
+		// statistics — for views, and for a freshly created or truncated table — so
+		// they stay nil rather than reading back as a real 0.
+		t.Rows = snowflake.CellInt64Ptr(row[3])
+		t.Bytes = snowflake.CellInt64Ptr(row[4])
+		t.RetentionTime = snowflake.CellInt64Ptr(row[6])
 
 		// Parsing times and converting to string for Wails compatibility
 		if row[7] != nil {
@@ -105,8 +138,8 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 	return tables
 }
 
-// GetDatabaseTableSummary returns detailed information about all tables in the
-// specified database.
+// GetDatabaseTableSummary returns detailed information about every table and
+// view in the specified database.
 func GetDatabaseTableSummary(ctx context.Context, client *snowflake.Client, database string) ([]TableSummary, error) {
 	res, err := client.QuerySingle(ctx, BuildDatabaseTableSummaryQuery(database))
 	if err != nil {

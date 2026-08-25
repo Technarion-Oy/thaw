@@ -4999,7 +4999,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram, undefined, !featureFlags.erDiagramDesigner, "ER Diagram & Designer is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "db" && menuItemSub("Reports", <BarChartOutlined style={{ fontSize: 12 }} />, "db-reports", (
             <>
-              {menuItem("Object Summaries", <DashboardOutlined style={{ fontSize: 12 }} />, openObjectSummaries)}
+              {menuItem("Tables & Views…", <DashboardOutlined style={{ fontSize: 12 }} />, openObjectSummaries)}
             </>
           ))}
           {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
@@ -5723,7 +5723,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         />
       )}
 
-      {/* Object Summaries modal */}
+      {/* Tables & Views report modal */}
       {objectSummariesModal && (
         <ObjectSummariesModal
           db={objectSummariesModal}
