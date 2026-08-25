@@ -537,8 +537,8 @@ Thaw ships as a **single self-contained binary** (no separate app runtime to ins
     - **Name & Schema**
     - **Type** — every `INFORMATION_SCHEMA.TABLES` type: BASE TABLE, TEMPORARY TABLE, EXTERNAL TABLE, EVENT TABLE, VIEW, MATERIALIZED VIEW, plus TRANSIENT (folded in from the separate `IS_TRANSIENT` flag)
     - **Owner** role
-    - **Row Count** and **Physical Size** (B, KB, MB, GB, TB) — shown as an em dash for views, which Snowflake reports no counts for
-    - **Time Travel Retention** (days)
+    - **Row Count** and **Physical Size** (B, KB, MB, GB, TB) — shown as an em dash for views, which Snowflake reports no counts for, and sorted after every known count
+    - **Time Travel Retention** (days) — an em dash for views, which have no retention setting
     - **Created On** and **Last Altered** timestamps
     - **Comment** description
     - **Column filters** — narrow the list by **schema** (funnel on Table Name), **type**, and **empty / non-empty** row count (views match neither, having no row count); filters combine, and the "Found N tables & views" caption tracks the filtered result

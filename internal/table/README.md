@@ -41,7 +41,7 @@ type TableSummary struct {
     Rows          int64  `json:"rows"`
     Bytes         int64  `json:"bytes"`
     Owner         string `json:"owner"`
-    RetentionTime int    `json:"retentionTime"`
+    RetentionTime int    `json:"retentionTime"` // UnknownCount when Snowflake reports none (views)
     Created       string `json:"created"`   // RFC3339 string
     LastAltered   string `json:"lastAltered"` // RFC3339 string
     Comment       string `json:"comment"`
@@ -160,10 +160,14 @@ are pure and unit-testable without a live connection. Only `GetDatabaseTableSumm
 - `ROW_COUNT` / `BYTES` are `NULL` for views, which have neither. They parse to
   `UnknownCount` (`-1`), *not* `0`, so the report can tell "empty" apart from "not
   applicable" — otherwise the Empty/Non-empty filter calls every view empty. The UI
-  renders `UnknownCount` as an em dash.
+  renders `UnknownCount` as an em dash and sorts it after every known count.
+  `RETENTION_TIME` is `NULL` for views too and gets the same sentinel, so a view is
+  not reported as a deliberate 0-day retention.
 - `TABLE_OWNER` and `COMMENT` are `NULL`-able (restricted or shared objects), so
-  every string cell goes through `cell()`, which maps `NULL` to `""` rather than to
-  Go's literal `"<nil>"`.
+  every string cell goes through `snowflake.CellString`, which maps `NULL` to `""`
+  rather than to Go's literal `"<nil>"`. Numeric cells go through `count()`, a thin
+  `NULL` → `UnknownCount` wrapper over `snowflake.CellInt64` (which also handles the
+  exponential notation the driver can return for large `BYTES` / `ROW_COUNT`).
 - `ParseDatabaseTableSummary` accesses columns by fixed positional index (0–10)
   rather than name lookup. If the `INFORMATION_SCHEMA.TABLES` column set ever
   changes, this parser will silently misread values. `GetTableSettings` uses a

@@ -5,7 +5,6 @@ package table
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +19,7 @@ type TableSummary struct {
 	Rows          int64  `json:"rows"`  // UnknownCount when Snowflake reports none (views)
 	Bytes         int64  `json:"bytes"` // UnknownCount when Snowflake reports none (views)
 	Owner         string `json:"owner"`
-	RetentionTime int    `json:"retentionTime"`
+	RetentionTime int    `json:"retentionTime"` // UnknownCount when Snowflake reports none (views)
 	// Use string for Wails binding compatibility with time.Time
 	Created     string `json:"created"`
 	LastAltered string `json:"lastAltered"`
@@ -68,25 +67,14 @@ func BuildDatabaseTableSummaryQuery(database string) string {
 // views. Distinct from 0, which means the object really is empty.
 const UnknownCount int64 = -1
 
-// cell renders a result cell as a string, mapping NULL to "" rather than to
-// Go's "<nil>". TABLE_OWNER and COMMENT are both NULL-able.
-func cell(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
-}
-
 // count parses a NULL-able numeric cell, returning UnknownCount for NULL.
+// Non-NULL values go through snowflake.CellInt64, which also handles the
+// exponential notation the driver can return for large BYTES / ROW_COUNT.
 func count(v interface{}) int64 {
 	if v == nil {
 		return UnknownCount
 	}
-	n, err := strconv.ParseInt(fmt.Sprintf("%v", v), 10, 64)
-	if err != nil {
-		return UnknownCount
-	}
-	return n
+	return snowflake.CellInt64(v)
 }
 
 // ParseDatabaseTableSummary projects a table-summary query result into
@@ -102,18 +90,18 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 			continue
 		}
 		t := TableSummary{
-			Name:    cell(row[0]),
-			Schema:  cell(row[1]),
-			Kind:    cell(row[2]),
-			Owner:   cell(row[5]),
-			Comment: cell(row[9]),
+			Name:    snowflake.CellString(row[0]),
+			Schema:  snowflake.CellString(row[1]),
+			Kind:    snowflake.CellString(row[2]),
+			Owner:   snowflake.CellString(row[5]),
+			Comment: snowflake.CellString(row[9]),
 		}
 
 		// Transient is not a TABLE_TYPE value — it is the separate IS_TRANSIENT
 		// flag — so fold it into Kind the way SHOW TABLES reports it. Only a
 		// BASE TABLE is reclassified: any other TABLE_TYPE keeps its own kind so
 		// a transient temporary table is not mislabelled.
-		if strings.EqualFold(t.Kind, "BASE TABLE") && strings.EqualFold(cell(row[10]), "YES") {
+		if strings.EqualFold(t.Kind, "BASE TABLE") && strings.EqualFold(snowflake.CellString(row[10]), "YES") {
 			t.Kind = "TRANSIENT"
 		}
 
@@ -122,8 +110,9 @@ func ParseDatabaseTableSummary(res *snowflake.QueryResult) []TableSummary {
 		// from "not applicable" rather than calling every view empty.
 		t.Rows = count(row[3])
 		t.Bytes = count(row[4])
-		retTime, _ := strconv.Atoi(cell(row[6]))
-		t.RetentionTime = retTime
+		// RETENTION_TIME is NULL for views too — same sentinel, so "not applicable"
+		// is not rendered as a deliberate 0-day retention.
+		t.RetentionTime = int(count(row[6]))
 
 		// Parsing times and converting to string for Wails compatibility
 		if row[7] != nil {

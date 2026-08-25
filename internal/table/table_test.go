@@ -75,9 +75,10 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 			"IS_TRANSIENT",
 		},
 		Rows: [][]interface{}{
-			{"T1", "PUBLIC", "BASE TABLE", int64(100), int64(4096), "SYSADMIN", 1, created, altered, "hi", "NO"},
+			// BYTES in exponential notation, as the driver can return it for large values.
+			{"T1", "PUBLIC", "BASE TABLE", int64(100), "4.096e+03", "SYSADMIN", 1, created, altered, "hi", "NO"},
 			{"T2", "PUBLIC", "BASE TABLE", int64(1), int64(8), "SYSADMIN", 1, created, altered, "", "YES"},
-			{"V1", "PUBLIC", "VIEW", nil, nil, nil, 0, created, altered, nil, "NO"},
+			{"V1", "PUBLIC", "VIEW", nil, nil, nil, nil, created, altered, nil, "NO"},
 			{"T3", "PUBLIC", "TEMPORARY TABLE", int64(2), int64(16), "SYSADMIN", 1, created, altered, "", "YES"},
 			{"too", "short"}, // skipped: fewer than the query's 11 columns
 		},
@@ -94,6 +95,9 @@ func TestParseDatabaseTableSummary(t *testing.T) {
 	// TABLE_OWNER / COMMENT as the literal "<nil>".
 	if tables[2].Kind != "VIEW" || tables[2].Rows != UnknownCount || tables[2].Bytes != UnknownCount {
 		t.Errorf("unexpected view projection: %+v", tables[2])
+	}
+	if tables[2].RetentionTime != int(UnknownCount) {
+		t.Errorf("expected NULL RETENTION_TIME to project as UnknownCount, got %d", tables[2].RetentionTime)
 	}
 	if tables[2].Owner != "" || tables[2].Comment != "" {
 		t.Errorf("expected NULL owner/comment to project as empty, got %+v", tables[2])

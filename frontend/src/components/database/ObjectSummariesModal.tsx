@@ -7,7 +7,7 @@ import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
 import type { table } from "../../../wailsjs/go/models";
 import type { FilterValue } from "antd/es/table/interface";
 import { KIND_VAR } from "../sidebar/objectIcons";
-import { KIND_FILTERS, ROW_FILTERS, schemaFilters, applyFilters, registryKind } from "./objectSummaryFilters";
+import { KIND_FILTERS, ROW_FILTERS, schemaFilters, applyFilters, registryKind, compareCounts } from "./objectSummaryFilters";
 
 const { Text } = Typography;
 
@@ -52,6 +52,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
   // Filtering is done here, not by antd, so the caption below can never disagree
   // with the rendered rows (an antd filter selection outlives a Reload).
   const rows = useMemo(() => applyFilters(data, filters), [data, filters]);
+  const schemaOptions = useMemo(() => schemaFilters(data), [data]);
 
   const columns = useMemo(() => [
     {
@@ -61,7 +62,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       fixed: "left" as const,
       width: 200,
       sorter: (a: table.TableSummary, b: table.TableSummary) => a.name.localeCompare(b.name),
-      filters: schemaFilters(data),
+      filters: schemaOptions,
       filteredValue: filters.name ?? null,
       render: (name: string, record: table.TableSummary) => (
         <Space direction="vertical" size={0}>
@@ -89,7 +90,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "rows",
       key: "rows",
       align: "right" as const,
-      sorter: (a: table.TableSummary, b: table.TableSummary) => a.rows - b.rows,
+      sorter: (a: table.TableSummary, b: table.TableSummary) => compareCounts(a.rows, b.rows),
       filters: ROW_FILTERS,
       filteredValue: filters.rows ?? null,
       // Snowflake reports no row count for views; "—" keeps that apart from 0.
@@ -100,7 +101,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "bytes",
       key: "bytes",
       align: "right" as const,
-      sorter: (a: table.TableSummary, b: table.TableSummary) => a.bytes - b.bytes,
+      sorter: (a: table.TableSummary, b: table.TableSummary) => compareCounts(a.bytes, b.bytes),
       render: (bytes: number) => <Text>{formatBytes(bytes)}</Text>,
     },
     {
@@ -116,7 +117,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       key: "retentionTime",
       width: 90,
       align: "center" as const,
-      render: (days: number) => <Text>{days} d</Text>,
+      // NULL for views, which have no retention setting — "—", not a real "0 d".
+      render: (days: number) => <Text>{days < 0 ? "—" : `${days} d`}</Text>,
     },
     {
       title: "Created",
@@ -143,7 +145,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
         <Text type="secondary" italic style={{ fontSize: 11, opacity: 0.5 }}>NULL</Text>
       ),
     },
-  ], [data, filters]);
+  ], [schemaOptions, filters]);
 
   return (
     <Modal

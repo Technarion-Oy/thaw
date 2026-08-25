@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { describe, it, expect } from "vitest";
-import { KIND_FILTERS, schemaFilters, matchesRowFilter, applyFilters, registryKind } from "./objectSummaryFilters";
+import { KIND_FILTERS, schemaFilters, matchesRowFilter, applyFilters, registryKind, compareCounts } from "./objectSummaryFilters";
 import { KIND_VAR } from "../sidebar/objectIcons";
 import { OBJECT_KINDS } from "../../generated/objectKinds";
 import type { table } from "../../../wailsjs/go/models";
@@ -84,6 +84,18 @@ describe("matchesRowFilter", () => {
   it("matches neither option when the count is unknown", () => {
     expect(matchesRowFilter("empty", -1)).toBe(false);
     expect(matchesRowFilter("nonempty", -1)).toBe(false);
+  });
+});
+
+describe("compareCounts", () => {
+  it("sorts unknown counts after every known value", () => {
+    expect([5, -1, 0, 2].sort(compareCounts)).toEqual([0, 2, 5, -1]);
+  });
+
+  it("orders known counts numerically", () => {
+    expect(compareCounts(1, 2)).toBeLessThan(0);
+    expect(compareCounts(2, 1)).toBeGreaterThan(0);
+    expect(compareCounts(-1, -1)).toBe(0);
   });
 });
 

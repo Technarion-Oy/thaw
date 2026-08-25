@@ -140,7 +140,8 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 
 ### Database Reports
 - Cascading menu in sidebar for database nodes.
-- `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `internal/app/table.go`.
+- **Tables & Views…** (`ObjectSummariesModal`) fetches metadata for every table *and* view via `GetDatabaseTableSummary` in `internal/app/table.go` — the `INFORMATION_SCHEMA.TABLES` query carries no `TABLE_TYPE` restriction, and `IS_TRANSIENT = YES` is folded into `Kind` as `TRANSIENT` for base tables only (#908).
+- Schema / type / empty-row filters are applied client side by `objectSummaryFilters.ts` (not antd's `onFilter`), so the rendered rows and the "Found N" caption come from one array. `ROW_COUNT` / `BYTES` / `RETENTION_TIME` are `NULL` for views and project to `table.UnknownCount` (`-1`), rendered as an em dash and matching neither row filter.
 - **Wails v2 Gotcha**: `time.Time` fields are formatted as RFC3339 strings in Go before being passed to the frontend to avoid "Not found: time.Time" build warnings and ensure clean TypeScript `any` -> `string` bindings.
 
 ### Insert Mapping

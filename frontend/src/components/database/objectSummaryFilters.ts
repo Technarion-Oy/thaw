@@ -62,6 +62,17 @@ export function matchesRowFilter(value: string, rows: number) {
   return value === "empty" ? rows === 0 : rows > 0;
 }
 
+/**
+ * Sorts the Rows / Size columns with `table.UnknownCount` (-1) after every known
+ * value ascending — antd flips it for descending — so a view, which the row
+ * filter treats as neither empty nor non-empty, never ranks below a genuinely
+ * empty table.
+ */
+export function compareCounts(a: number, b: number) {
+  if (a < 0 || b < 0) return (a < 0 ? 1 : 0) - (b < 0 ? 1 : 0);
+  return a - b;
+}
+
 /** Selected filter values per column key, as antd's Table `onChange` reports them. */
 export type SummaryFilters = Record<string, readonly (string | number | bigint | boolean)[] | null | undefined>;
 
