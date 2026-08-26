@@ -85,7 +85,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/leaanthony/slicer` | v1.6.0 | MIT |
 | `github.com/leaanthony/u` | v1.1.1 | MIT |
 | `github.com/mattn/go-ieproxy` | v0.0.12 | MIT |
-| `github.com/mattn/go-isatty` | v0.0.20 | MIT |
+| `github.com/mattn/go-isatty` | v0.0.22 | MIT |
 | `github.com/Microsoft/go-winio` | v0.6.2 | MIT |
 | `github.com/modelcontextprotocol/go-sdk` | v1.6.1 | Apache-2.0 |
 | `github.com/mtibben/percent` | v0.2.1 | MIT |
@@ -6529,7 +6529,7 @@ SOFTWARE.
 
 ### github.com/mattn/go-isatty
 
-- **Version:** v0.0.20
+- **Version:** v0.0.22
 - **License:** MIT
 
 ```
