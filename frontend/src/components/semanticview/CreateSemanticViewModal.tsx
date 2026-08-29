@@ -2,14 +2,26 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState } from "react";
-import { Form, Input, Checkbox, Alert, Typography } from "antd";
+import { useState, useEffect } from "react";
+import { Form, Input, InputNumber, Checkbox, Alert, Collapse, Typography } from "antd";
 import { ApartmentOutlined } from "@ant-design/icons";
-import { BuildCreateSemanticViewSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import {
+  BuildCreateSemanticViewSql, ExecDDL, ListDatabases,
+} from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
+import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
+import TagInput from "../shared/TagInput";
+import type { TagItem } from "../shared/TagInput";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
+import {
+  TablesSection, RelationshipsSection, ExpressionsSection, VerifiedQueriesSection,
+  useTableColumns, toLogicalTable,
+} from "./semanticViewForm";
+import type {
+  TableRow, SemRelationship, SemExpression, SemVerifiedQuery,
+} from "./semanticViewForm";
 import Editor from "@monaco-editor/react";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { useThemeStore } from "../../store/themeStore";
@@ -17,34 +29,8 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 
 const { Text } = Typography;
 
-// A skeleton of the semantic-view definition: logical TABLES, the
-// RELATIONSHIPS between them, and the FACTS / DIMENSIONS / METRICS that describe
-// the data. The clause order matters to Snowflake (FACTS before DIMENSIONS,
-// etc.), so the template lays them out in the required order for the user to
-// fill in rather than recall from scratch.
-const DEFAULT_BODY = `TABLES (
-    orders AS <database>.<schema>.orders
-      PRIMARY KEY (order_id)
-      WITH SYNONYMS = ('sales')
-      COMMENT = 'Order facts',
-    customers AS <database>.<schema>.customers
-      PRIMARY KEY (customer_id)
-  )
-  RELATIONSHIPS (
-    orders (customer_id) REFERENCES customers (customer_id)
-  )
-  FACTS (
-    orders.amount AS orders.amount
-  )
-  DIMENSIONS (
-    customers.region AS customers.region
-      WITH SYNONYMS = ('area'),
-    orders.order_date AS orders.order_date
-  )
-  METRICS (
-    orders.total_revenue AS SUM(orders.amount)
-      COMMENT = 'Total order revenue'
-  )`;
+// Snowflake's documented floor for MAX_STALENESS (seconds).
+const MIN_MAX_STALENESS = 120;
 
 interface Props {
   db: string;
@@ -53,6 +39,13 @@ interface Props {
   onSuccess?: () => void;
 }
 
+/**
+ * Form-driven CREATE SEMANTIC VIEW dialog. Each clause of the order-sensitive
+ * definition (TABLES → RELATIONSHIPS → FACTS → DIMENSIONS → METRICS) is its own
+ * section of pickers, and the builder — not the user — emits them in the order
+ * Snowflake requires. The raw-SQL editor under "Advanced" remains as an escape
+ * hatch: anything typed there replaces the whole structured definition.
+ */
 export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
   const editorTheme = resolved === "dark" ? "vs-dark" : "vs";
@@ -61,33 +54,74 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [orReplace, setOrReplace] = useState(false);
   const [ifNotExists, setIfNotExists] = useState(false);
-  const [body, setBody] = useState(DEFAULT_BODY);
+
+  const [tables, setTables] = useState<TableRow[]>([]);
+  const [relationships, setRelationships] = useState<SemRelationship[]>([]);
+  const [facts, setFacts] = useState<SemExpression[]>([]);
+  const [dimensions, setDimensions] = useState<SemExpression[]>([]);
+  const [metrics, setMetrics] = useState<SemExpression[]>([]);
+
   const [comment, setComment] = useState("");
+  const [maxStaleness, setMaxStaleness] = useState<number | null>(null);
+  const [aiSqlGeneration, setAiSqlGeneration] = useState("");
+  const [aiQuestionCategorization, setAiQuestionCategorization] = useState("");
+  const [verifiedQueries, setVerifiedQueries] = useState<SemVerifiedQuery[]>([]);
+  const [tags, setTags] = useState<TagItem[]>([]);
   const [copyGrants, setCopyGrants] = useState(false);
+  const [body, setBody] = useState("");
+
+  // A semantic view can reference tables and Cortex search services in any
+  // database, so the pickers get the full database list; the view's own db/schema
+  // only seed a new row.
+  const [dbOptions, setDbOptions] = useState<string[]>([db]);
+  useEffect(() => {
+    ListDatabases()
+      .then((d) => setDbOptions(d?.length ? d : [db]))
+      .catch(() => {});
+  }, [db]);
+
+  const columnsFor = useTableColumns(tables);
+
+  const cfg = {
+    name,
+    caseSensitive,
+    orReplace,
+    ifNotExists,
+    body,
+    tables: tables.map(toLogicalTable),
+    relationships,
+    facts,
+    dimensions,
+    metrics,
+    comment,
+    maxStaleness: maxStaleness ?? 0,
+    aiSqlGeneration,
+    aiQuestionCategorization,
+    verifiedQueries,
+    tags,
+    copyGrants,
+  };
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
-    () =>
-      BuildCreateSemanticViewSql(db, schema, {
-        name,
-        caseSensitive,
-        orReplace,
-        ifNotExists,
-        body,
-        comment,
-        copyGrants,
-      } as any),
-    [db, schema, name, caseSensitive, orReplace, ifNotExists, body, comment, copyGrants],
+    () => BuildCreateSemanticViewSql(db, schema, cfg as any),
+    [db, schema, JSON.stringify(cfg)],
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
-  // Block the untouched placeholder body (it contains literal <database>.<schema>
-  // tokens that would fail server-side), mirroring CreateViewModal's DEFAULT_QUERY
-  // guard.
-  const canSubmit =
-    name.trim().length > 0 &&
-    body.trim().length > 0 &&
-    body.trim() !== DEFAULT_BODY.trim();
+  // Dimension references for a metric's NON ADDITIVE BY picker.
+  const dimensionNames = dimensions
+    .filter((d) => d.name.trim())
+    .map((d) => (d.tableAlias ? `${d.tableAlias}.${d.name.trim()}` : d.name.trim()));
+
+  // Snowflake requires at least one dimension or metric, and the definition needs
+  // at least one logical table. The raw-SQL escape hatch bypasses both — its
+  // content is the definition, and the builder can't validate it.
+  const complete = (e: SemExpression) => e.name.trim().length > 0 && e.expr.trim().length > 0;
+  const structuredValid =
+    tables.some((t) => t.table.trim().length > 0) &&
+    (dimensions.some(complete) || metrics.some(complete));
+  const canSubmit = name.trim().length > 0 && (body.trim().length > 0 || structuredValid);
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -100,12 +134,97 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
 
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
+  const rawSqlBody = (
+    <>
+      <Alert
+        type={body.trim() ? "warning" : "info"}
+        showIcon
+        style={{ marginBottom: 8 }}
+        message={
+          body.trim()
+            ? "The raw definition below replaces the TABLES / RELATIONSHIPS / FACTS / DIMENSIONS / METRICS sections above. Clear it to go back to the form."
+            : "Escape hatch for anything the form doesn't cover. Anything typed here replaces the structured definition above; the clause order is then yours to get right."
+        }
+      />
+      <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+        <Editor
+          height={220}
+          language="sql"
+          theme={editorTheme}
+          value={body}
+          onChange={(v) => setBody(v ?? "")}
+          onMount={(editor) => {
+            patchMonacoClipboard(editor);
+            editor.onContextMenu(() => setActiveSnippetEditor(editor));
+            editor.onDidDispose(() => setActiveSnippetEditor(null));
+          }}
+          options={{
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            fontSize: 12,
+            wordWrap: "on",
+            automaticLayout: true,
+          }}
+        />
+      </div>
+    </>
+  );
+
+  const viewOptionsBody = (
+    <>
+      <Form.Item
+        label="MAX_STALENESS"
+        style={itemStyle}
+        help={`Seconds a cached result may lag behind the source. Minimum ${MIN_MAX_STALENESS}.`}
+      >
+        <InputNumber
+          min={MIN_MAX_STALENESS}
+          style={{ width: 200 }}
+          value={maxStaleness}
+          onChange={setMaxStaleness}
+          placeholder="not set"
+        />
+      </Form.Item>
+
+      <Form.Item label="AI_SQL_GENERATION" style={itemStyle}>
+        <Input.TextArea
+          value={aiSqlGeneration}
+          onChange={(e) => setAiSqlGeneration(e.target.value)}
+          placeholder="Instructions steering how Cortex Analyst writes SQL against this view"
+          autoSize={{ minRows: 1, maxRows: 3 }}
+        />
+      </Form.Item>
+
+      <Form.Item label="AI_QUESTION_CATEGORIZATION" style={itemStyle}>
+        <Input.TextArea
+          value={aiQuestionCategorization}
+          onChange={(e) => setAiQuestionCategorization(e.target.value)}
+          placeholder="Instructions for categorizing incoming questions"
+          autoSize={{ minRows: 1, maxRows: 3 }}
+        />
+      </Form.Item>
+
+      <VerifiedQueriesSection rows={verifiedQueries} onChange={setVerifiedQueries} />
+
+      <TagInput tags={tags} onChange={setTags} itemStyle={itemStyle} />
+
+      <Form.Item style={itemStyle}>
+        <Checkbox checked={copyGrants} onChange={(e) => setCopyGrants(e.target.checked)}>
+          COPY GRANTS
+        </Checkbox>
+        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+          Retain access grants from a replaced semantic view of the same name.
+        </Text>
+      </Form.Item>
+    </>
+  );
+
   return (
     <CreateModalShell
       icon={<ApartmentOutlined />}
       title="Create Semantic View"
       subtitle={`${db}.${schema}`}
-      width={760}
+      width={980}
       error={error}
       errorTitle="Semantic view creation failed"
       onErrorClose={() => setError(null)}
@@ -119,32 +238,19 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="A semantic view defines a semantic layer over physical tables for natural-language querying with Cortex Analyst. Define the logical TABLES, the RELATIONSHIPS between them, and the FACTS / DIMENSIONS / METRICS below — the clause order matters (FACTS before DIMENSIONS, etc.)."
+          message="A semantic view defines a semantic layer over physical tables for natural-language querying with Cortex Analyst. Add the logical tables, the relationships between them, and the facts / dimensions / metrics that describe the data — the clauses are emitted in the order Snowflake requires. At least one dimension or metric is required."
         />
 
-        {/* OR REPLACE and IF NOT EXISTS are mutually exclusive in Snowflake;
-            selecting one clears the other. */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Semantic view name" required style={{ marginBottom: 4 }}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="MY_SEMANTIC_VIEW" />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Checkbox
-              checked={orReplace}
-              onChange={(e) => { setOrReplace(e.target.checked); if (e.target.checked) setIfNotExists(false); }}
-            >
-              OR REPLACE
-            </Checkbox>
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 4 }}>
-            <Checkbox
-              checked={ifNotExists}
-              onChange={(e) => { setIfNotExists(e.target.checked); if (e.target.checked) setOrReplace(false); }}
-            >
-              IF NOT EXISTS
-            </Checkbox>
-          </Form.Item>
-        </div>
+        <NameWithReplaceOptions
+          label="Semantic view name"
+          placeholder="MY_SEMANTIC_VIEW"
+          name={name}
+          onNameChange={setName}
+          orReplace={orReplace}
+          ifNotExists={ifNotExists}
+          onOrReplaceChange={setOrReplace}
+          onIfNotExistsChange={setIfNotExists}
+        />
 
         <Form.Item style={itemStyle}>
           <ObjectNameCaseControl
@@ -153,30 +259,6 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
             onCaseSensitiveChange={setCaseSensitive}
             quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
           />
-        </Form.Item>
-
-        <Form.Item label="Definition" required style={itemStyle} help="TABLES → RELATIONSHIPS → FACTS → DIMENSIONS → METRICS (emitted verbatim, in this order).">
-          <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-            <Editor
-              height={320}
-              language="sql"
-              theme={editorTheme}
-              value={body}
-              onChange={(v) => setBody(v ?? "")}
-              onMount={(editor) => {
-                patchMonacoClipboard(editor);
-                editor.onContextMenu(() => setActiveSnippetEditor(editor));
-                editor.onDidDispose(() => setActiveSnippetEditor(null));
-              }}
-              options={{
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fontSize: 12,
-                wordWrap: "on",
-                automaticLayout: true,
-              }}
-            />
-          </div>
         </Form.Item>
 
         <Form.Item label="Comment" style={itemStyle}>
@@ -188,14 +270,48 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
           />
         </Form.Item>
 
-        <Form.Item style={itemStyle}>
-          <Checkbox checked={copyGrants} onChange={(e) => setCopyGrants(e.target.checked)}>
-            COPY GRANTS
-          </Checkbox>
-          <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
-            Retain access grants from a replaced semantic view of the same name.
-          </Text>
-        </Form.Item>
+        <TablesSection
+          dbOptions={dbOptions}
+          defaultDb={db}
+          defaultSchema={schema}
+          rows={tables}
+          onChange={setTables}
+          columnsFor={columnsFor}
+        />
+
+        <RelationshipsSection
+          rows={relationships}
+          tables={tables}
+          onChange={setRelationships}
+          columnsFor={columnsFor}
+        />
+
+        {([
+          ["FACTS", facts, setFacts],
+          ["DIMENSIONS", dimensions, setDimensions],
+          ["METRICS", metrics, setMetrics],
+        ] as const).map(([kind, rows, setRows]) => (
+          <ExpressionsSection
+            key={kind}
+            kind={kind}
+            rows={rows}
+            tables={tables}
+            relationships={relationships}
+            dimensionNames={dimensionNames}
+            dbOptions={dbOptions}
+            onChange={setRows}
+          />
+        ))}
+
+        <Collapse
+          ghost
+          size="small"
+          style={{ marginBottom: 8 }}
+          items={[
+            { key: "options", label: "View options", children: viewOptionsBody },
+            { key: "raw", label: "Advanced — raw SQL definition", children: rawSqlBody },
+          ]}
+        />
 
         <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
           ALTER only changes the comment, tags, or name — change the definition with “OR REPLACE”. Semantic views require Cortex AI to be enabled in your account.

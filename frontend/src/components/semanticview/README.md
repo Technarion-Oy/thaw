@@ -9,11 +9,37 @@ describe the data.
 
 ## Components
 
-- **`CreateSemanticViewModal.tsx`** — name + `OR REPLACE` / `IF NOT EXISTS`
-  (mutually exclusive) + case control + a Monaco SQL editor for the definition
-  body (`TABLES` → `RELATIONSHIPS` → `FACTS` → `DIMENSIONS` → `METRICS`, in that
-  required order) + an optional comment + a `COPY GRANTS` checkbox. Calls
-  `BuildCreateSemanticViewSql` for the live preview and `ExecDDL` to run it.
+- **`CreateSemanticViewModal.tsx`** — form-driven `CREATE SEMANTIC VIEW`: name +
+  `OR REPLACE` / `IF NOT EXISTS` (mutually exclusive) + case control + comment,
+  then one section per definition clause (`TABLES`, `RELATIONSHIPS`, `FACTS`,
+  `DIMENSIONS`, `METRICS`) built from pickers, a **View options** panel
+  (`MAX_STALENESS`, `AI_SQL_GENERATION`, `AI_QUESTION_CATEGORIZATION`,
+  `AI_VERIFIED_QUERIES`, tags, `COPY GRANTS`), and an **Advanced — raw SQL
+  definition** panel holding the original Monaco editor as an escape hatch
+  (anything typed there replaces the structured definition). Create is disabled
+  until the view has a name, a logical table, and at least one dimension or
+  metric — Snowflake's rule. Calls `BuildCreateSemanticViewSql` for the live
+  preview and `ExecDDL` to run it; the builder, not the user, emits the clauses
+  in the order Snowflake requires.
+- **`semanticViewForm.tsx`** — the section editors behind that modal:
+  `TablesSection` (database → schema → table picker per row — a semantic view
+  may reference tables in **any** database, so each row carries its own; the
+  view's own db/schema only seed a new row — plus alias, `PRIMARY KEY` /
+  `UNIQUE` column multi-selects, synonyms, comment, tags, and the preview-only
+  `CONSTRAINT … DISTINCT RANGE` bounds), `RelationshipsSection` (alias →
+  columns → `REFERENCES` alias, with the referenced columns constrained to the
+  target's declared keys, and a standard / `ASOF` / `BETWEEN … EXCLUSIVE` join
+  dropdown), `ExpressionsSection` (one component for facts, dimensions and
+  metrics — the `kind` prop gates visibility, `LABELS = (FILTER)`, `USING` /
+  `NON ADDITIVE BY`, and the Cortex Search binding), and
+  `VerifiedQueriesSection`. `useTableColumns` fetches and caches each picked
+  table's columns (`GetTableColumns`), keyed by the full
+  `database.schema.table` path so rows in different databases don't collide;
+  `toLogicalTable` turns a form row into the builder's quoted 3-part reference.
+- **`semanticViewNames.ts`** — `quoteFqn` / `parseQuotedFqn`, the quoted
+  `"db"."schema"."name"` round-trip behind the table and Cortex Search pickers
+  (the Go builder emits those references verbatim). Covered by
+  `semanticViewNames.test.ts`.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /

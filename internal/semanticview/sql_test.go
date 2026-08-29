@@ -5,6 +5,8 @@ package semanticview
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateSemanticViewSql(t *testing.T) {
@@ -17,6 +19,9 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 		cfg      SemanticViewConfig
 		contains []string
 		absent   []string
+		// order asserts the listed substrings appear in this relative order —
+		// CREATE SEMANTIC VIEW rejects a body whose clauses are out of sequence.
+		order []string
 	}{
 		{
 			name:   "basic with body and comment",
@@ -103,6 +108,177 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 			},
 			contains: []string{"COMMENT = 'it''s fine'"},
 		},
+		{
+			name:   "structured clauses render in the required order",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name: "sales",
+				Tables: []LogicalTable{
+					{
+						Alias:      "orders",
+						Name:       `"DB"."SC"."ORDERS"`,
+						PrimaryKey: []string{"order_id"},
+						Unique:     []string{"external_id"},
+						Synonyms:   []string{"sales", "purchases"},
+						Comment:    "Order facts",
+						Tags:       []snowflake.TagPair{{Name: "domain", Value: "sales"}},
+					},
+					{Alias: "customers", Name: `"DB"."SC"."CUSTOMERS"`, PrimaryKey: []string{"customer_id"}},
+				},
+				Relationships: []Relationship{
+					{Name: "orders_to_customers", Table: "orders", Columns: []string{"customer_id"}, RefTable: "customers", RefColumns: []string{"customer_id"}},
+				},
+				Facts: []Expression{
+					{TableAlias: "orders", Name: "amount", Expr: "orders.amount", Visibility: "PRIVATE", FilterLabel: true},
+				},
+				Dimensions: []Expression{
+					{TableAlias: "customers", Name: "region", Expr: "customers.region", CortexSearchService: `"DB"."SC"."REGION_SEARCH"`, CortexSearchColumn: "region"},
+				},
+				Metrics: []Expression{
+					{TableAlias: "orders", Name: "revenue", Expr: "SUM(orders.amount)", Visibility: "PUBLIC"},
+				},
+			},
+			contains: []string{
+				`orders AS "DB"."SC"."ORDERS" PRIMARY KEY (order_id) UNIQUE (external_id) WITH SYNONYMS = ('sales', 'purchases') COMMENT = 'Order facts' WITH TAG ("domain" = 'sales')`,
+				"orders_to_customers AS orders (customer_id) REFERENCES customers (customer_id)",
+				"PRIVATE orders.amount LABELS = (FILTER) AS orders.amount",
+				`customers.region AS customers.region WITH CORTEX SEARCH SERVICE "DB"."SC"."REGION_SEARCH" USING region`,
+				"PUBLIC orders.revenue AS SUM(orders.amount)",
+			},
+			// The placeholder body must not leak once real tables are supplied.
+			absent: []string{"my_table AS"},
+			order: []string{
+				"TABLES (", "RELATIONSHIPS (", "FACTS (", "DIMENSIONS (", "METRICS (",
+			},
+		},
+		{
+			name:   "raw body overrides the structured clauses",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:       "sales",
+				Body:       body,
+				Tables:     []LogicalTable{{Alias: "ignored", Name: `"DB"."SC"."IGNORED"`}},
+				Dimensions: []Expression{{TableAlias: "ignored", Name: "d", Expr: "1"}},
+			},
+			contains: []string{"orders AS DB.SC.ORDERS"},
+			absent:   []string{"IGNORED", "DIMENSIONS ("},
+		},
+		{
+			name:   "incomplete rows are dropped rather than emitted",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}, {Alias: "no_table"}},
+				// Missing RefTable / source columns / expression respectively.
+				Relationships: []Relationship{{Table: "orders", Columns: []string{"customer_id"}}},
+				Metrics:       []Expression{{TableAlias: "orders", Name: "revenue"}},
+			},
+			contains: []string{"orders AS"},
+			absent:   []string{"no_table", "RELATIONSHIPS (", "METRICS ("},
+		},
+		{
+			name:   "preview join types and distinct range",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name: "sales",
+				Tables: []LogicalTable{{
+					Alias: "rates", Name: `"DB"."SC"."RATES"`,
+					ConstraintName: "rate_range", RangeStart: "valid_from", RangeEnd: "valid_to",
+				}},
+				Relationships: []Relationship{
+					{Table: "orders", Columns: []string{"ts"}, RefTable: "rates", RefColumns: []string{"ts"}, JoinType: "ASOF"},
+					{Table: "orders", Columns: []string{"ts"}, RefTable: "rates", JoinType: "BETWEEN", RangeStart: "valid_from", RangeEnd: "valid_to"},
+				},
+			},
+			contains: []string{
+				"CONSTRAINT rate_range DISTINCT RANGE BETWEEN valid_from AND valid_to EXCLUSIVE",
+				"orders (ts) REFERENCES rates (ASOF ts)",
+				"orders (ts) REFERENCES rates (BETWEEN valid_from AND valid_to EXCLUSIVE)",
+			},
+		},
+		{
+			name:   "metric using and non additive by",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				Metrics: []Expression{{
+					TableAlias:    "orders",
+					Name:          "balance",
+					Expr:          "SUM(orders.amount)",
+					Using:         []string{"orders_to_customers"},
+					NonAdditiveBy: []NonAdditiveDim{{Dimension: "orders.order_date", Direction: "DESC", Nulls: "LAST"}},
+				}},
+			},
+			contains: []string{
+				"orders.balance USING (orders_to_customers) NON ADDITIVE BY (orders.order_date DESC NULLS LAST) AS SUM(orders.amount)",
+			},
+		},
+		{
+			name:   "dimension private is dropped, window metric expression passes through",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:       "sales",
+				Tables:     []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				Dimensions: []Expression{{TableAlias: "orders", Name: "order_date", Expr: "orders.order_date", Visibility: "PRIVATE"}},
+				Metrics: []Expression{{
+					TableAlias: "orders", Name: "running_total",
+					Expr: "SUM(orders.amount) OVER (PARTITION BY orders.region ORDER BY orders.order_date)",
+				}},
+			},
+			contains: []string{
+				"SUM(orders.amount) OVER (PARTITION BY orders.region ORDER BY orders.order_date)",
+			},
+			absent: []string{"PRIVATE"},
+		},
+		{
+			name:   "view level options",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:                     "sales",
+				Tables:                   []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				MaxStaleness:             120,
+				AISqlGeneration:          "prefer joins",
+				AIQuestionCategorization: "route billing questions",
+				VerifiedQueries: []VerifiedQuery{{
+					Name:               "top_regions",
+					Question:           "What are the top regions?",
+					VerifiedAt:         "1715120000",
+					OnboardingQuestion: true,
+					VerifiedBy:         "( analyst = jane )",
+					Sql:                "SELECT * FROM SEMANTIC_VIEW(sales METRICS revenue)",
+				}},
+				Tags:       []snowflake.TagPair{{Name: "tier", Value: "gold"}},
+				CopyGrants: true,
+			},
+			contains: []string{
+				"MAX_STALENESS = 120",
+				"AI_SQL_GENERATION 'prefer joins'",
+				"AI_QUESTION_CATEGORIZATION 'route billing questions'",
+				"AI_VERIFIED_QUERIES (",
+				`top_regions AS (QUESTION 'What are the top regions?' VERIFIED_AT 1715120000 ONBOARDING_QUESTION TRUE VERIFIED_BY '( analyst = jane )' SQL 'SELECT * FROM SEMANTIC_VIEW(sales METRICS revenue)')`,
+				`WITH TAG ("tier" = 'gold')`,
+				"COPY GRANTS",
+			},
+		},
+		{
+			name:   "incomplete verified query is dropped",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:            "sales",
+				Tables:          []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				VerifiedQueries: []VerifiedQuery{{Name: "no_sql", Question: "What?"}},
+			},
+			absent: []string{"AI_VERIFIED_QUERIES"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +299,18 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 				if strings.Contains(sql, no) {
 					t.Errorf("expected SQL NOT to contain %q, got:\n%s", no, sql)
 				}
+			}
+			prev := -1
+			for _, want := range tt.order {
+				at := strings.Index(sql, want)
+				if at < 0 {
+					t.Errorf("expected SQL to contain %q, got:\n%s", want, sql)
+					continue
+				}
+				if at < prev {
+					t.Errorf("expected %q to come after the preceding clause, got:\n%s", want, sql)
+				}
+				prev = at
 			}
 		})
 	}
