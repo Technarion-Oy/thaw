@@ -2,8 +2,10 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  diffAliases, hasAliasChange, remapAlias, remapQualified,
+  diffAliases, hasAliasChange, remapAlias, remapQualified, swappedAliases,
 } from "./semanticViewAliases";
+
+const row = (alias: string, table: string) => ({ alias, table });
 
 describe("diffAliases", () => {
   it("reports no change when the aliases are untouched", () => {
@@ -86,5 +88,40 @@ describe("remapQualified", () => {
 
   it("treats a dotless reference as a bare alias", () => {
     expect(remapQualified("orders", renamed)).toBe("sales");
+  });
+});
+
+describe("swappedAliases", () => {
+  it("reports a row re-pointed at another table", () => {
+    expect(swappedAliases(
+      [row("orders", "DB.SC.ORDERS")],
+      [row("orders", "DB.SC.ORDERS_V2")],
+    )).toEqual(["orders"]);
+  });
+
+  it("reports it under the new alias when the alias was auto-reseeded", () => {
+    // Picking a new table reseeds an untouched alias, so alias and table change
+    // together — the case a rename-only check misses.
+    expect(swappedAliases(
+      [row("ORDERS", "DB.SC.ORDERS")],
+      [row("ORDERS_V2", "DB.SC.ORDERS_V2")],
+    )).toEqual(["ORDERS_V2"]);
+  });
+
+  it("reports nothing when only the alias was edited", () => {
+    expect(swappedAliases(
+      [row("orders", "DB.SC.ORDERS")],
+      [row("sales", "DB.SC.ORDERS")],
+    )).toEqual([]);
+  });
+
+  it("reports nothing when a row was added or deleted", () => {
+    const before = [row("orders", "DB.SC.ORDERS"), row("customers", "DB.SC.CUSTOMERS")];
+    expect(swappedAliases(before, [before[1]])).toEqual([]);
+    expect(swappedAliases(before, [...before, row("", "")])).toEqual([]);
+  });
+
+  it("ignores a row with no alias yet", () => {
+    expect(swappedAliases([row("", "")], [row("", "DB.SC.ORDERS")])).toEqual([]);
   });
 });

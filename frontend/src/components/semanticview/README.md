@@ -58,7 +58,7 @@ describe the data.
   lets every cascade be a fully controlled component with no local state to
   fall out of step with its row.
 - **`semanticViewAliases.ts`** — `diffAliases` / `remapAlias` /
-  `remapQualified`. The other sections refer to logical tables by alias — a
+  `remapQualified` / `swappedAliases`. The other sections refer to logical tables by alias — a
   copied string, not a live reference — so renaming or deleting a table row
   would leave them pointing at an alias that no longer exists in
   `TABLES ( … )`, which neither the preview nor the builder can catch (the SQL
@@ -69,9 +69,12 @@ describe the data.
   remapping would silently repoint the row the user didn't touch. The same
   diffing runs over two more reference kinds a metric copies by string: the
   relationship names its `USING` holds, and the `alias.name` its
-  `NON ADDITIVE BY` holds. And because an alias can stay while the table under
-  it is swapped, the modal also clears column picks made against the table that
-  row no longer points at. Covered by `semanticViewAliases.test.ts`.
+  `NON ADDITIVE BY` holds. Re-pointing a row at a different table is tracked
+  separately by `swappedAliases`, because it isn't a rename — columns picked
+  against the old table don't carry over, so they are cleared. It compares table
+  identity rather than alias: picking a new table also reseeds an untouched
+  alias, so the two change together and an alias-based check would miss the
+  ordinary case. Covered by `semanticViewAliases.test.ts`.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /

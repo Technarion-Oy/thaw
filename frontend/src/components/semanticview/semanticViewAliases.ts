@@ -63,6 +63,36 @@ export function diffAliases(prev: string[], next: string[]): AliasDiff {
   return { renames, removed };
 }
 
+/** A table row reduced to what reference-tracking needs: its alias and its
+ * physical table. */
+export interface TableIdentity {
+  alias: string;
+  /** Something that identifies the physical table — a qualified name. */
+  table: string;
+}
+
+/**
+ * The aliases whose row now points at a *different* physical table, named by
+ * the alias they carry **after** the edit (references are remapped to the new
+ * alias first, so that is what a caller matches against).
+ *
+ * Deliberately independent of the alias: picking a new table for a row whose
+ * alias was auto-seeded from the old table name rewrites both in one edit, so
+ * requiring the alias to be unchanged would miss the ordinary case. A swap is
+ * not a rename — columns picked against the old table don't carry over, they
+ * have to be cleared.
+ *
+ * Only a same-length edit aligns row-for-row; an add or delete shifts the
+ * indices, so nothing can be compared and nothing is reported.
+ */
+export function swappedAliases(prev: TableIdentity[], next: TableIdentity[]): string[] {
+  if (prev.length !== next.length) return [];
+  return next
+    .filter((r, i) => prev[i].table !== r.table)
+    .map((r) => r.alias)
+    .filter(Boolean);
+}
+
 /** Maps one alias reference through a diff — "" when the alias is gone. */
 export function remapAlias(alias: string, diff: AliasDiff): string {
   if (!alias) return "";

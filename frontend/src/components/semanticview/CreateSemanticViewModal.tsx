@@ -24,7 +24,7 @@ import type {
   TableRow, SemRelationship, ExpressionRow, SemVerifiedQuery,
 } from "./semanticViewForm";
 import {
-  diffAliases, hasAliasChange, remapAlias, remapQualified,
+  diffAliases, hasAliasChange, remapAlias, remapQualified, swappedAliases,
 } from "./semanticViewAliases";
 import Editor from "@monaco-editor/react";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
@@ -96,18 +96,15 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   // alias that no longer exists in TABLES ( … ), which only fails once Snowflake
   // runs the statement.
   const updateTables = (next: TableRow[]) => {
+    const identities = (rows: TableRow[]) =>
+      rows.map((r) => ({ alias: aliasOf(r), table: tableKey(r) }));
     const diff = diffAliases(tables.map(aliasOf), next.map(aliasOf));
-    // An alias kept while its underlying table is swapped is not a rename, but
-    // the column picks of rows referencing it now point at a different table's
-    // columns. Clear them rather than leave a join silently pointing at columns
-    // that may not exist on the new table.
-    // Only a same-length edit aligns row-for-row; an add or delete shifts the
-    // indices, and there the row identities can't be compared this way.
-    const swapped = new Set(
-      tables.length !== next.length ? [] : next
-        .filter((r, i) => aliasOf(tables[i]) === aliasOf(r) && tableKey(tables[i]) !== tableKey(r))
-        .map(aliasOf),
-    );
+    // Re-pointing a row at a different table is not a rename: columns picked
+    // against the old table don't carry over, so clear them rather than leave a
+    // join silently referencing columns the new table may not have. The alias
+    // usually changes at the same time (it is auto-seeded from the table name),
+    // so this is tracked by table identity, not by alias.
+    const swapped = new Set(swappedAliases(identities(tables), identities(next)));
     setTables(next);
     if (!hasAliasChange(diff) && swapped.size === 0) return;
     setRelationships((rs) => rs.map((r) => {
