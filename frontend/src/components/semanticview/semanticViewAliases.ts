@@ -33,26 +33,33 @@ export function hasAliasChange(diff: AliasDiff): boolean {
 /**
  * Diffs the alias list before and after an edit to the `TABLES` rows.
  *
- * A same-length list means the rows were edited in place, so the aliases are
- * compared position-wise and a changed one is a rename. A different length
- * means a row was added or deleted, where position-wise comparison would be
- * meaningless — there, any alias that is simply gone counts as removed.
- * Blank aliases (a row whose table isn't picked yet) are never references.
+ * Only an alias that has *disappeared* is interesting: one still present
+ * somewhere in the new list keeps resolving, whichever row now carries it. A
+ * same-length list means the rows were edited in place, so the row at the same
+ * position holds the replacement — that is a rename; any other length means a
+ * row was added or deleted, where position-wise comparison is meaningless, so
+ * the alias counts as removed.
+ *
+ * Because a reference is a bare alias string, an alias used by two rows at once
+ * cannot be attributed to either — remapping it would silently repoint rows
+ * belonging to the row the user did *not* touch. Duplicated aliases are
+ * therefore left alone; the stale value stays visible in its dropdown for the
+ * user to correct. Blank aliases (a row whose table isn't picked yet) are never
+ * references.
  */
 export function diffAliases(prev: string[], next: string[]): AliasDiff {
   const renames: Record<string, string> = {};
   const removed: string[] = [];
+  const sameLength = prev.length === next.length;
 
-  if (prev.length === next.length) {
-    prev.forEach((old, i) => {
-      if (old && next[i] && old !== next[i]) renames[old] = next[i];
-      else if (old && !next[i]) removed.push(old);
-    });
-  } else {
-    for (const old of prev) {
-      if (old && !next.includes(old)) removed.push(old);
-    }
-  }
+  prev.forEach((old, i) => {
+    if (!old) return;
+    if (next.includes(old)) return;
+    if (prev.filter((a) => a === old).length > 1) return;
+    const replacement = sameLength ? next[i] : "";
+    if (replacement) renames[old] = replacement;
+    else removed.push(old);
+  });
   return { renames, removed };
 }
 

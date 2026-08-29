@@ -105,32 +105,52 @@ export const toLogicalTable = (r: TableRow): SemTable => ({
 const colKey = (r: TableRow) => (r.db && r.schema && r.table ? quoteFqn(r.db, r.schema, r.table) : "");
 
 /**
+ * A keyed, fetch-once cache: `ensure(key, …)` runs the fetcher the first time a
+ * key is asked for and stores the result under it. A failed fetch forgets its
+ * key, so a transient error can be retried on a later render rather than
+ * leaving the caller looking at an empty list for the life of the modal.
+ *
+ * Both caches in this form are built on it — the per-table column lists and the
+ * shared schema/object lists — so the caching and retry policy lives in one
+ * place instead of being reimplemented per lookup.
+ */
+function useKeyedFetch<T>() {
+  const [values, setValues] = useState<Record<string, T>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const requested = useRef<Set<string>>(new Set());
+
+  const ensure = useCallback((key: string, fetcher: () => Promise<T>) => {
+    if (!key || requested.current.has(key)) return;
+    requested.current.add(key);
+    setLoading((l) => ({ ...l, [key]: true }));
+    fetcher()
+      .then((v) => setValues((c) => ({ ...c, [key]: v })))
+      .catch(() => requested.current.delete(key))
+      .finally(() => setLoading((l) => ({ ...l, [key]: false })));
+  }, []);
+
+  return { values, loading, ensure };
+}
+
+/**
  * Fetches and caches the column list of every picked logical table, so the
  * PRIMARY KEY / UNIQUE / relationship pickers can offer real columns. Each
  * table is fetched at most once per modal instance, keyed by its full
  * database.schema.table path (rows may point at different databases).
  */
 export function useTableColumns(rows: TableRow[]) {
-  const [cache, setCache] = useState<Record<string, string[]>>({});
-  const requested = useRef<Set<string>>(new Set());
+  const { values, ensure } = useKeyedFetch<string[]>();
 
   useEffect(() => {
     for (const r of rows) {
-      const key = colKey(r);
-      if (!key || requested.current.has(key)) continue;
-      requested.current.add(key);
-      GetTableColumns(r.db, r.schema, r.table)
-        .then((cols) => setCache((c) => ({ ...c, [key]: cols ?? [] })))
-        // Forget the key on failure, so a transient error doesn't leave this
-        // table's column pickers empty for the rest of the modal's life.
-        .catch(() => requested.current.delete(key));
+      ensure(colKey(r), () => GetTableColumns(r.db, r.schema, r.table).then((c) => c ?? []));
     }
-  }, [rows]);
+  }, [ensure, rows]);
 
   /** Columns of the row with this alias (empty until the fetch resolves). */
   return (alias: string): string[] => {
     const row = rows.find((r) => aliasOf(r) === alias);
-    return row ? cache[colKey(row)] ?? [] : [];
+    return row ? values[colKey(row)] ?? [] : [];
   };
 }
 
@@ -141,52 +161,45 @@ const patchAt = <T,>(rows: T[], i: number, next: Partial<T>): T[] =>
 /** Immutably drops row `i`. */
 const removeAt = <T,>(rows: T[], i: number): T[] => rows.filter((_, idx) => idx !== i);
 
-const objKey = (db: string, schema: string) => JSON.stringify([db, schema]);
+const schemaKey = (db: string) => JSON.stringify(["schemas", db]);
+const objKey = (db: string, schema: string) => JSON.stringify(["objects", db, schema]);
+
+// Object kinds a semantic view can name as a logical table — the same
+// "table-like" set the model-monitor source picker offers.
+const TABLE_KINDS = [
+  "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
+  "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
+];
 
 /**
  * One shared schema/object cache for every `ObjectPicker` in the modal. Without
  * it each picker fetches independently, so five logical tables in the same
  * schema mean five identical `ListUserSchemas` and `ListObjects` round-trips.
- * Each database and each database.schema is fetched at most once — and, as in
- * `useTableColumns`, a failed fetch forgets its key so it can be retried rather
- * than leaving the picker permanently empty.
+ * Schemas and objects share one `useKeyedFetch`; the key prefixes keep the two
+ * lookups apart.
  */
 export function useObjectCache() {
-  const [schemas, setSchemas] = useState<Record<string, string[]>>({});
-  const [objects, setObjects] = useState<Record<string, snowflake.SnowflakeObject[]>>({});
-  const [loading, setLoading] = useState<Record<string, boolean>>({});
-  const requested = useRef<Set<string>>(new Set());
+  const { values, loading, ensure } = useKeyedFetch<string[] | snowflake.SnowflakeObject[]>();
 
   const ensureSchemas = useCallback((db: string) => {
-    if (!db || requested.current.has(db)) return;
-    requested.current.add(db);
-    setLoading((l) => ({ ...l, [db]: true }));
-    ListUserSchemas(db)
-      .then((s) => setSchemas((c) => ({ ...c, [db]: s ?? [] })))
-      .catch(() => requested.current.delete(db))
-      .finally(() => setLoading((l) => ({ ...l, [db]: false })));
-  }, []);
+    if (!db) return;
+    ensure(schemaKey(db), () => ListUserSchemas(db).then((s) => s ?? []));
+  }, [ensure]);
 
   const ensureObjects = useCallback((db: string, schema: string) => {
     if (!db || !schema) return;
-    const key = objKey(db, schema);
-    if (requested.current.has(key)) return;
-    requested.current.add(key);
-    setLoading((l) => ({ ...l, [key]: true }));
-    ListObjects(db, schema)
-      .then((o) => setObjects((c) => ({ ...c, [key]: o ?? [] })))
-      .catch(() => requested.current.delete(key))
-      .finally(() => setLoading((l) => ({ ...l, [key]: false })));
-  }, []);
+    ensure(objKey(db, schema), () => ListObjects(db, schema).then((o) => o ?? []));
+  }, [ensure]);
 
   return useMemo(() => ({
     ensureSchemas,
     ensureObjects,
-    schemasOf: (db: string) => schemas[db] ?? [],
-    schemasLoading: (db: string) => !!loading[db],
-    objectsOf: (db: string, schema: string) => objects[objKey(db, schema)] ?? [],
+    schemasOf: (db: string) => (values[schemaKey(db)] ?? []) as string[],
+    schemasLoading: (db: string) => !!loading[schemaKey(db)],
+    objectsOf: (db: string, schema: string) =>
+      (values[objKey(db, schema)] ?? []) as snowflake.SnowflakeObject[],
     objectsLoading: (db: string, schema: string) => !!loading[objKey(db, schema)],
-  }), [schemas, objects, loading, ensureSchemas, ensureObjects]);
+  }), [values, loading, ensureSchemas, ensureObjects]);
 }
 
 export type ObjectCache = ReturnType<typeof useObjectCache>;
@@ -324,7 +337,7 @@ export function TablesSection({
             <ObjectPicker
               cache={cache}
               dbOptions={dbOptions} db={r.db} schema={r.schema} name={r.table}
-              kinds={["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE"]}
+              kinds={TABLE_KINDS}
               placeholder="Table / view"
               onChange={(db, schema, table) =>
                 // Seed the alias from the table name unless the user set one.

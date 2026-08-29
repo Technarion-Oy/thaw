@@ -35,6 +35,20 @@ describe("diffAliases", () => {
     expect(diffAliases(["orders"], [""]))
       .toEqual({ renames: {}, removed: ["orders"] });
   });
+
+  it("leaves a duplicated alias alone — a reference can't be attributed to one row", () => {
+    // Two same-named tables from different schemas both auto-seed "orders".
+    // Renaming only the second must not repoint the first row's references.
+    const diff = diffAliases(["orders", "orders"], ["orders", "orders2"]);
+    expect(hasAliasChange(diff)).toBe(false);
+    expect(remapAlias("orders", diff)).toBe("orders");
+  });
+
+  it("leaves an alias that still exists on another row alone", () => {
+    const diff = diffAliases(["orders", "customers"], ["customers", "customers"]);
+    expect(remapAlias("customers", diff)).toBe("customers");
+    expect(remapAlias("orders", diff)).toBe("customers");
+  });
 });
 
 describe("remapAlias", () => {

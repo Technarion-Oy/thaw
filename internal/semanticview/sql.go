@@ -164,6 +164,22 @@ func (r renderer) identList(names []string) string {
 	return strings.Join(snowflake.QuoteIdentList(names, r.caseSensitive), ", ")
 }
 
+// qualifiedIdent renders a possibly-dotted `alias.name` reference, quoting each
+// half separately — quoting the whole string would produce one identifier
+// containing a dot. Used for a metric's NON ADDITIVE BY dimensions, which are
+// the only references in the grammar the form supplies pre-qualified.
+func (r renderer) qualifiedIdent(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	alias, name, dotted := strings.Cut(ref, ".")
+	if !dotted {
+		return r.ident(ref)
+	}
+	return r.ident(alias) + "." + r.ident(name)
+}
+
 // renderEach maps items through render and drops the entries it rejects (an
 // incomplete row in the create modal renders as "" rather than broken SQL).
 func renderEach[T any](items []T, render func(T) string) []string {
@@ -256,15 +272,24 @@ func (r renderer) relationship(rel Relationship) string {
 		sb.WriteString(r.ident(n) + " AS ")
 	}
 	sb.WriteString(r.ident(table) + " (" + cols + ") REFERENCES " + r.ident(refTable))
+	// The reference form is required for ASOF and BETWEEN — without it the row
+	// would render as a plain standard relationship, silently dropping the join
+	// semantics the user picked. Drop the row instead, like every other
+	// incomplete entry. Only the standard form may omit the columns (Snowflake
+	// then matches the target's declared key).
 	switch strings.ToUpper(strings.TrimSpace(rel.JoinType)) {
 	case "BETWEEN":
-		if start, end := strings.TrimSpace(rel.RangeStart), strings.TrimSpace(rel.RangeEnd); start != "" && end != "" {
-			sb.WriteString(" (BETWEEN " + r.ident(start) + " AND " + r.ident(end) + " EXCLUSIVE)")
+		start, end := strings.TrimSpace(rel.RangeStart), strings.TrimSpace(rel.RangeEnd)
+		if start == "" || end == "" {
+			return ""
 		}
+		sb.WriteString(" (BETWEEN " + r.ident(start) + " AND " + r.ident(end) + " EXCLUSIVE)")
 	case "ASOF":
-		if refCols := r.identList(rel.RefColumns); refCols != "" {
-			sb.WriteString(" (ASOF " + refCols + ")")
+		refCols := r.identList(rel.RefColumns)
+		if refCols == "" {
+			return ""
 		}
+		sb.WriteString(" (ASOF " + refCols + ")")
 	default:
 		if refCols := r.identList(rel.RefColumns); refCols != "" {
 			sb.WriteString(" (" + refCols + ")")
@@ -276,9 +301,7 @@ func (r renderer) relationship(rel Relationship) string {
 func (r renderer) nonAdditive(dims []NonAdditiveDim) string {
 	parts := make([]string, 0, len(dims))
 	for _, d := range dims {
-		// The dimension may be a dotted alias.dimension reference, so it is
-		// emitted verbatim rather than quoted as a single identifier.
-		name := strings.TrimSpace(d.Dimension)
+		name := r.qualifiedIdent(d.Dimension)
 		if name == "" {
 			continue
 		}
@@ -325,6 +348,10 @@ func (r renderer) expression(kind string, e Expression) string {
 		sb.WriteString(" LABELS = (FILTER)")
 	}
 	sb.WriteString(" AS " + expr)
+	// Deliberately TAG before COMMENT — the opposite of renderer.table. The
+	// factExpression / dimensionExpression / metricExpression productions order
+	// the trailing clauses SYNONYMS → TAG → COMMENT, while logicalTable orders
+	// them SYNONYMS → COMMENT → TAG. Both orders are asserted by the tests.
 	sb.WriteString(synonymsClause(e.Synonyms))
 	sb.WriteString(tagPart(e.Tags))
 	sb.WriteString(commentPart(e.Comment))

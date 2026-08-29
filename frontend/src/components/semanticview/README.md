@@ -37,14 +37,18 @@ describe the data.
   `NON ADDITIVE BY`, and the Cortex Search binding), and
   `VerifiedQueriesSection`.
 
-  Two caches keep the pickers cheap: `useTableColumns` fetches each picked
-  table's columns (`GetTableColumns`), keyed by the full
-  `database.schema.table` path so rows in different databases don't collide,
-  and `useObjectCache` is the one schema/object cache (`ListUserSchemas` /
-  `ListObjects`) every `ObjectPicker` in the modal shares — without it five
-  logical tables in one schema would mean five identical round-trips. Both
-  forget a key when its fetch fails, so a transient error can be retried
-  instead of leaving a picker permanently empty.
+  Two caches keep the pickers cheap, both built on the shared `useKeyedFetch`
+  (fetch-once per key, and forget a key when its fetch fails so a transient
+  error can be retried instead of leaving a picker permanently empty):
+  `useTableColumns` fetches each picked table's columns (`GetTableColumns`),
+  keyed by the full `database.schema.table` path so rows in different databases
+  don't collide, and `useObjectCache` is the one schema/object cache
+  (`ListUserSchemas` / `ListObjects`) every `ObjectPicker` in the modal shares —
+  without it five logical tables in one schema would mean five identical
+  round-trips. The table picker offers every table-like kind (`TABLE`, `VIEW`,
+  `MATERIALIZED VIEW`, `DYNAMIC TABLE`, `EXTERNAL TABLE`, `ICEBERG TABLE`,
+  `HYBRID TABLE`, `EVENT TABLE`), the same set the model-monitor source picker
+  uses.
 
   `TableRow` and `ExpressionRow` extend the generated config types with the
   picked `db` / `schema` / object parts, and `toLogicalTable` / `toExpression`
@@ -59,7 +63,10 @@ describe the data.
   `TABLES ( … )`, which neither the preview nor the builder can catch (the SQL
   is well-formed; only Snowflake rejects it). Every edit to the table list is
   diffed and the dependent rows rewritten: a renamed alias is followed, a
-  removed one cleared. Covered by `semanticViewAliases.test.ts`.
+  removed one cleared. An alias two rows share is deliberately left alone — a
+  reference is a bare string, so it can't be attributed to one of them, and
+  remapping would silently repoint the row the user didn't touch. Covered by
+  `semanticViewAliases.test.ts`.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /

@@ -147,10 +147,12 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
-  // Dimension references for a metric's NON ADDITIVE BY picker.
+  // Dimension references for a metric's NON ADDITIVE BY picker. Only rows the
+  // builder will actually emit are offered — picking a half-finished dimension
+  // would leave the metric referencing one that never appears in DIMENSIONS.
   const dimensionNames = dimensions
-    .filter((d) => d.name.trim())
-    .map((d) => (d.tableAlias ? `${d.tableAlias}.${d.name.trim()}` : d.name.trim()));
+    .filter((d) => d.tableAlias.trim() && d.name.trim())
+    .map((d) => `${d.tableAlias.trim()}.${d.name.trim()}`);
 
   // A complete expression needs all three of `<table_alias>.<name> AS <sql_expr>`
   // — the grammar has no alias-less form — matching what the builder accepts.
@@ -162,7 +164,15 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const structuredValid =
     tables.some((t) => t.table.trim().length > 0) &&
     (dimensions.some(complete) || metrics.some(complete));
-  const canSubmit = name.trim().length > 0 && (body.trim().length > 0 || structuredValid);
+  // A pasted snippet may still carry <database>.<schema> style placeholders; they
+  // would only fail server-side, so block them here as the old default-body guard
+  // did.
+  // Three letters minimum so a spaceless comparison (`a<b>c`) isn't mistaken
+  // for a placeholder.
+  const bodyPlaceholders = /<[a-z_]{3,}>/i.test(body);
+  const canSubmit =
+    name.trim().length > 0 &&
+    (body.trim().length > 0 ? !bodyPlaceholders : structuredValid);
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -178,11 +188,13 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const rawSqlBody = (
     <>
       <Alert
-        type={body.trim() ? "warning" : "info"}
+        type={body.trim() ? (bodyPlaceholders ? "error" : "warning") : "info"}
         showIcon
         style={{ marginBottom: 8 }}
         message={
-          body.trim()
+          bodyPlaceholders
+            ? "The raw definition still contains <placeholder> tokens — replace them with real names before creating."
+            : body.trim()
             ? "The raw definition below replaces the TABLES / RELATIONSHIPS / FACTS / DIMENSIONS / METRICS sections above. Clear it to go back to the form."
             : "Escape hatch for anything the form doesn't cover. Anything typed here replaces the structured definition above; the clause order is then yours to get right."
         }

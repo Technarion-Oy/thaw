@@ -22,7 +22,10 @@ that describe the business meaning of the data.
   unique constraints is served by `Body`.
 - `Relationship` — `[ name AS ] alias ( cols ) REFERENCES ref_alias ( … )`, with
   `JoinType` selecting the reference form: `""` (standard), `"ASOF"`, or
-  `"BETWEEN"` (the latter two are Snowflake preview features).
+  `"BETWEEN"` (the latter two are Snowflake preview features). `ASOF` and
+  `BETWEEN` require their reference form, so a row missing it is dropped rather
+  than silently downgraded to a standard relationship; only the standard form
+  may omit the columns (Snowflake then matches the target's declared key).
 - `Expression` — one `FACTS` / `DIMENSIONS` / `METRICS` entry. The grammar is
   `[ visibility ] <table_alias>.<name> … AS <sql_expr>`, so `TableAlias`,
   `Name` and `Expr` are all required. The three
@@ -62,10 +65,16 @@ that describe the business meaning of the data.
   SQL, so the live preview stays valid while a row is being filled in.
 
   `CaseSensitive` governs **every** identifier in the statement — the view's own
-  name plus the aliases, columns and entity names inside the clauses — matching
-  the other CREATE builders (hybrid / iceberg / external tables all quote their
-  column names with `cfg.CaseSensitive`). The per-entity renderers hang off a
-  `renderer` value that carries the flag.
+  name plus the aliases, columns and entity names inside the clauses, including
+  each half of a dotted `NON ADDITIVE BY` reference — matching the other CREATE
+  builders (hybrid / iceberg / external tables all quote their column names with
+  `cfg.CaseSensitive`). The per-entity renderers hang off a `renderer` value
+  that carries the flag.
+
+  The trailing clauses are ordered per production, and the two orders differ:
+  `logicalTable` is `WITH SYNONYMS` → `COMMENT` → `WITH TAG`, while the
+  fact / dimension / metric productions are `WITH SYNONYMS` → `WITH TAG` →
+  `COMMENT`. Both are asserted by the tests so the divergence can't drift.
 
   A non-blank `Body` **replaces the whole structured definition** and is emitted
   verbatim, so anything the create form doesn't cover can still be typed into

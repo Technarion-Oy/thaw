@@ -308,6 +308,71 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 			},
 		},
 		{
+			name:   "trailing clause order differs between tables and expressions",
+			db:     "DB",
+			schema: "SC",
+			// logicalTable orders the trailing clauses SYNONYMS → COMMENT → TAG;
+			// the fact/dimension/metric productions order them SYNONYMS → TAG →
+			// COMMENT. Both are asserted so the divergence can't drift.
+			cfg: SemanticViewConfig{
+				Name: "sales",
+				Tables: []LogicalTable{{
+					Alias: "orders", Name: `"DB"."SC"."ORDERS"`,
+					Synonyms: []string{"sales"},
+					Comment:  "table comment",
+					Tags:     []snowflake.TagPair{{Name: "domain", Value: "sales"}},
+				}},
+				Metrics: []Expression{{
+					TableAlias: "orders", Name: "revenue", Expr: "SUM(orders.amount)",
+					Synonyms: []string{"income"},
+					Comment:  "metric comment",
+					Tags:     []snowflake.TagPair{{Name: "tier", Value: "gold"}},
+				}},
+			},
+			contains: []string{
+				`WITH SYNONYMS = ('sales') COMMENT = 'table comment' WITH TAG ("domain" = 'sales')`,
+				`WITH SYNONYMS = ('income') WITH TAG ("tier" = 'gold') COMMENT = 'metric comment'`,
+			},
+		},
+		{
+			name:   "preview join type without its reference form is dropped",
+			db:     "DB",
+			schema: "SC",
+			// An ASOF/BETWEEN row missing its reference would otherwise render as
+			// a plain standard relationship, silently losing the join semantics
+			// the user picked.
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				Relationships: []Relationship{
+					{Table: "orders", Columns: []string{"ts"}, RefTable: "rates", JoinType: "ASOF"},
+					{Table: "orders", Columns: []string{"ts"}, RefTable: "rates", JoinType: "BETWEEN", RangeStart: "valid_from"},
+					// The standard form may omit the columns — Snowflake then
+					// matches the target's declared key — so this one survives.
+					{Table: "orders", Columns: []string{"customer_id"}, RefTable: "customers"},
+				},
+			},
+			contains: []string{"orders (customer_id) REFERENCES customers"},
+			absent:   []string{"rates"},
+		},
+		{
+			name:   "case sensitive quotes each half of a non additive by reference",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:          "sales",
+				CaseSensitive: true,
+				Tables:        []LogicalTable{{Alias: "Orders", Name: `"DB"."SC"."Orders"`}},
+				Metrics: []Expression{{
+					TableAlias:    "Orders",
+					Name:          "Balance",
+					Expr:          "SUM(Orders.Amount)",
+					NonAdditiveBy: []NonAdditiveDim{{Dimension: "Orders.Order_Date"}},
+				}},
+			},
+			contains: []string{`NON ADDITIVE BY ("Orders"."Order_Date")`},
+		},
+		{
 			name:   "incomplete verified query is dropped",
 			db:     "DB",
 			schema: "SC",
