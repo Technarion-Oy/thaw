@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { Button, Checkbox, Input, InputNumber, Select, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
@@ -10,7 +10,7 @@ import { ListObjects, ListUserSchemas, GetTableColumns } from "../../../wailsjs/
 import type { semanticview, snowflake } from "../../../wailsjs/go/models";
 import TagInput from "../shared/TagInput";
 import type { TagItem } from "../shared/TagInput";
-import { quoteFqn, parseQuotedFqn } from "./semanticViewNames";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -22,6 +22,14 @@ export type SemRelationship = semanticview.Relationship;
 export type SemExpression = Omit<semanticview.Expression, "convertValues">;
 export type SemNonAdditive = semanticview.NonAdditiveDim;
 export type SemVerifiedQuery = semanticview.VerifiedQuery;
+
+/**
+ * Builds the quoted `"db"."schema"."name"` reference the Go builder emits
+ * verbatim, or "" when no object is picked. Quoting is delegated to the shared
+ * `quoteIdent` so Snowflake's escaping rule lives in one place.
+ */
+const quoteFqn = (db: string, schema: string, name: string) =>
+  (name ? [db, schema, name].map(quoteIdent).join(".") : "");
 
 /** The clause an ExpressionsSection edits — gates the clause-specific fields. */
 export type ExpressionKind = "FACTS" | "DIMENSIONS" | "METRICS";
@@ -51,11 +59,33 @@ export const emptyRelationship = (): SemRelationship => ({
   joinType: "", rangeStart: "", rangeEnd: "",
 });
 
-export const emptyExpression = (): SemExpression => ({
+/**
+ * A FACTS / DIMENSIONS / METRICS row as the form holds it. `cortexSearchService`
+ * is a single quoted reference in the config, but the picker that produces it is
+ * a database → schema → service cascade, so the row keeps the three parts and
+ * the reference is derived at the IPC boundary via `toExpression` — the same
+ * split `TableRow` uses. Holding the parts keeps the picker fully controlled,
+ * with no local state to fall out of step with its row.
+ */
+export interface ExpressionRow extends Omit<SemExpression, "cortexSearchService"> {
+  cortexDb: string;
+  cortexSchema: string;
+  cortexName: string;
+}
+
+export const emptyExpression = (): ExpressionRow => ({
   visibility: "", tableAlias: "", name: "", filterLabel: false,
   using: [], nonAdditiveBy: [], expr: "",
   synonyms: [], tags: [], comment: "",
-  cortexSearchService: "", cortexSearchColumn: "",
+  cortexDb: "", cortexSchema: "", cortexName: "", cortexSearchColumn: "",
+});
+
+/** Converts a form row to the builder's Expression (quoted service reference). */
+export const toExpression = (
+  { cortexDb, cortexSchema, cortexName, ...rest }: ExpressionRow,
+): SemExpression => ({
+  ...rest,
+  cortexSearchService: quoteFqn(cortexDb, cortexSchema, cortexName),
 });
 
 export const emptyVerifiedQuery = (): SemVerifiedQuery => ({
@@ -91,7 +121,9 @@ export function useTableColumns(rows: TableRow[]) {
       requested.current.add(key);
       GetTableColumns(r.db, r.schema, r.table)
         .then((cols) => setCache((c) => ({ ...c, [key]: cols ?? [] })))
-        .catch(() => {});
+        // Forget the key on failure, so a transient error doesn't leave this
+        // table's column pickers empty for the rest of the modal's life.
+        .catch(() => requested.current.delete(key));
     }
   }, [rows]);
 
@@ -101,6 +133,63 @@ export function useTableColumns(rows: TableRow[]) {
     return row ? cache[colKey(row)] ?? [] : [];
   };
 }
+
+/** Immutably merges `next` into row `i`. */
+const patchAt = <T,>(rows: T[], i: number, next: Partial<T>): T[] =>
+  rows.map((r, idx) => (idx === i ? { ...r, ...next } : r));
+
+/** Immutably drops row `i`. */
+const removeAt = <T,>(rows: T[], i: number): T[] => rows.filter((_, idx) => idx !== i);
+
+const objKey = (db: string, schema: string) => JSON.stringify([db, schema]);
+
+/**
+ * One shared schema/object cache for every `ObjectPicker` in the modal. Without
+ * it each picker fetches independently, so five logical tables in the same
+ * schema mean five identical `ListUserSchemas` and `ListObjects` round-trips.
+ * Each database and each database.schema is fetched at most once — and, as in
+ * `useTableColumns`, a failed fetch forgets its key so it can be retried rather
+ * than leaving the picker permanently empty.
+ */
+export function useObjectCache() {
+  const [schemas, setSchemas] = useState<Record<string, string[]>>({});
+  const [objects, setObjects] = useState<Record<string, snowflake.SnowflakeObject[]>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const requested = useRef<Set<string>>(new Set());
+
+  const ensureSchemas = useCallback((db: string) => {
+    if (!db || requested.current.has(db)) return;
+    requested.current.add(db);
+    setLoading((l) => ({ ...l, [db]: true }));
+    ListUserSchemas(db)
+      .then((s) => setSchemas((c) => ({ ...c, [db]: s ?? [] })))
+      .catch(() => requested.current.delete(db))
+      .finally(() => setLoading((l) => ({ ...l, [db]: false })));
+  }, []);
+
+  const ensureObjects = useCallback((db: string, schema: string) => {
+    if (!db || !schema) return;
+    const key = objKey(db, schema);
+    if (requested.current.has(key)) return;
+    requested.current.add(key);
+    setLoading((l) => ({ ...l, [key]: true }));
+    ListObjects(db, schema)
+      .then((o) => setObjects((c) => ({ ...c, [key]: o ?? [] })))
+      .catch(() => requested.current.delete(key))
+      .finally(() => setLoading((l) => ({ ...l, [key]: false })));
+  }, []);
+
+  return useMemo(() => ({
+    ensureSchemas,
+    ensureObjects,
+    schemasOf: (db: string) => schemas[db] ?? [],
+    schemasLoading: (db: string) => !!loading[db],
+    objectsOf: (db: string, schema: string) => objects[objKey(db, schema)] ?? [],
+    objectsLoading: (db: string, schema: string) => !!loading[objKey(db, schema)],
+  }), [schemas, objects, loading, ensureSchemas, ensureObjects]);
+}
+
+export type ObjectCache = ReturnType<typeof useObjectCache>;
 
 const ROW_STYLE: React.CSSProperties = {
   display: "flex", alignItems: "flex-start", gap: 8,
@@ -150,40 +239,28 @@ const opts = (values: string[]) => values.map((v) => ({ value: v, label: v }));
  * Database → schema → object cascade. A semantic view can reference objects in
  * any database the role can see, so the database is picked per row rather than
  * fixed to the view's own. `dbOptions` is loaded once by the modal; the schema
- * and object lists load on demand as the cascade is filled in. `kinds` filters
- * the object list (tables/views for the logical tables, Cortex search services
- * for a dimension's search binding).
+ * and object lists load on demand as the cascade is filled in, through the
+ * `cache` every picker in the modal shares. `kinds` filters the object list
+ * (tables/views for the logical tables, Cortex search services for a
+ * dimension's search binding).
  */
 function ObjectPicker({
-  dbOptions, db, schema, name, kinds, placeholder, onChange, width = 190,
+  cache, dbOptions, db, schema, name, kinds, placeholder, onChange, width = 190,
 }: {
+  cache: ObjectCache;
   dbOptions: string[]; db: string; schema: string; name: string;
   kinds: string[]; placeholder: string;
   onChange: (db: string, schema: string, name: string) => void;
   width?: number;
 }) {
-  const [schemas, setSchemas] = useState<string[]>([]);
-  const [objects, setObjects] = useState<snowflake.SnowflakeObject[]>([]);
-  const [loadingSchemas, setLoadingSchemas] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { ensureSchemas, ensureObjects } = cache;
+  useEffect(() => { ensureSchemas(db); }, [ensureSchemas, db]);
+  useEffect(() => { ensureObjects(db, schema); }, [ensureObjects, db, schema]);
 
-  useEffect(() => {
-    if (!db) { setSchemas([]); return; }
-    setLoadingSchemas(true);
-    ListUserSchemas(db)
-      .then((s) => setSchemas(s ?? []))
-      .catch(() => setSchemas([]))
-      .finally(() => setLoadingSchemas(false));
-  }, [db]);
-
-  useEffect(() => {
-    if (!db || !schema) { setObjects([]); return; }
-    setLoading(true);
-    ListObjects(db, schema)
-      .then((o) => setObjects(o ?? []))
-      .catch(() => setObjects([]))
-      .finally(() => setLoading(false));
-  }, [db, schema]);
+  const schemas = cache.schemasOf(db);
+  const objects = cache.objectsOf(db, schema);
+  const loadingSchemas = cache.schemasLoading(db);
+  const loading = cache.objectsLoading(db, schema);
 
   return (
     <>
@@ -222,14 +299,15 @@ function ObjectPicker({
  * row is referenceable by the other sections.
  */
 export function TablesSection({
-  dbOptions, defaultDb, defaultSchema, rows, onChange, columnsFor,
+  cache, dbOptions, defaultDb, defaultSchema, rows, onChange, columnsFor,
 }: {
+  cache: ObjectCache;
   dbOptions: string[]; defaultDb: string; defaultSchema: string; rows: TableRow[];
   onChange: (rows: TableRow[]) => void;
   columnsFor: (alias: string) => string[];
 }) {
   const patch = (i: number, next: Partial<TableRow>) =>
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
+    onChange(patchAt(rows, i, next));
 
   return (
     <Section
@@ -242,8 +320,9 @@ export function TablesSection({
       {rows.map((r, i) => {
         const columns = columnsFor(aliasOf(r));
         return (
-          <RowCard key={i} onRemove={() => onChange(rows.filter((_, idx) => idx !== i))}>
+          <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
             <ObjectPicker
+              cache={cache}
               dbOptions={dbOptions} db={r.db} schema={r.schema} name={r.table}
               kinds={["TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE", "EXTERNAL TABLE"]}
               placeholder="Table / view"
@@ -331,7 +410,7 @@ export function RelationshipsSection({
 }) {
   const aliases = tables.map(aliasOf).filter(Boolean);
   const patch = (i: number, next: Partial<SemRelationship>) =>
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
+    onChange(patchAt(rows, i, next));
 
   const keyColumnsOf = (alias: string) => {
     const row = tables.find((t) => aliasOf(t) === alias);
@@ -348,7 +427,7 @@ export function RelationshipsSection({
       onAdd={() => onChange([...rows, emptyRelationship()])}
     >
       {rows.map((r, i) => (
-        <RowCard key={i} onRemove={() => onChange(rows.filter((_, idx) => idx !== i))}>
+        <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
           <Input
             size="small" style={{ width: 150 }} placeholder="relationship name"
             value={r.name} onChange={(e) => patch(i, { name: e.target.value })}
@@ -414,7 +493,7 @@ function NonAdditiveEditor({
   onChange: (rows: SemNonAdditive[]) => void;
 }) {
   const patch = (i: number, next: Partial<SemNonAdditive>) =>
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
+    onChange(patchAt(rows, i, next));
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
       <Text type="secondary" style={{ fontSize: 11 }}>NON ADDITIVE BY</Text>
@@ -442,7 +521,7 @@ function NonAdditiveEditor({
           />
           <Button
             size="small" type="text" danger icon={<DeleteOutlined />}
-            onClick={() => onChange(rows.filter((_, idx) => idx !== i))}
+            onClick={() => onChange(removeAt(rows, i))}
           />
         </div>
       ))}
@@ -471,19 +550,20 @@ const VISIBILITY = [
  * window-metric grammar adds no keywords around the expression itself.
  */
 export function ExpressionsSection({
-  kind, rows, tables, relationships, dimensionNames, dbOptions, onChange,
+  kind, rows, tables, relationships, dimensionNames, cache, dbOptions, onChange,
 }: {
   kind: ExpressionKind;
-  rows: SemExpression[];
+  rows: ExpressionRow[];
   tables: TableRow[];
   relationships: SemRelationship[];
   dimensionNames: string[];
+  cache: ObjectCache;
   dbOptions: string[];
-  onChange: (rows: SemExpression[]) => void;
+  onChange: (rows: ExpressionRow[]) => void;
 }) {
   const aliases = tables.map(aliasOf).filter(Boolean);
-  const patch = (i: number, next: Partial<SemExpression>) =>
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
+  const patch = (i: number, next: Partial<ExpressionRow>) =>
+    onChange(patchAt(rows, i, next));
 
   const isMetric = kind === "METRICS";
   const isDimension = kind === "DIMENSIONS";
@@ -504,7 +584,7 @@ export function ExpressionsSection({
       onAdd={() => onChange([...rows, emptyExpression()])}
     >
       {rows.map((r, i) => (
-        <RowCard key={i} onRemove={() => onChange(rows.filter((_, idx) => idx !== i))}>
+        <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
           {!isDimension && (
             <Select
               size="small" style={{ width: 110 }} value={r.visibility}
@@ -564,9 +644,14 @@ export function ExpressionsSection({
           {isDimension && (
             <>
               <Text type="secondary" style={{ fontSize: 11 }}>WITH CORTEX SEARCH SERVICE</Text>
-              <CortexSearchPicker
-                dbOptions={dbOptions} value={r.cortexSearchService}
-                onChange={(v) => patch(i, { cortexSearchService: v })}
+              <ObjectPicker
+                cache={cache}
+                dbOptions={dbOptions}
+                db={r.cortexDb} schema={r.cortexSchema} name={r.cortexName}
+                kinds={["CORTEX SEARCH SERVICE"]} placeholder="Search service"
+                onChange={(cortexDb, cortexSchema, cortexName) =>
+                  patch(i, { cortexDb, cortexSchema, cortexName })
+                }
               />
               <Input
                 size="small" style={{ width: 150 }} placeholder="USING column"
@@ -585,37 +670,6 @@ export function ExpressionsSection({
 }
 
 /**
- * Picks a Cortex search service (from any database) and hands back its quoted,
- * fully-qualified name — the builder emits it verbatim. The cascade's parts are
- * parsed back out of that reference rather than held locally, so the control
- * stays in sync with its row when rows above it are removed.
- */
-function CortexSearchPicker({
-  dbOptions, value, onChange,
-}: {
-  dbOptions: string[]; value: string; onChange: (v: string) => void;
-}) {
-  const picked = parseQuotedFqn(value);
-  // A database/schema with no service picked yet has nothing to store in the
-  // reference, so the partial cascade is held until a service is chosen.
-  const [pending, setPending] = useState({ db: "", schema: "" });
-
-  return (
-    <ObjectPicker
-      dbOptions={dbOptions}
-      db={picked.db || pending.db}
-      schema={picked.schema || pending.schema}
-      name={picked.name}
-      kinds={["CORTEX SEARCH SERVICE"]} placeholder="Search service"
-      onChange={(db, schema, name) => {
-        setPending({ db, schema });
-        onChange(quoteFqn(db, schema, name));
-      }}
-    />
-  );
-}
-
-/**
  * AI_VERIFIED_QUERIES ( … ) editor — question/SQL pairs Cortex Analyst can reuse
  * verbatim. Name, question and SQL are all required; a row missing any of them
  * is dropped by the builder rather than emitted as invalid SQL.
@@ -626,7 +680,7 @@ export function VerifiedQueriesSection({
   rows: SemVerifiedQuery[]; onChange: (rows: SemVerifiedQuery[]) => void;
 }) {
   const patch = (i: number, next: Partial<SemVerifiedQuery>) =>
-    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
+    onChange(patchAt(rows, i, next));
 
   return (
     <Section
@@ -637,7 +691,7 @@ export function VerifiedQueriesSection({
       onAdd={() => onChange([...rows, emptyVerifiedQuery()])}
     >
       {rows.map((r, i) => (
-        <RowCard key={i} onRemove={() => onChange(rows.filter((_, idx) => idx !== i))}>
+        <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
           <Input
             size="small" style={{ width: 160 }} placeholder="name"
             value={r.name} onChange={(e) => patch(i, { name: e.target.value })}

@@ -18,9 +18,12 @@ describe the data.
   definition** panel holding the original Monaco editor as an escape hatch
   (anything typed there replaces the structured definition). Create is disabled
   until the view has a name, a logical table, and at least one dimension or
-  metric — Snowflake's rule. Calls `BuildCreateSemanticViewSql` for the live
-  preview and `ExecDDL` to run it; the builder, not the user, emits the clauses
-  in the order Snowflake requires.
+  metric — Snowflake's rule, where a complete expression is
+  `<table_alias>.<name> AS <sql_expr>` (the grammar has no alias-less form).
+  Calls `BuildCreateSemanticViewSql` for the live preview and `ExecDDL` to run
+  it; the builder, not the user, emits the clauses in the order Snowflake
+  requires. It owns every section's state, so it is also where `updateTables`
+  keeps alias references honest (see `semanticViewAliases.ts`).
 - **`semanticViewForm.tsx`** — the section editors behind that modal:
   `TablesSection` (database → schema → table picker per row — a semantic view
   may reference tables in **any** database, so each row carries its own; the
@@ -32,14 +35,31 @@ describe the data.
   dropdown), `ExpressionsSection` (one component for facts, dimensions and
   metrics — the `kind` prop gates visibility, `LABELS = (FILTER)`, `USING` /
   `NON ADDITIVE BY`, and the Cortex Search binding), and
-  `VerifiedQueriesSection`. `useTableColumns` fetches and caches each picked
+  `VerifiedQueriesSection`.
+
+  Two caches keep the pickers cheap: `useTableColumns` fetches each picked
   table's columns (`GetTableColumns`), keyed by the full
-  `database.schema.table` path so rows in different databases don't collide;
-  `toLogicalTable` turns a form row into the builder's quoted 3-part reference.
-- **`semanticViewNames.ts`** — `quoteFqn` / `parseQuotedFqn`, the quoted
-  `"db"."schema"."name"` round-trip behind the table and Cortex Search pickers
-  (the Go builder emits those references verbatim). Covered by
-  `semanticViewNames.test.ts`.
+  `database.schema.table` path so rows in different databases don't collide,
+  and `useObjectCache` is the one schema/object cache (`ListUserSchemas` /
+  `ListObjects`) every `ObjectPicker` in the modal shares — without it five
+  logical tables in one schema would mean five identical round-trips. Both
+  forget a key when its fetch fails, so a transient error can be retried
+  instead of leaving a picker permanently empty.
+
+  `TableRow` and `ExpressionRow` extend the generated config types with the
+  picked `db` / `schema` / object parts, and `toLogicalTable` / `toExpression`
+  derive the quoted `"db"."schema"."name"` reference the Go builder emits
+  verbatim (via the shared `quoteIdent`). Keeping the parts on the row is what
+  lets every cascade be a fully controlled component with no local state to
+  fall out of step with its row.
+- **`semanticViewAliases.ts`** — `diffAliases` / `remapAlias` /
+  `remapQualified`. The other sections refer to logical tables by alias — a
+  copied string, not a live reference — so renaming or deleting a table row
+  would leave them pointing at an alias that no longer exists in
+  `TABLES ( … )`, which neither the preview nor the builder can catch (the SQL
+  is well-formed; only Snowflake rejects it). Every edit to the table list is
+  diffed and the dependent rows rewritten: a renamed alias is followed, a
+  removed one cleared. Covered by `semanticViewAliases.test.ts`.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /

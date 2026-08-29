@@ -23,7 +23,9 @@ that describe the business meaning of the data.
 - `Relationship` — `[ name AS ] alias ( cols ) REFERENCES ref_alias ( … )`, with
   `JoinType` selecting the reference form: `""` (standard), `"ASOF"`, or
   `"BETWEEN"` (the latter two are Snowflake preview features).
-- `Expression` — one `FACTS` / `DIMENSIONS` / `METRICS` entry. The three
+- `Expression` — one `FACTS` / `DIMENSIONS` / `METRICS` entry. The grammar is
+  `[ visibility ] <table_alias>.<name> … AS <sql_expr>`, so `TableAlias`,
+  `Name` and `Expr` are all required. The three
   grammars overlap almost entirely, so one type covers all of them and the
   renderer gates the clause-specific parts: `Visibility` (`PRIVATE` is dropped
   for dimensions, which are always public), `FilterLabel` →
@@ -56,8 +58,14 @@ that describe the business meaning of the data.
   The clause order matters to Snowflake (e.g. `FACTS` must precede
   `DIMENSIONS`) and is guaranteed by the builder, not the user. An incomplete
   entry — a table row with no table, a relationship with no target, an
-  expression with no name or SQL — renders as nothing rather than broken SQL, so
-  the live preview stays valid while a row is being filled in.
+  expression with no alias, name or SQL — renders as nothing rather than broken
+  SQL, so the live preview stays valid while a row is being filled in.
+
+  `CaseSensitive` governs **every** identifier in the statement — the view's own
+  name plus the aliases, columns and entity names inside the clauses — matching
+  the other CREATE builders (hybrid / iceberg / external tables all quote their
+  column names with `cfg.CaseSensitive`). The per-entity renderers hang off a
+  `renderer` value that carries the flag.
 
   A non-blank `Body` **replaces the whole structured definition** and is emitted
   verbatim, so anything the create form doesn't cover can still be typed into

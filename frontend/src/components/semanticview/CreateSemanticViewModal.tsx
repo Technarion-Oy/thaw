@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Form, Input, InputNumber, Checkbox, Alert, Collapse, Typography } from "antd";
 import { ApartmentOutlined } from "@ant-design/icons";
 import {
@@ -17,11 +17,14 @@ import type { TagItem } from "../shared/TagInput";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import {
   TablesSection, RelationshipsSection, ExpressionsSection, VerifiedQueriesSection,
-  useTableColumns, toLogicalTable,
+  useTableColumns, useObjectCache, toLogicalTable, toExpression, aliasOf,
 } from "./semanticViewForm";
 import type {
-  TableRow, SemRelationship, SemExpression, SemVerifiedQuery,
+  TableRow, SemRelationship, ExpressionRow, SemVerifiedQuery,
 } from "./semanticViewForm";
+import {
+  diffAliases, hasAliasChange, remapAlias, remapQualified,
+} from "./semanticViewAliases";
 import Editor from "@monaco-editor/react";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { useThemeStore } from "../../store/themeStore";
@@ -57,9 +60,9 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
 
   const [tables, setTables] = useState<TableRow[]>([]);
   const [relationships, setRelationships] = useState<SemRelationship[]>([]);
-  const [facts, setFacts] = useState<SemExpression[]>([]);
-  const [dimensions, setDimensions] = useState<SemExpression[]>([]);
-  const [metrics, setMetrics] = useState<SemExpression[]>([]);
+  const [facts, setFacts] = useState<ExpressionRow[]>([]);
+  const [dimensions, setDimensions] = useState<ExpressionRow[]>([]);
+  const [metrics, setMetrics] = useState<ExpressionRow[]>([]);
 
   const [comment, setComment] = useState("");
   const [maxStaleness, setMaxStaleness] = useState<number | null>(null);
@@ -76,13 +79,43 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const [dbOptions, setDbOptions] = useState<string[]>([db]);
   useEffect(() => {
     ListDatabases()
-      .then((d) => setDbOptions(d?.length ? d : [db]))
+      // The view's own database seeds every new table row, so it must be an
+      // option even if ListDatabases filters differently from whatever listed it.
+      .then((d) => setDbOptions(d?.includes(db) ? d : [db, ...(d ?? [])]))
       .catch(() => {});
   }, [db]);
 
   const columnsFor = useTableColumns(tables);
+  const objectCache = useObjectCache();
 
-  const cfg = {
+  // The other sections reference logical tables by alias — a copied string, not
+  // a live reference — so every edit to the table list is diffed and the
+  // dependent rows are rewritten: a renamed alias is followed, a removed one
+  // cleared. Without this a rename or delete silently leaves rows pointing at an
+  // alias that no longer exists in TABLES ( … ), which only fails once Snowflake
+  // runs the statement.
+  const updateTables = (next: TableRow[]) => {
+    const diff = diffAliases(tables.map(aliasOf), next.map(aliasOf));
+    setTables(next);
+    if (!hasAliasChange(diff)) return;
+    setRelationships((rs) => rs.map((r) => ({
+      ...r,
+      table: remapAlias(r.table, diff),
+      refTable: remapAlias(r.refTable, diff),
+    })));
+    const remapRows = (rows: ExpressionRow[]) => rows.map((e) => ({
+      ...e,
+      tableAlias: remapAlias(e.tableAlias, diff),
+      nonAdditiveBy: e.nonAdditiveBy
+        .map((d) => ({ ...d, dimension: remapQualified(d.dimension, diff) }))
+        .filter((d) => d.dimension),
+    }));
+    setFacts(remapRows);
+    setDimensions(remapRows);
+    setMetrics(remapRows);
+  };
+
+  const cfg = useMemo(() => ({
     name,
     caseSensitive,
     orReplace,
@@ -90,9 +123,9 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     body,
     tables: tables.map(toLogicalTable),
     relationships,
-    facts,
-    dimensions,
-    metrics,
+    facts: facts.map(toExpression),
+    dimensions: dimensions.map(toExpression),
+    metrics: metrics.map(toExpression),
     comment,
     maxStaleness: maxStaleness ?? 0,
     aiSqlGeneration,
@@ -100,12 +133,17 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     verifiedQueries,
     tags,
     copyGrants,
-  };
+  }), [
+    name, caseSensitive, orReplace, ifNotExists, body,
+    tables, relationships, facts, dimensions, metrics,
+    comment, maxStaleness, aiSqlGeneration, aiQuestionCategorization,
+    verifiedQueries, tags, copyGrants,
+  ]);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
     () => BuildCreateSemanticViewSql(db, schema, cfg as any),
-    [db, schema, JSON.stringify(cfg)],
+    [db, schema, cfg],
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
@@ -114,10 +152,13 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     .filter((d) => d.name.trim())
     .map((d) => (d.tableAlias ? `${d.tableAlias}.${d.name.trim()}` : d.name.trim()));
 
+  // A complete expression needs all three of `<table_alias>.<name> AS <sql_expr>`
+  // — the grammar has no alias-less form — matching what the builder accepts.
+  const complete = (e: ExpressionRow) =>
+    e.tableAlias.trim().length > 0 && e.name.trim().length > 0 && e.expr.trim().length > 0;
   // Snowflake requires at least one dimension or metric, and the definition needs
   // at least one logical table. The raw-SQL escape hatch bypasses both — its
   // content is the definition, and the builder can't validate it.
-  const complete = (e: SemExpression) => e.name.trim().length > 0 && e.expr.trim().length > 0;
   const structuredValid =
     tables.some((t) => t.table.trim().length > 0) &&
     (dimensions.some(complete) || metrics.some(complete));
@@ -271,11 +312,12 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
         </Form.Item>
 
         <TablesSection
+          cache={objectCache}
           dbOptions={dbOptions}
           defaultDb={db}
           defaultSchema={schema}
           rows={tables}
-          onChange={setTables}
+          onChange={updateTables}
           columnsFor={columnsFor}
         />
 
@@ -298,6 +340,7 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
             tables={tables}
             relationships={relationships}
             dimensionNames={dimensionNames}
+            cache={objectCache}
             dbOptions={dbOptions}
             onChange={setRows}
           />

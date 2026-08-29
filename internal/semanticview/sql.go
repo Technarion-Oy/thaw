@@ -77,6 +77,10 @@ type NonAdditiveDim struct {
 //   - Using / NonAdditiveBy — metrics only.
 //   - CortexSearchService / CortexSearchColumn — dimensions only.
 //
+// TableAlias, Name and Expr are all required — the grammar is
+// `[ visibility ] <table_alias>.<name> … AS <sql_expr>`, with no alias-less
+// form — so a row missing any of them is dropped rather than rendered.
+//
 // Expr is the SQL expression after AS, emitted verbatim. A window-function
 // metric is just an Expr carrying its own OVER ( … ) clause — Snowflake's
 // separate windowFunctionMetricExpression production adds no extra keywords
@@ -139,15 +143,25 @@ type SemanticViewConfig struct {
 	CopyGrants               bool                `json:"copyGrants"`
 }
 
-// ident renders an alias/column/entity identifier, quoting it only when
-// Snowflake requires it (invalid bare identifier or reserved keyword).
-func ident(name string) string {
-	return snowflake.QuoteOrBare(strings.TrimSpace(name), false)
+// renderer carries the config-wide settings the per-entity renderers need. The
+// case flag applies to every identifier in the definition — aliases, columns,
+// entity and relationship names — not just the view's own name, matching the
+// other CREATE builders (hybrid/iceberg/external tables all quote their column
+// names with cfg.CaseSensitive).
+type renderer struct {
+	caseSensitive bool
+}
+
+// ident renders an alias/column/entity identifier, quoting it when the config
+// asks for case sensitivity or when Snowflake requires it (invalid bare
+// identifier or reserved keyword).
+func (r renderer) ident(name string) string {
+	return snowflake.QuoteOrBare(strings.TrimSpace(name), r.caseSensitive)
 }
 
 // identList renders a comma-separated identifier list, dropping blanks.
-func identList(names []string) string {
-	return strings.Join(snowflake.QuoteIdentList(names, false), ", ")
+func (r renderer) identList(names []string) string {
+	return strings.Join(snowflake.QuoteIdentList(names, r.caseSensitive), ", ")
 }
 
 // renderEach maps items through render and drops the entries it rejects (an
@@ -199,20 +213,20 @@ func tagPart(tags []snowflake.TagPair) string {
 
 // renderTable emits one logicalTable. A row without a physical table name is
 // incomplete and renders as "".
-func renderTable(t LogicalTable) string {
+func (r renderer) table(t LogicalTable) string {
 	name := strings.TrimSpace(t.Name)
 	if name == "" {
 		return ""
 	}
 	var sb strings.Builder
 	if alias := strings.TrimSpace(t.Alias); alias != "" {
-		sb.WriteString(ident(alias) + " AS ")
+		sb.WriteString(r.ident(alias) + " AS ")
 	}
 	sb.WriteString(name)
-	if pk := identList(t.PrimaryKey); pk != "" {
+	if pk := r.identList(t.PrimaryKey); pk != "" {
 		sb.WriteString(" PRIMARY KEY (" + pk + ")")
 	}
-	if uq := identList(t.Unique); uq != "" {
+	if uq := r.identList(t.Unique); uq != "" {
 		sb.WriteString(" UNIQUE (" + uq + ")")
 	}
 	// CONSTRAINT … DISTINCT RANGE needs both bounds; a half-filled range is
@@ -220,9 +234,9 @@ func renderTable(t LogicalTable) string {
 	if start, end := strings.TrimSpace(t.RangeStart), strings.TrimSpace(t.RangeEnd); start != "" && end != "" {
 		sb.WriteString(" CONSTRAINT ")
 		if n := strings.TrimSpace(t.ConstraintName); n != "" {
-			sb.WriteString(ident(n) + " ")
+			sb.WriteString(r.ident(n) + " ")
 		}
-		sb.WriteString("DISTINCT RANGE BETWEEN " + ident(start) + " AND " + ident(end) + " EXCLUSIVE")
+		sb.WriteString("DISTINCT RANGE BETWEEN " + r.ident(start) + " AND " + r.ident(end) + " EXCLUSIVE")
 	}
 	sb.WriteString(synonymsClause(t.Synonyms))
 	sb.WriteString(commentPart(t.Comment))
@@ -232,34 +246,34 @@ func renderTable(t LogicalTable) string {
 
 // renderRelationship emits one relationshipDef. A row missing either side or
 // the source columns is incomplete and renders as "".
-func renderRelationship(r Relationship) string {
-	table, refTable, cols := strings.TrimSpace(r.Table), strings.TrimSpace(r.RefTable), identList(r.Columns)
+func (r renderer) relationship(rel Relationship) string {
+	table, refTable, cols := strings.TrimSpace(rel.Table), strings.TrimSpace(rel.RefTable), r.identList(rel.Columns)
 	if table == "" || refTable == "" || cols == "" {
 		return ""
 	}
 	var sb strings.Builder
-	if n := strings.TrimSpace(r.Name); n != "" {
-		sb.WriteString(ident(n) + " AS ")
+	if n := strings.TrimSpace(rel.Name); n != "" {
+		sb.WriteString(r.ident(n) + " AS ")
 	}
-	sb.WriteString(ident(table) + " (" + cols + ") REFERENCES " + ident(refTable))
-	switch strings.ToUpper(strings.TrimSpace(r.JoinType)) {
+	sb.WriteString(r.ident(table) + " (" + cols + ") REFERENCES " + r.ident(refTable))
+	switch strings.ToUpper(strings.TrimSpace(rel.JoinType)) {
 	case "BETWEEN":
-		if start, end := strings.TrimSpace(r.RangeStart), strings.TrimSpace(r.RangeEnd); start != "" && end != "" {
-			sb.WriteString(" (BETWEEN " + ident(start) + " AND " + ident(end) + " EXCLUSIVE)")
+		if start, end := strings.TrimSpace(rel.RangeStart), strings.TrimSpace(rel.RangeEnd); start != "" && end != "" {
+			sb.WriteString(" (BETWEEN " + r.ident(start) + " AND " + r.ident(end) + " EXCLUSIVE)")
 		}
 	case "ASOF":
-		if refCols := identList(r.RefColumns); refCols != "" {
+		if refCols := r.identList(rel.RefColumns); refCols != "" {
 			sb.WriteString(" (ASOF " + refCols + ")")
 		}
 	default:
-		if refCols := identList(r.RefColumns); refCols != "" {
+		if refCols := r.identList(rel.RefColumns); refCols != "" {
 			sb.WriteString(" (" + refCols + ")")
 		}
 	}
 	return sb.String()
 }
 
-func renderNonAdditive(dims []NonAdditiveDim) string {
+func (r renderer) nonAdditive(dims []NonAdditiveDim) string {
 	parts := make([]string, 0, len(dims))
 	for _, d := range dims {
 		// The dimension may be a dotted alias.dimension reference, so it is
@@ -281,10 +295,12 @@ func renderNonAdditive(dims []NonAdditiveDim) string {
 
 // renderExpression emits one FACTS / DIMENSIONS / METRICS entry. kind is the
 // owning clause keyword and gates the clause-specific parts (see Expression).
-// A row without a name or expression is incomplete and renders as "".
-func renderExpression(kind string, e Expression) string {
-	name, expr := strings.TrimSpace(e.Name), strings.TrimSpace(e.Expr)
-	if name == "" || expr == "" {
+// The grammar is `[ visibility ] <table_alias>.<name> … AS <sql_expr>`, so all
+// three of the alias, the name and the expression are required; a row missing
+// any of them is incomplete and renders as "".
+func (r renderer) expression(kind string, e Expression) string {
+	alias, name, expr := strings.TrimSpace(e.TableAlias), strings.TrimSpace(e.Name), strings.TrimSpace(e.Expr)
+	if alias == "" || name == "" || expr == "" {
 		return ""
 	}
 	var sb strings.Builder
@@ -297,15 +313,12 @@ func renderExpression(kind string, e Expression) string {
 			sb.WriteString("PRIVATE ")
 		}
 	}
-	if alias := strings.TrimSpace(e.TableAlias); alias != "" {
-		sb.WriteString(ident(alias) + ".")
-	}
-	sb.WriteString(ident(name))
+	sb.WriteString(r.ident(alias) + "." + r.ident(name))
 	if kind == "METRICS" {
-		if using := identList(e.Using); using != "" {
+		if using := r.identList(e.Using); using != "" {
 			sb.WriteString(" USING (" + using + ")")
 		}
-		if nonAdditive := renderNonAdditive(e.NonAdditiveBy); nonAdditive != "" {
+		if nonAdditive := r.nonAdditive(e.NonAdditiveBy); nonAdditive != "" {
 			sb.WriteString(" NON ADDITIVE BY (" + nonAdditive + ")")
 		}
 	} else if e.FilterLabel {
@@ -321,7 +334,7 @@ func renderExpression(kind string, e Expression) string {
 		if svc := strings.TrimSpace(e.CortexSearchService); svc != "" {
 			sb.WriteString(" WITH CORTEX SEARCH SERVICE " + svc)
 			if col := strings.TrimSpace(e.CortexSearchColumn); col != "" {
-				sb.WriteString(" USING " + ident(col))
+				sb.WriteString(" USING " + r.ident(col))
 			}
 		}
 	}
@@ -330,7 +343,7 @@ func renderExpression(kind string, e Expression) string {
 
 // renderVerifiedQuery emits one verifiedQuery. The name, question, and SQL are
 // all required; a row missing any of them renders as "".
-func renderVerifiedQuery(q VerifiedQuery) string {
+func (r renderer) verifiedQuery(q VerifiedQuery) string {
 	name, question, query := strings.TrimSpace(q.Name), strings.TrimSpace(q.Question), strings.TrimSpace(q.Sql)
 	if name == "" || question == "" || query == "" {
 		return ""
@@ -346,7 +359,7 @@ func renderVerifiedQuery(q VerifiedQuery) string {
 		parts = append(parts, "VERIFIED_BY "+snowflake.QuoteTextLit(by))
 	}
 	parts = append(parts, "SQL "+snowflake.QuoteTextLit(query))
-	return ident(name) + " AS (" + strings.Join(parts, " ") + ")"
+	return r.ident(name) + " AS (" + strings.Join(parts, " ") + ")"
 }
 
 // definitionBody renders the order-sensitive TABLES → RELATIONSHIPS → FACTS →
@@ -354,17 +367,17 @@ func renderVerifiedQuery(q VerifiedQuery) string {
 // modal's raw-SQL escape hatch). With neither a body nor any logical table, a
 // minimal TABLES placeholder keeps the live preview a completable template
 // rather than invalid SQL.
-func definitionBody(cfg SemanticViewConfig) string {
+func (r renderer) definitionBody(cfg SemanticViewConfig) string {
 	if body := strings.TrimSpace(cfg.Body); body != "" {
 		return "\n  " + body
 	}
 	var sb strings.Builder
-	if tables := renderEach(cfg.Tables, renderTable); len(tables) > 0 {
+	if tables := renderEach(cfg.Tables, r.table); len(tables) > 0 {
 		sb.WriteString(clause("TABLES", tables))
 	} else {
 		sb.WriteString("\n  TABLES (\n    my_table AS <database>.<schema>.<table>\n  )")
 	}
-	sb.WriteString(clause("RELATIONSHIPS", renderEach(cfg.Relationships, renderRelationship)))
+	sb.WriteString(clause("RELATIONSHIPS", renderEach(cfg.Relationships, r.relationship)))
 	for _, c := range []struct {
 		keyword string
 		items   []Expression
@@ -374,7 +387,7 @@ func definitionBody(cfg SemanticViewConfig) string {
 		{"METRICS", cfg.Metrics},
 	} {
 		sb.WriteString(clause(c.keyword, renderEach(c.items, func(e Expression) string {
-			return renderExpression(c.keyword, e)
+			return r.expression(c.keyword, e)
 		})))
 	}
 	return sb.String()
@@ -401,6 +414,10 @@ func definitionBody(cfg SemanticViewConfig) string {
 func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (string, error) {
 	var sb strings.Builder
 
+	// The case flag governs every identifier in the statement, not just the
+	// view's own name.
+	r := renderer{caseSensitive: cfg.CaseSensitive}
+
 	createClause := snowflake.CreateClause("SEMANTIC VIEW", cfg.OrReplace, cfg.IfNotExists)
 
 	name := cfg.Name
@@ -411,7 +428,7 @@ func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (stri
 	fmt.Fprintf(&sb, "%s %s", createClause,
 		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
-	sb.WriteString(definitionBody(cfg))
+	sb.WriteString(r.definitionBody(cfg))
 
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 
@@ -425,7 +442,7 @@ func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (stri
 	if v := strings.TrimSpace(cfg.AIQuestionCategorization); v != "" {
 		sb.WriteString("\n  AI_QUESTION_CATEGORIZATION " + snowflake.QuoteTextLit(v))
 	}
-	sb.WriteString(clause("AI_VERIFIED_QUERIES", renderEach(cfg.VerifiedQueries, renderVerifiedQuery)))
+	sb.WriteString(clause("AI_VERIFIED_QUERIES", renderEach(cfg.VerifiedQueries, r.verifiedQuery)))
 
 	if t := snowflake.TagClause(cfg.Tags); t != "" {
 		sb.WriteString("\n  WITH " + t)

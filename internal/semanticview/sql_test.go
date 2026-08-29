@@ -269,6 +269,45 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 			},
 		},
 		{
+			name:   "expression without a table alias is dropped",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				// The grammar is `<table_alias>.<name> AS <expr>` — an alias-less
+				// row would render as a bare `name AS expr`, which Snowflake rejects.
+				Metrics: []Expression{
+					{Name: "orphan", Expr: "SUM(1)"},
+					{TableAlias: "orders", Name: "revenue", Expr: "SUM(orders.amount)"},
+				},
+			},
+			contains: []string{"orders.revenue AS SUM(orders.amount)"},
+			absent:   []string{"orphan"},
+		},
+		{
+			name:   "case sensitive quotes every identifier, not just the view name",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:          "Sales",
+				CaseSensitive: true,
+				Tables: []LogicalTable{{
+					Alias: "Orders", Name: `"DB"."SC"."Orders"`, PrimaryKey: []string{"OrderId"},
+				}},
+				Relationships: []Relationship{
+					{Name: "Rel", Table: "Orders", Columns: []string{"CustomerId"}, RefTable: "Orders", RefColumns: []string{"OrderId"}},
+				},
+				Metrics: []Expression{{TableAlias: "Orders", Name: "Revenue", Expr: "SUM(Orders.Amount)"}},
+			},
+			contains: []string{
+				`"Sales"`,
+				`"Orders" AS "DB"."SC"."Orders" PRIMARY KEY ("OrderId")`,
+				`"Rel" AS "Orders" ("CustomerId") REFERENCES "Orders" ("OrderId")`,
+				`"Orders"."Revenue" AS SUM(Orders.Amount)`,
+			},
+		},
+		{
 			name:   "incomplete verified query is dropped",
 			db:     "DB",
 			schema: "SC",
