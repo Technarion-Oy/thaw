@@ -39,7 +39,10 @@ that describe the business meaning of the data.
 - `NonAdditiveDim` — one `NON ADDITIVE BY` entry with its `ASC`/`DESC` and
   `NULLS FIRST`/`LAST` ordering.
 - `VerifiedQuery` — one `AI_VERIFIED_QUERIES` entry (`QUESTION`, `VERIFIED_AT`,
-  `ONBOARDING_QUESTION`, `VERIFIED_BY`, `SQL`).
+  `ONBOARDING_QUESTION`, `VERIFIED_BY`, `SQL`). `VERIFIED_AT` is the one value in
+  the grammar embedded unquoted, so it is emitted only when
+  `snowflake.IsNumericID` accepts it; anything else drops the clause rather than
+  splicing raw text into the statement.
 - `BuildCreateSemanticViewSql(db, schema, cfg)` — renders:
 
   ```sql
@@ -69,7 +72,9 @@ that describe the business meaning of the data.
   each half of a dotted `NON ADDITIVE BY` reference — matching the other CREATE
   builders (hybrid / iceberg / external tables all quote their column names with
   `cfg.CaseSensitive`). The per-entity renderers hang off a `renderer` value
-  that carries the flag.
+  that carries the flag. Human-entered free text — comments, synonyms, the AI
+  instruction fields, the verified-query strings — goes through
+  `snowflake.QuoteTextLit`, which doubles backslashes as well as quotes.
 
   The trailing clauses are ordered per production, and the two orders differ:
   `logicalTable` is `WITH SYNONYMS` → `COMMENT` → `WITH TAG`, while the

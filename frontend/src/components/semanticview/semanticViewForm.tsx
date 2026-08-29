@@ -9,6 +9,7 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { ListObjects, ListUserSchemas, GetTableColumns } from "../../../wailsjs/go/app/App";
 import type { semanticview, snowflake } from "../../../wailsjs/go/models";
 import TagInput from "../shared/TagInput";
+import { TABLE_LIKE_KINDS } from "../shared/objectKinds";
 import type { TagItem } from "../shared/TagInput";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
@@ -96,6 +97,39 @@ export const emptyVerifiedQuery = (): SemVerifiedQuery => ({
 /** The alias a row is referenced by — the explicit alias, else the table name. */
 export const aliasOf = (r: TableRow) => (r.alias.trim() || r.table);
 
+/**
+ * Whether a row is complete enough for the builder to emit it. Rows that fail
+ * these are dropped from the statement, so anything that references them by name
+ * — a metric's USING, a metric's NON ADDITIVE BY — must not offer them either,
+ * or the emitted SQL points at something that isn't there. They mirror the
+ * completeness checks in `internal/semanticview/sql.go`.
+ */
+export const isCompleteRelationship = (r: SemRelationship) =>
+  !!r.name.trim() && !!r.table.trim() && !!r.refTable.trim() && r.columns.length > 0;
+
+export const isCompleteExpression = (e: ExpressionRow) =>
+  !!e.tableAlias.trim() && !!e.name.trim() && !!e.expr.trim();
+
+/**
+ * The `alias.name` a metric's NON ADDITIVE BY refers to an expression by, or ""
+ * when the reference can't be formed yet. Deliberately *not* gated on the
+ * expression being complete: this is the row's identity for reference-tracking,
+ * and clearing a half-typed SQL expression must not look like the dimension was
+ * deleted out from under a metric that references it.
+ */
+export const qualifiedNameOf = (e: ExpressionRow) => {
+  const alias = e.tableAlias.trim();
+  const name = e.name.trim();
+  return alias && name ? `${alias}.${name}` : "";
+};
+
+/**
+ * The physical table a row points at. Two rows can keep the same alias while
+ * one is re-pointed at a different table, which invalidates any column picked
+ * against the old one — the modal compares this to notice.
+ */
+export const tableKey = (r: TableRow) => colKey(r);
+
 /** Converts a form row to the builder's LogicalTable (quoted 3-part name). */
 export const toLogicalTable = (r: TableRow): SemTable => ({
   ...r,
@@ -163,13 +197,6 @@ const removeAt = <T,>(rows: T[], i: number): T[] => rows.filter((_, idx) => idx 
 
 const schemaKey = (db: string) => JSON.stringify(["schemas", db]);
 const objKey = (db: string, schema: string) => JSON.stringify(["objects", db, schema]);
-
-// Object kinds a semantic view can name as a logical table — the same
-// "table-like" set the model-monitor source picker offers.
-const TABLE_KINDS = [
-  "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
-  "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
-];
 
 /**
  * One shared schema/object cache for every `ObjectPicker` in the modal. Without
@@ -262,7 +289,7 @@ function ObjectPicker({
 }: {
   cache: ObjectCache;
   dbOptions: string[]; db: string; schema: string; name: string;
-  kinds: string[]; placeholder: string;
+  kinds: readonly string[]; placeholder: string;
   onChange: (db: string, schema: string, name: string) => void;
   width?: number;
 }) {
@@ -337,7 +364,7 @@ export function TablesSection({
             <ObjectPicker
               cache={cache}
               dbOptions={dbOptions} db={r.db} schema={r.schema} name={r.table}
-              kinds={TABLE_KINDS}
+              kinds={TABLE_LIKE_KINDS}
               placeholder="Table / view"
               onChange={(db, schema, table) =>
                 // Seed the alias from the table name unless the user set one.
@@ -580,7 +607,10 @@ export function ExpressionsSection({
 
   const isMetric = kind === "METRICS";
   const isDimension = kind === "DIMENSIONS";
-  const relationshipNames = relationships.map((r) => r.name.trim()).filter(Boolean);
+  // Only relationships the builder will actually emit are offered — a named but
+  // otherwise empty row is dropped from RELATIONSHIPS, so a metric USING it
+  // would reference something absent from the statement.
+  const relationshipNames = relationships.filter(isCompleteRelationship).map((r) => r.name.trim());
 
   const help = isMetric
     ? "Aggregations over the facts. Window metrics go in the expression: SUM(x) OVER (PARTITION BY … ORDER BY …)."

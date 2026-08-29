@@ -208,7 +208,11 @@ func synonymsClause(synonyms []string) string {
 	}
 	quoted := make([]string, len(cleaned))
 	for i, s := range cleaned {
-		quoted[i] = snowflake.QuoteStringLit(s)
+		// Synonyms are human-entered free text, so they need the backslash
+		// escaping QuoteTextLit adds — QuoteStringLit would let a trailing
+		// backslash escape the closing quote and swallow the rest of the
+		// statement.
+		quoted[i] = snowflake.QuoteTextLit(s)
 	}
 	return " WITH SYNONYMS = (" + strings.Join(quoted, ", ") + ")"
 }
@@ -376,7 +380,11 @@ func (r renderer) verifiedQuery(q VerifiedQuery) string {
 		return ""
 	}
 	parts := []string{"QUESTION " + snowflake.QuoteTextLit(question)}
-	if at := strings.TrimSpace(q.VerifiedAt); at != "" {
+	// VERIFIED_AT is the one value in the grammar embedded unquoted, so it must
+	// be a bare integer; anything else would splice arbitrary text into the
+	// statement. A non-numeric value drops the clause rather than the row — the
+	// question/SQL pair is still usable without its timestamp.
+	if at := strings.TrimSpace(q.VerifiedAt); snowflake.IsNumericID(at) {
 		parts = append(parts, "VERIFIED_AT "+at)
 	}
 	if q.OnboardingQuestion {

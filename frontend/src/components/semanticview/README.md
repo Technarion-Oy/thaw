@@ -16,10 +16,12 @@ describe the data.
   (`MAX_STALENESS`, `AI_SQL_GENERATION`, `AI_QUESTION_CATEGORIZATION`,
   `AI_VERIFIED_QUERIES`, tags, `COPY GRANTS`), and an **Advanced — raw SQL
   definition** panel holding the original Monaco editor as an escape hatch
-  (anything typed there replaces the structured definition). Create is disabled
-  until the view has a name, a logical table, and at least one dimension or
-  metric — Snowflake's rule, where a complete expression is
-  `<table_alias>.<name> AS <sql_expr>` (the grammar has no alias-less form).
+  (anything typed there replaces the structured definition — and, with it, the
+  form's validation, so Create then only requires a name and a body free of the
+  template's `<database>` / `<schema>` / `<table>` tokens). On the structured
+  path Create is disabled until the view has a name, a logical table, and at
+  least one dimension or metric — Snowflake's rule, where a complete expression
+  is `<table_alias>.<name> AS <sql_expr>` (the grammar has no alias-less form).
   Calls `BuildCreateSemanticViewSql` for the live preview and `ExecDDL` to run
   it; the builder, not the user, emits the clauses in the order Snowflake
   requires. It owns every section's state, so it is also where `updateTables`
@@ -45,10 +47,9 @@ describe the data.
   don't collide, and `useObjectCache` is the one schema/object cache
   (`ListUserSchemas` / `ListObjects`) every `ObjectPicker` in the modal shares —
   without it five logical tables in one schema would mean five identical
-  round-trips. The table picker offers every table-like kind (`TABLE`, `VIEW`,
-  `MATERIALIZED VIEW`, `DYNAMIC TABLE`, `EXTERNAL TABLE`, `ICEBERG TABLE`,
-  `HYBRID TABLE`, `EVENT TABLE`), the same set the model-monitor source picker
-  uses.
+  round-trips. The table picker offers every table-like kind, from the shared
+  `components/shared/objectKinds.ts` (`TABLE_LIKE_KINDS`) the model-monitor
+  source picker also uses.
 
   `TableRow` and `ExpressionRow` extend the generated config types with the
   picked `db` / `schema` / object parts, and `toLogicalTable` / `toExpression`
@@ -65,8 +66,12 @@ describe the data.
   diffed and the dependent rows rewritten: a renamed alias is followed, a
   removed one cleared. An alias two rows share is deliberately left alone — a
   reference is a bare string, so it can't be attributed to one of them, and
-  remapping would silently repoint the row the user didn't touch. Covered by
-  `semanticViewAliases.test.ts`.
+  remapping would silently repoint the row the user didn't touch. The same
+  diffing runs over two more reference kinds a metric copies by string: the
+  relationship names its `USING` holds, and the `alias.name` its
+  `NON ADDITIVE BY` holds. And because an alias can stay while the table under
+  it is swapped, the modal also clears column picks made against the table that
+  row no longer points at. Covered by `semanticViewAliases.test.ts`.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /

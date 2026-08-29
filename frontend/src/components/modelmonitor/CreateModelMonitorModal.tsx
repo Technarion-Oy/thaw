@@ -12,6 +12,7 @@ import {
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
+import { TABLE_LIKE_KIND_SET } from "../shared/objectKinds";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 
 interface Props {
@@ -20,12 +21,6 @@ interface Props {
   onClose: () => void;
   onSuccess?: () => void;
 }
-
-// Object kinds that can serve as a monitor SOURCE or BASELINE (table-like).
-const SOURCE_KINDS = new Set([
-  "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
-  "EXTERNAL TABLE", "ICEBERG TABLE", "HYBRID TABLE", "EVENT TABLE",
-]);
 
 type RefreshUnit = "seconds" | "minutes" | "hours" | "days";
 
@@ -147,7 +142,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
     [schemaObjects],
   );
   const tablesViews = useMemo(
-    () => schemaObjects.filter((o) => SOURCE_KINDS.has(o.kind)).map((o) => o.name).sort(),
+    () => schemaObjects.filter((o) => TABLE_LIKE_KIND_SET.has(o.kind)).map((o) => o.name).sort(),
     [schemaObjects],
   );
 

@@ -18,6 +18,7 @@ import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/
 import {
   TablesSection, RelationshipsSection, ExpressionsSection, VerifiedQueriesSection,
   useTableColumns, useObjectCache, toLogicalTable, toExpression, aliasOf,
+  isCompleteExpression, qualifiedNameOf, tableKey,
 } from "./semanticViewForm";
 import type {
   TableRow, SemRelationship, ExpressionRow, SemVerifiedQuery,
@@ -96,13 +97,32 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   // runs the statement.
   const updateTables = (next: TableRow[]) => {
     const diff = diffAliases(tables.map(aliasOf), next.map(aliasOf));
+    // An alias kept while its underlying table is swapped is not a rename, but
+    // the column picks of rows referencing it now point at a different table's
+    // columns. Clear them rather than leave a join silently pointing at columns
+    // that may not exist on the new table.
+    // Only a same-length edit aligns row-for-row; an add or delete shifts the
+    // indices, and there the row identities can't be compared this way.
+    const swapped = new Set(
+      tables.length !== next.length ? [] : next
+        .filter((r, i) => aliasOf(tables[i]) === aliasOf(r) && tableKey(tables[i]) !== tableKey(r))
+        .map(aliasOf),
+    );
     setTables(next);
-    if (!hasAliasChange(diff)) return;
-    setRelationships((rs) => rs.map((r) => ({
-      ...r,
-      table: remapAlias(r.table, diff),
-      refTable: remapAlias(r.refTable, diff),
-    })));
+    if (!hasAliasChange(diff) && swapped.size === 0) return;
+    setRelationships((rs) => rs.map((r) => {
+      const table = remapAlias(r.table, diff);
+      const refTable = remapAlias(r.refTable, diff);
+      return {
+        ...r,
+        table,
+        refTable,
+        columns: swapped.has(table) ? [] : r.columns,
+        refColumns: swapped.has(refTable) ? [] : r.refColumns,
+        rangeStart: swapped.has(refTable) ? "" : r.rangeStart,
+        rangeEnd: swapped.has(refTable) ? "" : r.rangeEnd,
+      };
+    }));
     const remapRows = (rows: ExpressionRow[]) => rows.map((e) => ({
       ...e,
       tableAlias: remapAlias(e.tableAlias, diff),
@@ -113,6 +133,31 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     setFacts(remapRows);
     setDimensions(remapRows);
     setMetrics(remapRows);
+  };
+
+  // Metrics reference relationships by name and dimensions by `alias.name`, both
+  // copied strings — the same staleness the table aliases have, so they get the
+  // same treatment: renaming one follows the reference, removing it clears it.
+  const updateRelationships = (next: SemRelationship[]) => {
+    const diff = diffAliases(relationships.map((r) => r.name.trim()), next.map((r) => r.name.trim()));
+    setRelationships(next);
+    if (!hasAliasChange(diff)) return;
+    setMetrics((ms) => ms.map((m) => ({
+      ...m,
+      using: m.using.map((u) => remapAlias(u, diff)).filter(Boolean),
+    })));
+  };
+
+  const updateDimensions = (next: ExpressionRow[]) => {
+    const diff = diffAliases(dimensions.map(qualifiedNameOf), next.map(qualifiedNameOf));
+    setDimensions(next);
+    if (!hasAliasChange(diff)) return;
+    setMetrics((ms) => ms.map((m) => ({
+      ...m,
+      nonAdditiveBy: m.nonAdditiveBy
+        .map((d) => ({ ...d, dimension: remapAlias(d.dimension, diff) }))
+        .filter((d) => d.dimension),
+    })));
   };
 
   const cfg = useMemo(() => ({
@@ -150,26 +195,19 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   // Dimension references for a metric's NON ADDITIVE BY picker. Only rows the
   // builder will actually emit are offered — picking a half-finished dimension
   // would leave the metric referencing one that never appears in DIMENSIONS.
-  const dimensionNames = dimensions
-    .filter((d) => d.tableAlias.trim() && d.name.trim())
-    .map((d) => `${d.tableAlias.trim()}.${d.name.trim()}`);
+  const dimensionNames = dimensions.filter(isCompleteExpression).map(qualifiedNameOf);
 
-  // A complete expression needs all three of `<table_alias>.<name> AS <sql_expr>`
-  // — the grammar has no alias-less form — matching what the builder accepts.
-  const complete = (e: ExpressionRow) =>
-    e.tableAlias.trim().length > 0 && e.name.trim().length > 0 && e.expr.trim().length > 0;
   // Snowflake requires at least one dimension or metric, and the definition needs
   // at least one logical table. The raw-SQL escape hatch bypasses both — its
   // content is the definition, and the builder can't validate it.
   const structuredValid =
     tables.some((t) => t.table.trim().length > 0) &&
-    (dimensions.some(complete) || metrics.some(complete));
-  // A pasted snippet may still carry <database>.<schema> style placeholders; they
-  // would only fail server-side, so block them here as the old default-body guard
-  // did.
-  // Three letters minimum so a spaceless comparison (`a<b>c`) isn't mistaken
-  // for a placeholder.
-  const bodyPlaceholders = /<[a-z_]{3,}>/i.test(body);
+    (dimensions.some(isCompleteExpression) || metrics.some(isCompleteExpression));
+  // A pasted snippet may still carry the documentation template's placeholders;
+  // they would only fail server-side, so block them here as the old default-body
+  // guard did. Deliberately just those three tokens — a broader `<word>` match
+  // would reject legitimate SQL that mentions one in a comment or a string.
+  const bodyPlaceholders = /<(database|schema|table)>/i.test(body);
   const canSubmit =
     name.trim().length > 0 &&
     (body.trim().length > 0 ? !bodyPlaceholders : structuredValid);
@@ -232,6 +270,7 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
       >
         <InputNumber
           min={MIN_MAX_STALENESS}
+          precision={0}
           style={{ width: 200 }}
           value={maxStaleness}
           onChange={setMaxStaleness}
@@ -336,13 +375,13 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
         <RelationshipsSection
           rows={relationships}
           tables={tables}
-          onChange={setRelationships}
+          onChange={updateRelationships}
           columnsFor={columnsFor}
         />
 
         {([
           ["FACTS", facts, setFacts],
-          ["DIMENSIONS", dimensions, setDimensions],
+          ["DIMENSIONS", dimensions, updateDimensions],
           ["METRICS", metrics, setMetrics],
         ] as const).map(([kind, rows, setRows]) => (
           <ExpressionsSection

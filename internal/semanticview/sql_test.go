@@ -373,6 +373,35 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 			contains: []string{`NON ADDITIVE BY ("Orders"."Order_Date")`},
 		},
 		{
+			name:   "free text is escaped as text, not as a control literal",
+			db:     "DB",
+			schema: "SC",
+			// A trailing backslash in a synonym would otherwise escape the
+			// closing quote and swallow the rest of the statement.
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`, Synonyms: []string{`sales\`}}},
+			},
+			contains: []string{`WITH SYNONYMS = ('sales\\')`},
+		},
+		{
+			name:   "non numeric verified_at drops only its clause",
+			db:     "DB",
+			schema: "SC",
+			// VERIFIED_AT is embedded unquoted, so anything non-numeric would
+			// splice raw text into the statement.
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "orders", Name: `"DB"."SC"."ORDERS"`}},
+				VerifiedQueries: []VerifiedQuery{{
+					Name: "q", Question: "Why?", Sql: "SELECT 1",
+					VerifiedAt: "0 OR 1=1",
+				}},
+			},
+			contains: []string{`q AS (QUESTION 'Why?' SQL 'SELECT 1')`},
+			absent:   []string{"VERIFIED_AT"},
+		},
+		{
 			name:   "incomplete verified query is dropped",
 			db:     "DB",
 			schema: "SC",
