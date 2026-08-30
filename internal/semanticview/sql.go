@@ -458,6 +458,19 @@ func (r renderer) definitionBody(cfg SemanticViewConfig) string {
 //	  [AI_VERIFIED_QUERIES ( … )]
 //	  [WITH TAG ( … )]
 //	  [COPY GRANTS];
+//
+// Structural incompleteness is never an error here — an incomplete row (or a
+// whole clause with no complete rows) is just dropped, the same tolerant
+// behavior the field-level completeness checks throughout this file already
+// have, so the create modal's live preview keeps rendering a readable
+// best-effort statement while the form is mid-edit. That includes Snowflake's
+// "at least one dimension or metric" rule: it's enforced by the modal's own
+// structuredValid (the only current caller), not here — enforcing it in this
+// function would mean erroring out (and blanking the live preview) for the
+// completely ordinary state of having added a table but not yet a dimension
+// or metric, which every other completeness check in this file goes out of
+// its way to render gracefully instead. MaxStaleness above is different in
+// kind: a value that's actively wrong, not merely not-yet-provided.
 func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (string, error) {
 	if cfg.MaxStaleness > 0 && cfg.MaxStaleness < MinMaxStaleness {
 		return "", fmt.Errorf("MAX_STALENESS must be at least %d seconds", MinMaxStaleness)

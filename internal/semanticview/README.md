@@ -65,7 +65,14 @@ that describe the business meaning of the data.
   `DIMENSIONS`) and is guaranteed by the builder, not the user. An incomplete
   entry — a table row with no table, a relationship with no target, an
   expression with no alias, name or SQL — renders as nothing rather than broken
-  SQL, so the live preview stays valid while a row is being filled in.
+  SQL, so the live preview stays valid while a row is being filled in. That
+  tolerance is deliberate and extends to the statement as a whole: Snowflake's
+  "at least one dimension or metric" rule is enforced by the create modal's own
+  `structuredValid` (its only current caller), not here — this function only
+  rejects a value that's actively *wrong* (`MaxStaleness` below the floor), not
+  one that's merely *not yet provided*, since erroring on the latter would mean
+  a blank live preview for the ordinary mid-edit state of having added a table
+  but no dimension or metric yet.
 
   `CaseSensitive` governs **every** identifier in the statement — the view's own
   name plus the aliases, columns and entity names inside the clauses, including

@@ -12,6 +12,7 @@ import TagInput from "../shared/TagInput";
 import { TABLE_LIKE_KINDS } from "../shared/objectKinds";
 import type { TagItem } from "../shared/TagInput";
 import { quoteQualifiedIdent } from "../shared/ObjectNameCaseControl";
+import { opts } from "../shared/PropertyRows";
 
 const { Text } = Typography;
 
@@ -97,6 +98,19 @@ export const emptyVerifiedQuery = (): SemVerifiedQuery => ({
 /** The alias a row is referenced by — the explicit alias, else the table name. */
 export const aliasOf = (r: TableRow) => (r.alias.trim() || r.table);
 
+/** Non-blank values of `keyOf(item)` that more than one item shares. */
+const duplicateValues = <T,>(items: T[], keyOf: (item: T) => string): Set<string> => {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const item of items) {
+    const k = keyOf(item);
+    if (!k) continue;
+    if (seen.has(k)) dupes.add(k);
+    else seen.add(k);
+  }
+  return dupes;
+};
+
 /**
  * Aliases shared by more than one TABLES row. `semanticViewAliases.ts`
  * deliberately leaves a duplicated alias unremapped on rename/removal — a bare
@@ -106,17 +120,17 @@ export const aliasOf = (r: TableRow) => (r.alias.trim() || r.table);
  * flags the rows and `structuredValid` blocks Create until every alias is
  * unique.
  */
-export const duplicateAliases = (tables: TableRow[]): Set<string> => {
-  const seen = new Set<string>();
-  const dupes = new Set<string>();
-  for (const t of tables) {
-    const a = aliasOf(t);
-    if (!a) continue;
-    if (seen.has(a)) dupes.add(a);
-    else seen.add(a);
-  }
-  return dupes;
-};
+export const duplicateAliases = (tables: TableRow[]): Set<string> => duplicateValues(tables, aliasOf);
+
+/**
+ * Names shared by more than one RELATIONSHIPS row — the same ambiguity as a
+ * duplicated table alias, one level up: a metric's `USING` refers to a
+ * relationship by this name, so two rows sharing one make that reference
+ * ambiguous (Snowflake, not this form, would pick a resolution — or reject
+ * it). `structuredValid` blocks Create the same way it does for table aliases.
+ */
+export const duplicateRelationshipNames = (relationships: SemRelationship[]): Set<string> =>
+  duplicateValues(relationships, (r) => r.name.trim());
 
 /**
  * Whether a relationship can be safely offered as a metric's USING option.
@@ -192,6 +206,11 @@ export const toLogicalTable = (r: TableRow): SemTable => {
 
 const colKey = (r: TableRow) => (r.db && r.schema && r.table ? quoteFqn(r.db, r.schema, r.table) : "");
 
+// A key that keeps failing (no privilege on the object, a service the user
+// can't see, …) stops being retried after this many attempts, rather than
+// hammering the backend on every retryTick for the life of the modal.
+const MAX_FETCH_ATTEMPTS = 3;
+
 /**
  * A keyed, fetch-once cache: `ensure(key, …)` runs the fetcher the first time a
  * key is asked for and stores the result under it. A failed fetch forgets its
@@ -199,7 +218,12 @@ const colKey = (r: TableRow) => (r.db && r.schema && r.table ? quoteFqn(r.db, r.
  * own effect wouldn't otherwise re-run (its dependencies didn't change — the
  * key did, but that's internal to this hook) has something to depend on to
  * actually trigger that retry, rather than leaving the caller looking at an
- * empty list for the life of the modal.
+ * empty list for the life of the modal. Capped at `MAX_FETCH_ATTEMPTS`: once a
+ * key has failed that many times it's left marked as requested and never
+ * retried again — a *persistent* failure (missing privilege, a deleted
+ * object) would otherwise retry forever, and since `retryTick` is shared
+ * across every key in the cache, one dead lookup would keep re-firing every
+ * other picker's effects too.
  *
  * Both caches in this form are built on it — the per-table column lists and the
  * shared schema/object lists — so the caching and retry policy lives in one
@@ -210,16 +234,26 @@ function useKeyedFetch<T>() {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [retryTick, setRetryTick] = useState(0);
   const requested = useRef<Set<string>>(new Set());
+  const attempts = useRef<Record<string, number>>({});
 
   const ensure = useCallback((key: string, fetcher: () => Promise<T>) => {
     if (!key || requested.current.has(key)) return;
     requested.current.add(key);
     setLoading((l) => ({ ...l, [key]: true }));
     fetcher()
-      .then((v) => setValues((c) => ({ ...c, [key]: v })))
+      .then((v) => {
+        setValues((c) => ({ ...c, [key]: v }));
+        delete attempts.current[key];
+      })
       .catch(() => {
-        requested.current.delete(key);
-        setRetryTick((t) => t + 1);
+        const n = (attempts.current[key] ?? 0) + 1;
+        attempts.current[key] = n;
+        if (n < MAX_FETCH_ATTEMPTS) {
+          requested.current.delete(key);
+          setRetryTick((t) => t + 1);
+        }
+        // else: give up silently — requested stays marked, so this key is
+        // never attempted again for the life of the modal.
       })
       .finally(() => setLoading((l) => ({ ...l, [key]: false })));
   }, []);
@@ -353,8 +387,6 @@ function Section({
   );
 }
 
-const opts = (values: string[]) => values.map((v) => ({ value: v, label: v }));
-
 /**
  * Database → schema → object cascade. A semantic view can reference objects in
  * any database the role can see, so the database is picked per row rather than
@@ -388,7 +420,7 @@ function ObjectPicker({
         size="small" showSearch placeholder="Database" style={{ width: 150 }}
         value={db || undefined}
         onChange={(v) => onChange(v ?? "", "", "")}
-        options={opts(dbOptions)}
+        options={opts(...dbOptions)}
       />
       <Select
         size="small" showSearch placeholder="Schema" style={{ width: 150 }}
@@ -396,7 +428,7 @@ function ObjectPicker({
         onChange={(v) => onChange(db, v ?? "", "")}
         disabled={!db}
         loading={loadingSchemas}
-        options={opts(schemas)}
+        options={opts(...schemas)}
       />
       <Select
         size="small" showSearch placeholder={placeholder} style={{ width }}
@@ -404,7 +436,7 @@ function ObjectPicker({
         onChange={(v) => onChange(db, schema, v ?? "")}
         disabled={!schema}
         loading={loading}
-        options={opts(objects.filter((o) => kinds.includes(o.kind)).map((o) => o.name))}
+        options={opts(...objects.filter((o) => kinds.includes(o.kind)).map((o) => o.name))}
         notFoundContent={loading ? "Loading…" : `No ${placeholder.toLowerCase()}`}
       />
     </>
@@ -467,13 +499,13 @@ export function TablesSection({
               size="small" mode="multiple" allowClear style={{ minWidth: 180 }}
               placeholder="PRIMARY KEY" value={r.primaryKey}
               onChange={(v) => patch(i, { primaryKey: v })}
-              options={opts(columns)}
+              options={opts(...columns)}
             />
             <Select
               size="small" mode="multiple" allowClear style={{ minWidth: 160 }}
               placeholder="UNIQUE" value={r.unique}
               onChange={(v) => patch(i, { unique: v })}
-              options={opts(columns)}
+              options={opts(...columns)}
             />
             <Select
               size="small" mode="tags" allowClear style={{ minWidth: 170 }}
@@ -491,13 +523,13 @@ export function TablesSection({
               size="small" allowClear style={{ width: 165 }}
               placeholder="RANGE start (preview)" value={r.rangeStart || undefined}
               onChange={(v) => patch(i, { rangeStart: v ?? "" })}
-              options={opts(columns)}
+              options={opts(...columns)}
             />
             <Select
               size="small" allowClear style={{ width: 150 }}
               placeholder="RANGE end" value={r.rangeEnd || undefined}
               onChange={(v) => patch(i, { rangeEnd: v ?? "" })}
-              options={opts(columns)}
+              options={opts(...columns)}
             />
             <Input
               size="small" style={{ width: 150 }} placeholder="constraint name"
@@ -535,6 +567,7 @@ export function RelationshipsSection({
   const aliases = tables.map(aliasOf).filter(Boolean);
   const patch = (i: number, next: Partial<SemRelationship>) =>
     onChange(patchAt(rows, i, next));
+  const dupeNames = duplicateRelationshipNames(rows);
 
   const keyColumnsOf = (alias: string) => {
     const row = tables.find((t) => aliasOf(t) === alias);
@@ -554,26 +587,30 @@ export function RelationshipsSection({
         <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
           <Input
             size="small" style={{ width: 150 }} placeholder="relationship name"
+            status={dupeNames.has(r.name.trim()) ? "error" : undefined}
+            title={dupeNames.has(r.name.trim())
+              ? "This name is used by more than one relationship — a metric's USING referencing it would be ambiguous."
+              : undefined}
             value={r.name} onChange={(e) => patch(i, { name: e.target.value })}
           />
           <Select
             size="small" showSearch style={{ width: 150 }} placeholder="from table"
             value={r.table || undefined}
             onChange={(v) => patch(i, { table: v ?? "", columns: [] })}
-            options={opts(aliases)}
+            options={opts(...aliases)}
           />
           <Select
             size="small" mode="multiple" allowClear style={{ minWidth: 180 }}
             placeholder="columns" value={r.columns}
             onChange={(v) => patch(i, { columns: v })}
-            options={opts(columnsFor(r.table))}
+            options={opts(...columnsFor(r.table))}
           />
           <Text type="secondary" style={{ fontSize: 11 }}>REFERENCES</Text>
           <Select
             size="small" showSearch style={{ width: 150 }} placeholder="to table"
             value={r.refTable || undefined}
             onChange={(v) => patch(i, { refTable: v ?? "", refColumns: [], rangeStart: "", rangeEnd: "" })}
-            options={opts(aliases)}
+            options={opts(...aliases)}
           />
           <Select
             size="small" style={{ width: 200 }} value={r.joinType}
@@ -586,13 +623,13 @@ export function RelationshipsSection({
                 size="small" allowClear style={{ width: 150 }} placeholder="range start"
                 value={r.rangeStart || undefined}
                 onChange={(v) => patch(i, { rangeStart: v ?? "" })}
-                options={opts(columnsFor(r.refTable))}
+                options={opts(...columnsFor(r.refTable))}
               />
               <Select
                 size="small" allowClear style={{ width: 150 }} placeholder="range end"
                 value={r.rangeEnd || undefined}
                 onChange={(v) => patch(i, { rangeEnd: v ?? "" })}
-                options={opts(columnsFor(r.refTable))}
+                options={opts(...columnsFor(r.refTable))}
               />
             </>
           ) : (
@@ -603,7 +640,7 @@ export function RelationshipsSection({
               onChange={(v) => patch(i, { refColumns: v })}
               // ASOF references a type-compatible column (e.g. a timestamp), not
               // necessarily a declared key — only the standard join requires one.
-              options={opts(r.joinType === "ASOF" ? columnsFor(r.refTable) : keyColumnsOf(r.refTable))}
+              options={opts(...(r.joinType === "ASOF" ? columnsFor(r.refTable) : keyColumnsOf(r.refTable)))}
             />
           )}
         </RowCard>
@@ -630,7 +667,7 @@ function NonAdditiveEditor({
             size="small" showSearch style={{ width: 180 }} placeholder="dimension"
             value={r.dimension || undefined}
             onChange={(v) => patch(i, { dimension: v ?? "" })}
-            options={opts(dimensions)}
+            options={opts(...dimensions)}
           />
           <Select
             size="small" style={{ width: 90 }} value={r.direction}
@@ -726,7 +763,7 @@ export function ExpressionsSection({
             size="small" showSearch style={{ width: 150 }} placeholder="table alias"
             value={r.tableAlias || undefined}
             onChange={(v) => patch(i, { tableAlias: v ?? "" })}
-            options={opts(aliases)}
+            options={opts(...aliases)}
           />
           <Input
             size="small" style={{ width: 160 }} placeholder="name"
@@ -760,7 +797,7 @@ export function ExpressionsSection({
                 size="small" mode="multiple" allowClear style={{ minWidth: 200 }}
                 placeholder="USING relationships (preview)" value={r.using}
                 onChange={(v) => patch(i, { using: v })}
-                options={opts(relationshipNames)}
+                options={opts(...relationshipNames)}
               />
               <div style={{ flexBasis: "100%" }}>
                 <NonAdditiveEditor
@@ -785,6 +822,13 @@ export function ExpressionsSection({
               />
               <Input
                 size="small" style={{ width: 150 }} placeholder="USING column"
+                // WITH CORTEX SEARCH SERVICE … USING … is only emitted once a
+                // service is fully picked (renderer.expression in
+                // internal/semanticview/sql.go gates the whole clause on a
+                // non-blank cortexSearchService) — disabled rather than
+                // silently accepting text the builder would drop.
+                disabled={!r.cortexName}
+                title={!r.cortexName ? "Pick a search service above first — this has no effect until you do." : undefined}
                 value={r.cortexSearchColumn}
                 onChange={(e) => patch(i, { cortexSearchColumn: e.target.value })}
               />

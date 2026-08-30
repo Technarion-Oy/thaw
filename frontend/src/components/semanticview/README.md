@@ -27,7 +27,10 @@ describe the data.
   fields) and `ExecDDL` to run it; the builder, not the user, emits the clauses
   in the order Snowflake requires. A failed build (e.g. a `MAX_STALENESS` below
   Snowflake's floor) blanks the preview and disables Create rather than
-  executing stale SQL. It owns every section's state, so it is also where
+  executing stale SQL. Submitting rebuilds the statement fresh from `cfg`
+  rather than trusting the debounced preview string — an edit made just before
+  clicking Create could still be within that 250ms window and not yet
+  reflected in it. It owns every section's state, so it is also where
   `updateTables` / `updateRelationships` / `updateDimensions` keep cross-clause
   references honest (see `semanticViewAliases.ts`) — re-validated against both
   identity (renamed/removed) and *completeness* (e.g. a relationship losing its
@@ -61,16 +64,22 @@ describe the data.
   depend on nothing that changes after a failure — so `useKeyedFetch` also
   bumps a `retryTick` counter on failure, and `useObjectCache` exposes it
   purely so `ObjectPicker`'s effects can list it as a dependency and actually
-  re-fire. The table picker offers every table-like kind, from the shared
-  `components/shared/objectKinds.ts` (`TABLE_LIKE_KINDS`) the model-monitor
-  source picker also uses.
+  re-fire. Capped at 3 attempts per key — a *persistent* failure (no privilege
+  on the object, a deleted table) would otherwise retry forever, and since
+  `retryTick` is shared across the whole cache, one dead lookup would keep
+  re-firing every other picker's effects too. The table picker offers every
+  table-like kind, from the shared `components/shared/objectKinds.ts`
+  (`TABLE_LIKE_KINDS`) the model-monitor source picker also uses.
 
   `TableRow` and `ExpressionRow` extend the generated config types with the
   picked `db` / `schema` / object parts, and `toLogicalTable` / `toExpression`
   derive the quoted `"db"."schema"."name"` reference the Go builder emits
   verbatim (via the shared `quoteQualifiedIdent`, `ObjectNameCaseControl.tsx` —
   also used by `useObjectTags.ts`, so the quote-each-part-and-join pattern
-  lives in one place instead of being rewritten per caller). Keeping the parts
+  lives in one place instead of being rewritten per caller). The `Select`
+  options every picker builds go through the shared `opts` from
+  `components/shared/PropertyRows.tsx` too (a rest-arg helper, so a call site
+  holding an array spreads it: `opts(...columns)`). Keeping the parts
   on the row is what lets every cascade be a fully controlled component with
   no local state to fall out of step with its row. `toLogicalTable` always
   sends the row's resolved `aliasOf(r)`, not the possibly-blank `alias` field
@@ -93,7 +102,18 @@ describe the data.
   colliding rows — `TablesSection` marks their alias `Input` with an error
   state, and `CreateSemanticViewModal.tsx`'s `structuredValid` blocks Create
   outright while any alias is duplicated, since `semanticViewAliases.ts`
-  can't safely remap a reference to one either.
+  can't safely remap a reference to one either. `duplicateRelationshipNames`
+  is the same check one clause over — two `RELATIONSHIPS` rows sharing a name
+  make a metric's `USING` reference to it ambiguous the same way, and get the
+  same error-state `Input` plus `structuredValid` block.
+
+  The `WITH CORTEX SEARCH SERVICE … USING <column>` binding is a dimension-only
+  `ObjectPicker` cascade (database → schema → service) plus a free-text "USING
+  column" `Input`; the whole clause — column included — is gated in
+  `renderer.expression` (`internal/semanticview/sql.go`) on the service
+  actually being picked, so the column `Input` is disabled until `cortexName`
+  is set rather than silently discarding text typed into a field with no
+  effect yet.
 - **`semanticViewAliases.ts`** — `diffAliases` / `remapAlias` /
   `remapQualified` / `swappedAliases`. The other sections refer to logical tables by alias — a
   copied string, not a live reference — so renaming or deleting a table row

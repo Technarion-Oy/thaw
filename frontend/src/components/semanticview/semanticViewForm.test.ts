@@ -11,6 +11,7 @@ vi.mock("../../../wailsjs/go/sqleditor/Service", () => ({
 
 import {
   isCompleteRelationship, emptyRelationship, emptyTableRow, toLogicalTable, duplicateAliases,
+  duplicateRelationshipNames,
 } from "./semanticViewForm";
 
 describe("toLogicalTable", () => {
@@ -53,6 +54,29 @@ describe("duplicateAliases", () => {
   it("ignores blank aliases (table not picked yet)", () => {
     const rows = [emptyTableRow("DB", "SC"), emptyTableRow("DB", "SC")];
     expect(duplicateAliases(rows).size).toBe(0);
+  });
+});
+
+describe("duplicateRelationshipNames", () => {
+  it("is empty when every name is unique", () => {
+    const rows = [
+      { ...emptyRelationship(), name: "r1" },
+      { ...emptyRelationship(), name: "r2" },
+    ];
+    expect(duplicateRelationshipNames(rows).size).toBe(0);
+  });
+
+  it("flags a name shared by two rows", () => {
+    const rows = [
+      { ...emptyRelationship(), name: "r1" },
+      { ...emptyRelationship(), name: "r1" },
+    ];
+    expect(duplicateRelationshipNames(rows)).toEqual(new Set(["r1"]));
+  });
+
+  it("ignores blank names", () => {
+    const rows = [emptyRelationship(), emptyRelationship()];
+    expect(duplicateRelationshipNames(rows).size).toBe(0);
   });
 });
 

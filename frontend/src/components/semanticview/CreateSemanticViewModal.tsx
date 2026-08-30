@@ -19,7 +19,7 @@ import {
   TablesSection, RelationshipsSection, ExpressionsSection, VerifiedQueriesSection,
   useTableColumns, useObjectCache, toLogicalTable, toExpression, aliasOf,
   isCompleteExpression, isCompleteRelationship, qualifiedNameOf, tableKey,
-  duplicateAliases,
+  duplicateAliases, duplicateRelationshipNames,
 } from "./semanticViewForm";
 import type {
   TableRow, SemRelationship, ExpressionRow, SemVerifiedQuery,
@@ -227,15 +227,16 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   // Snowflake requires at least one dimension or metric, and the definition needs
   // at least one logical table. The raw-SQL escape hatch bypasses both — its
   // content is the definition, and the builder can't validate it.
-  // A duplicated alias is also blocked here: semanticViewAliases.ts can't
-  // remap a reference to a duplicated alias (a bare string can't say which of
-  // the rows sharing it was meant), so a rename or removal on either row
-  // leaves the other rows' references stale with no rewrite to catch it. That
-  // stale SQL is otherwise well-formed — the builder doesn't validate that an
-  // alias actually exists in TABLES — so only Snowflake would reject it.
+  // A duplicated table alias or relationship name is also blocked here: a
+  // bare string can't say which of the rows sharing it a reference meant, so
+  // semanticViewAliases.ts can't remap it on rename/removal and a metric's
+  // USING/NON ADDITIVE BY can't unambiguously refer to it either — that stale
+  // or ambiguous SQL is otherwise well-formed, so only Snowflake would reject
+  // it.
   const structuredValid =
     tables.some((t) => t.table.trim().length > 0) &&
     duplicateAliases(tables).size === 0 &&
+    duplicateRelationshipNames(relationships).size === 0 &&
     (dimensions.some(isCompleteExpression) || metrics.some(isCompleteExpression));
   // A pasted snippet may still carry the documentation template's placeholders;
   // they would only fail server-side, so block them here as the old default-body
@@ -250,7 +251,11 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const handleRun = () => {
     if (!canSubmit) return;
     submit(async () => {
-      await ExecDDL(preview);
+      // Rebuilt fresh here rather than trusting `preview` — it's debounced
+      // 250ms, so an edit made just before clicking Create could still be
+      // in flight and not yet reflected in that string.
+      const sql = await BuildCreateSemanticViewSql(db, schema, cfg as any);
+      await ExecDDL(sql);
       onSuccess?.();
       onClose();
     });
