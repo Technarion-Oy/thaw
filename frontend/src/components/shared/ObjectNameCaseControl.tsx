@@ -54,6 +54,16 @@ export function quoteIdent(name: string): string {
 }
 
 /**
+ * Quotes each already-split part of a dotted `db.schema.name`-style reference
+ * and joins them, e.g. `quoteQualifiedIdent("DB", "SC", "T")` →
+ * `"DB"."SC"."T"`. Blank parts (an object with no schema part, say) are
+ * dropped rather than quoted into an empty `""` segment.
+ */
+export function quoteQualifiedIdent(...parts: string[]): string {
+  return parts.filter(Boolean).map(quoteIdent).join(".");
+}
+
+/**
  * Returns the SQL token for a Snowflake object identifier.
  *
  * - If `caseSensitive` is true, or the name cannot be expressed as a bare

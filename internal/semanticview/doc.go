@@ -8,10 +8,14 @@
 // meaning of the data.
 //
 // CREATE SEMANTIC VIEW has a rich, order-sensitive body (TABLES → RELATIONSHIPS
-// → FACTS → DIMENSIONS → METRICS) whose per-entity sub-grammar is far too large
-// for a structured form, so the builder takes the body verbatim from a Monaco
-// editor and frames it with the CREATE prefix, an optional COMMENT, and an
-// optional COPY GRANTS. SHOW SEMANTIC VIEWS reports only metadata (owner,
+// → FACTS → DIMENSIONS → METRICS). Each clause is modeled structurally
+// (LogicalTable, Relationship, Expression) so the create modal can drive it from
+// form controls and the builder — not the user — guarantees the clause order;
+// SemanticViewConfig.Body remains as a raw-SQL escape hatch that replaces the
+// whole structured definition when set. The view-level options (COMMENT,
+// MAX_STALENESS, AI_SQL_GENERATION, AI_QUESTION_CATEGORIZATION,
+// AI_VERIFIED_QUERIES, WITH TAG, COPY GRANTS) follow the body.
+// SHOW SEMANTIC VIEWS reports only metadata (owner,
 // comment); the full structure comes from DESCRIBE SEMANTIC VIEW and the
 // SHOW SEMANTIC DIMENSIONS / FACTS / METRICS commands, read by the properties
 // panel. ALTER SEMANTIC VIEW only changes the comment, tags, or name; the body

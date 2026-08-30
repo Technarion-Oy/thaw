@@ -3914,13 +3914,188 @@ export namespace secrets {
 
 export namespace semanticview {
 	
+	export class NonAdditiveDim {
+	    dimension: string;
+	    direction: string;
+	    nulls: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NonAdditiveDim(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dimension = source["dimension"];
+	        this.direction = source["direction"];
+	        this.nulls = source["nulls"];
+	    }
+	}
+	export class Expression {
+	    visibility: string;
+	    tableAlias: string;
+	    name: string;
+	    filterLabel: boolean;
+	    using: string[];
+	    nonAdditiveBy: NonAdditiveDim[];
+	    expr: string;
+	    synonyms: string[];
+	    tags: snowflake.TagPair[];
+	    comment: string;
+	    cortexSearchService: string;
+	    cortexSearchColumn: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Expression(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.visibility = source["visibility"];
+	        this.tableAlias = source["tableAlias"];
+	        this.name = source["name"];
+	        this.filterLabel = source["filterLabel"];
+	        this.using = source["using"];
+	        this.nonAdditiveBy = this.convertValues(source["nonAdditiveBy"], NonAdditiveDim);
+	        this.expr = source["expr"];
+	        this.synonyms = source["synonyms"];
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
+	        this.comment = source["comment"];
+	        this.cortexSearchService = source["cortexSearchService"];
+	        this.cortexSearchColumn = source["cortexSearchColumn"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class LogicalTable {
+	    alias: string;
+	    name: string;
+	    primaryKey: string[];
+	    unique: string[];
+	    constraintName: string;
+	    rangeStart: string;
+	    rangeEnd: string;
+	    synonyms: string[];
+	    comment: string;
+	    tags: snowflake.TagPair[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LogicalTable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.name = source["name"];
+	        this.primaryKey = source["primaryKey"];
+	        this.unique = source["unique"];
+	        this.constraintName = source["constraintName"];
+	        this.rangeStart = source["rangeStart"];
+	        this.rangeEnd = source["rangeEnd"];
+	        this.synonyms = source["synonyms"];
+	        this.comment = source["comment"];
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class Relationship {
+	    name: string;
+	    table: string;
+	    columns: string[];
+	    refTable: string;
+	    refColumns: string[];
+	    joinType: string;
+	    rangeStart: string;
+	    rangeEnd: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Relationship(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.table = source["table"];
+	        this.columns = source["columns"];
+	        this.refTable = source["refTable"];
+	        this.refColumns = source["refColumns"];
+	        this.joinType = source["joinType"];
+	        this.rangeStart = source["rangeStart"];
+	        this.rangeEnd = source["rangeEnd"];
+	    }
+	}
+	export class VerifiedQuery {
+	    name: string;
+	    question: string;
+	    verifiedAt: string;
+	    onboardingQuestion: boolean;
+	    verifiedBy: string;
+	    sql: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VerifiedQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.question = source["question"];
+	        this.verifiedAt = source["verifiedAt"];
+	        this.onboardingQuestion = source["onboardingQuestion"];
+	        this.verifiedBy = source["verifiedBy"];
+	        this.sql = source["sql"];
+	    }
+	}
 	export class SemanticViewConfig {
 	    name: string;
 	    caseSensitive: boolean;
 	    orReplace: boolean;
 	    ifNotExists: boolean;
 	    body: string;
+	    tables: LogicalTable[];
+	    relationships: Relationship[];
+	    facts: Expression[];
+	    dimensions: Expression[];
+	    metrics: Expression[];
 	    comment: string;
+	    maxStaleness: number;
+	    aiSqlGeneration: string;
+	    aiQuestionCategorization: string;
+	    verifiedQueries: VerifiedQuery[];
+	    tags: snowflake.TagPair[];
 	    copyGrants: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -3934,9 +4109,37 @@ export namespace semanticview {
 	        this.orReplace = source["orReplace"];
 	        this.ifNotExists = source["ifNotExists"];
 	        this.body = source["body"];
+	        this.tables = this.convertValues(source["tables"], LogicalTable);
+	        this.relationships = this.convertValues(source["relationships"], Relationship);
+	        this.facts = this.convertValues(source["facts"], Expression);
+	        this.dimensions = this.convertValues(source["dimensions"], Expression);
+	        this.metrics = this.convertValues(source["metrics"], Expression);
 	        this.comment = source["comment"];
+	        this.maxStaleness = source["maxStaleness"];
+	        this.aiSqlGeneration = source["aiSqlGeneration"];
+	        this.aiQuestionCategorization = source["aiQuestionCategorization"];
+	        this.verifiedQueries = this.convertValues(source["verifiedQueries"], VerifiedQuery);
+	        this.tags = this.convertValues(source["tags"], snowflake.TagPair);
 	        this.copyGrants = source["copyGrants"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
