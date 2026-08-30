@@ -89,6 +89,11 @@ describe("remapQualified", () => {
   it("treats a dotless reference as a bare alias", () => {
     expect(remapQualified("orders", renamed)).toBe("sales");
   });
+
+  it("splits on the last dot, so an alias containing a dot survives", () => {
+    const renamedDotted = diffAliases(["ord.v2"], ["ord.v3"]);
+    expect(remapQualified("ord.v2.order_date", renamedDotted)).toBe("ord.v3.order_date");
+  });
 });
 
 describe("swappedAliases", () => {

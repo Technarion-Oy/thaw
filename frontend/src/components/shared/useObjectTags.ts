@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { GetObjectTagReferences, ListAccountTags } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import { quoteIdent } from "./ObjectNameCaseControl";
+import { quoteQualifiedIdent } from "./ObjectNameCaseControl";
 import { quoteTextLit } from "./sqlEscape";
 import type { EditableTag } from "./TagsRow";
 import { parseAllowedValues } from "../tag/allowedValues";
@@ -53,7 +53,7 @@ export function parseObjectTags(res: snowflake.QueryResult | null, kind: string)
     const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
     const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
     const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
-    const qualified = [tdb, tsc, tnm].filter(Boolean).map(quoteIdent).join(".");
+    const qualified = quoteQualifiedIdent(tdb, tsc, tnm);
     const level = lvI >= 0 ? String(row[lvI] ?? "").toUpperCase() : "";
     const inherited = level !== "" && level !== self;
     return {
@@ -84,7 +84,7 @@ function tagNameOptions(res: snowflake.QueryResult | null): TagNameOption[] | un
     const sc = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
     const parts = [db, sc, nm].filter(Boolean);
     const allowedValues = iAllowed >= 0 && r[iAllowed] != null ? parseAllowedValues(String(r[iAllowed])) : [];
-    return { value: parts.map(quoteIdent).join("."), label: parts.join("."), allowedValues };
+    return { value: quoteQualifiedIdent(...parts), label: parts.join("."), allowedValues };
   });
   return opts.length ? opts : undefined;
 }

@@ -72,9 +72,14 @@ that describe the business meaning of the data.
   each half of a dotted `NON ADDITIVE BY` reference — matching the other CREATE
   builders (hybrid / iceberg / external tables all quote their column names with
   `cfg.CaseSensitive`). The per-entity renderers hang off a `renderer` value
-  that carries the flag. Human-entered free text — comments, synonyms, the AI
-  instruction fields, the verified-query strings — goes through
-  `snowflake.QuoteTextLit`, which doubles backslashes as well as quotes.
+  that carries the flag. `qualifiedIdent` splits a `NON ADDITIVE BY` reference
+  on its *last* dot, not its first — the table alias half is a free-text form
+  field with no restriction against containing one (e.g. `ord.v2`), so
+  splitting on the first dot would fold the rest of the alias into the name
+  half and quote it as one nonexistent identifier. Human-entered free text —
+  comments, synonyms, the AI instruction fields, the verified-query strings —
+  goes through `snowflake.QuoteTextLit`, which doubles backslashes as well as
+  quotes.
 
   The trailing clauses are ordered per production, and the two orders differ:
   `logicalTable` is `WITH SYNONYMS` → `COMMENT` → `WITH TAG`, while the

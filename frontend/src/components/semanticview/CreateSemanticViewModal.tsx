@@ -18,7 +18,8 @@ import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/
 import {
   TablesSection, RelationshipsSection, ExpressionsSection, VerifiedQueriesSection,
   useTableColumns, useObjectCache, toLogicalTable, toExpression, aliasOf,
-  isCompleteExpression, qualifiedNameOf, tableKey,
+  isCompleteExpression, isCompleteRelationship, qualifiedNameOf, tableKey,
+  duplicateAliases,
 } from "./semanticViewForm";
 import type {
   TableRow, SemRelationship, ExpressionRow, SemVerifiedQuery,
@@ -33,7 +34,10 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 
 const { Text } = Typography;
 
-// Snowflake's documented floor for MAX_STALENESS (seconds).
+// Snowflake's documented floor for MAX_STALENESS (seconds). A UI-only guard —
+// BuildCreateSemanticViewSql enforces the same floor (MinMaxStaleness in
+// internal/semanticview/sql.go) server-side, so a value that slips past this
+// InputNumber still fails closed instead of reaching Snowflake.
 const MIN_MAX_STALENESS = 120;
 
 interface Props {
@@ -74,6 +78,8 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const [copyGrants, setCopyGrants] = useState(false);
   const [body, setBody] = useState("");
 
+  const { creating, error, setError, submit } = useCreateSubmit();
+
   // A semantic view can reference tables and Cortex search services in any
   // database, so the pickers get the full database list; the view's own db/schema
   // only seed a new row.
@@ -83,8 +89,11 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
       // The view's own database seeds every new table row, so it must be an
       // option even if ListDatabases filters differently from whatever listed it.
       .then((d) => setDbOptions(d?.includes(db) ? d : [db, ...(d ?? [])]))
-      .catch(() => {});
-  }, [db]);
+      // Surfaced the same way as every other failure in this modal, rather than
+      // silently narrowing the picker to just the current database with no
+      // indication why other databases didn't show up.
+      .catch((err) => setError(`Failed to list databases: ${err}`));
+  }, [db, setError]);
 
   const columnsFor = useTableColumns(tables);
   const objectCache = useObjectCache();
@@ -107,7 +116,11 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     const swapped = new Set(swappedAliases(identities(tables), identities(next)));
     setTables(next);
     if (!hasAliasChange(diff) && swapped.size === 0) return;
-    setRelationships((rs) => rs.map((r) => {
+    // A table rename/removal can also turn a relationship that referenced it
+    // incomplete (its table/refTable clears when the alias is removed), which
+    // must cascade into any metric's USING the same way a direct relationship
+    // edit does — see the completeness re-check in updateRelationships below.
+    const newRelationships = relationships.map((r) => {
       const table = remapAlias(r.table, diff);
       const refTable = remapAlias(r.refTable, diff);
       return {
@@ -119,10 +132,15 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
         rangeStart: swapped.has(refTable) ? "" : r.rangeStart,
         rangeEnd: swapped.has(refTable) ? "" : r.rangeEnd,
       };
-    }));
+    });
+    setRelationships(newRelationships);
+    const completeRelNames = new Set(
+      newRelationships.filter(isCompleteRelationship).map((r) => r.name.trim()),
+    );
     const remapRows = (rows: ExpressionRow[]) => rows.map((e) => ({
       ...e,
       tableAlias: remapAlias(e.tableAlias, diff),
+      using: e.using.filter((u) => completeRelNames.has(u)),
       nonAdditiveBy: e.nonAdditiveBy
         .map((d) => ({ ...d, dimension: remapQualified(d.dimension, diff) }))
         .filter((d) => d.dimension),
@@ -133,27 +151,32 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   };
 
   // Metrics reference relationships by name and dimensions by `alias.name`, both
-  // copied strings — the same staleness the table aliases have, so they get the
-  // same treatment: renaming one follows the reference, removing it clears it.
+  // copied strings — the same staleness the table aliases have, so a rename is
+  // followed and a removal clears the reference. But a row can also go stale
+  // without its identity changing at all — e.g. a relationship losing its
+  // columns, or a dimension losing its SQL expression — which the builder
+  // (internal/semanticview/sql.go) silently drops from its clause the same as a
+  // removed row. So references are re-validated against *completeness*, not just
+  // identity, on every edit.
   const updateRelationships = (next: SemRelationship[]) => {
     const diff = diffAliases(relationships.map((r) => r.name.trim()), next.map((r) => r.name.trim()));
     setRelationships(next);
-    if (!hasAliasChange(diff)) return;
+    const completeNames = new Set(next.filter(isCompleteRelationship).map((r) => r.name.trim()));
     setMetrics((ms) => ms.map((m) => ({
       ...m,
-      using: m.using.map((u) => remapAlias(u, diff)).filter(Boolean),
+      using: m.using.map((u) => remapAlias(u, diff)).filter((u) => completeNames.has(u)),
     })));
   };
 
   const updateDimensions = (next: ExpressionRow[]) => {
     const diff = diffAliases(dimensions.map(qualifiedNameOf), next.map(qualifiedNameOf));
     setDimensions(next);
-    if (!hasAliasChange(diff)) return;
+    const completeNames = new Set(next.filter(isCompleteExpression).map(qualifiedNameOf));
     setMetrics((ms) => ms.map((m) => ({
       ...m,
       nonAdditiveBy: m.nonAdditiveBy
         .map((d) => ({ ...d, dimension: remapAlias(d.dimension, diff) }))
-        .filter((d) => d.dimension),
+        .filter((d) => completeNames.has(d.dimension)),
     })));
   };
 
@@ -183,11 +206,18 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   ]);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
+  // blankOnError: the builder now rejects a MAX_STALENESS below Snowflake's
+  // floor (see internal/semanticview/sql.go). A failed build must clear the
+  // preview rather than leave stale SQL that Create could execute, so submit
+  // below is also gated on a non-empty preview.
+  // debounceMs: `cfg` spans every table/relationship/expression row, so it gets
+  // a new identity on every keystroke in any field — without a debounce that
+  // would mean one IPC round trip per keystroke.
   const preview = useSqlPreview(
     () => BuildCreateSemanticViewSql(db, schema, cfg as any),
     [db, schema, cfg],
+    { blankOnError: true, debounceMs: 250 },
   );
-  const { creating, error, setError, submit } = useCreateSubmit();
 
   // Dimension references for a metric's NON ADDITIVE BY picker. Only rows the
   // builder will actually emit are offered — picking a half-finished dimension
@@ -197,8 +227,15 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   // Snowflake requires at least one dimension or metric, and the definition needs
   // at least one logical table. The raw-SQL escape hatch bypasses both — its
   // content is the definition, and the builder can't validate it.
+  // A duplicated alias is also blocked here: semanticViewAliases.ts can't
+  // remap a reference to a duplicated alias (a bare string can't say which of
+  // the rows sharing it was meant), so a rename or removal on either row
+  // leaves the other rows' references stale with no rewrite to catch it. That
+  // stale SQL is otherwise well-formed — the builder doesn't validate that an
+  // alias actually exists in TABLES — so only Snowflake would reject it.
   const structuredValid =
     tables.some((t) => t.table.trim().length > 0) &&
+    duplicateAliases(tables).size === 0 &&
     (dimensions.some(isCompleteExpression) || metrics.some(isCompleteExpression));
   // A pasted snippet may still carry the documentation template's placeholders;
   // they would only fail server-side, so block them here as the old default-body
@@ -207,7 +244,8 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
   const bodyPlaceholders = /<(database|schema|table)>/i.test(body);
   const canSubmit =
     name.trim().length > 0 &&
-    (body.trim().length > 0 ? !bodyPlaceholders : structuredValid);
+    (body.trim().length > 0 ? !bodyPlaceholders : structuredValid) &&
+    !!preview;
 
   const handleRun = () => {
     if (!canSubmit) return;

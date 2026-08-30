@@ -27,6 +27,15 @@ interface SqlPreviewOptions {
    * otherwise risk executing stale SQL after a build error (e.g. git repository).
    */
   blankOnError?: boolean;
+  /**
+   * Delay (ms) before a build runs after `deps` change, so a burst of rapid
+   * edits (e.g. keystrokes in a text field) coalesces into one backend round
+   * trip instead of one per keystroke. Omit (or 0) for the previous
+   * build-immediately behavior — fine for modals whose `deps` rarely change
+   * faster than a user can act, but worth setting for a form with many
+   * free-text fields feeding one preview (e.g. the semantic view builder).
+   */
+  debounceMs?: number;
 }
 
 /**
@@ -48,12 +57,20 @@ export function useSqlPreview(
 ): string {
   const [preview, setPreview] = useState("");
   const blankOnError = options?.blankOnError ?? false;
+  const debounceMs = options?.debounceMs ?? 0;
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve(build())
-      .then((sql) => { if (!cancelled) setPreview(sql); })
-      .catch(() => { if (!cancelled && blankOnError) setPreview(""); });
-    return () => { cancelled = true; };
+    const run = () => {
+      Promise.resolve(build())
+        .then((sql) => { if (!cancelled) setPreview(sql); })
+        .catch(() => { if (!cancelled && blankOnError) setPreview(""); });
+    };
+    if (debounceMs <= 0) {
+      run();
+      return () => { cancelled = true; };
+    }
+    const timer = setTimeout(run, debounceMs);
+    return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return preview;

@@ -373,6 +373,23 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 			contains: []string{`NON ADDITIVE BY ("Orders"."Order_Date")`},
 		},
 		{
+			name:   "non additive by splits an alias containing a dot on the last dot",
+			db:     "DB",
+			schema: "SC",
+			cfg: SemanticViewConfig{
+				Name:   "sales",
+				Tables: []LogicalTable{{Alias: "ord.v2", Name: `"DB"."SC"."ORDERS"`}},
+				Metrics: []Expression{{
+					TableAlias:    "ord.v2",
+					Name:          "balance",
+					Expr:          "SUM(amount)",
+					NonAdditiveBy: []NonAdditiveDim{{Dimension: "ord.v2.order_date"}},
+				}},
+			},
+			contains: []string{`NON ADDITIVE BY ("ord.v2".order_date)`},
+			absent:   []string{`."v2.order_date"`, `"ord.v2.order_date"`},
+		},
+		{
 			name:   "free text is escaped as text, not as a control literal",
 			db:     "DB",
 			schema: "SC",
@@ -446,5 +463,24 @@ func TestBuildCreateSemanticViewSql(t *testing.T) {
 				prev = at
 			}
 		})
+	}
+}
+
+func TestBuildCreateSemanticViewSql_MaxStalenessFloor(t *testing.T) {
+	base := SemanticViewConfig{Name: "sales", Body: "TABLES ( orders AS DB.SC.ORDERS )"}
+
+	base.MaxStaleness = 0
+	if _, err := BuildCreateSemanticViewSql("DB", "SC", base); err != nil {
+		t.Errorf("unset MaxStaleness: unexpected error: %v", err)
+	}
+
+	base.MaxStaleness = MinMaxStaleness - 1
+	if _, err := BuildCreateSemanticViewSql("DB", "SC", base); err == nil {
+		t.Error("expected an error for MaxStaleness below the floor")
+	}
+
+	base.MaxStaleness = MinMaxStaleness
+	if _, err := BuildCreateSemanticViewSql("DB", "SC", base); err != nil {
+		t.Errorf("MaxStaleness at the floor: unexpected error: %v", err)
 	}
 }

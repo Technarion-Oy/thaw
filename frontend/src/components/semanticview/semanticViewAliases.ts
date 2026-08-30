@@ -104,9 +104,15 @@ export function remapAlias(alias: string, diff: AliasDiff): string {
  * Maps a dotted `alias.name` reference (a metric's NON ADDITIVE BY dimension)
  * through a diff, returning "" when the alias is gone. A reference with no dot
  * is treated as a bare alias.
+ *
+ * Splits on the *last* dot: the alias half is free-text with no restriction
+ * against containing one (e.g. "ord.v2"), while the name half is a single
+ * field — the same reasoning as `qualifiedIdent` in
+ * `internal/semanticview/sql.go`, which renders this same reference and must
+ * split it the same way to stay consistent with what gets remapped here.
  */
 export function remapQualified(ref: string, diff: AliasDiff): string {
-  const dot = ref.indexOf(".");
+  const dot = ref.lastIndexOf(".");
   if (dot < 0) return remapAlias(ref, diff);
   const alias = remapAlias(ref.slice(0, dot), diff);
   return alias ? alias + ref.slice(dot) : "";

@@ -9,6 +9,9 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// MinMaxStaleness is Snowflake's documented floor (seconds) for MAX_STALENESS.
+const MinMaxStaleness = 120
+
 // LogicalTable is one entry of the TABLES ( … ) clause:
 //
 //	[ <alias> AS ] <table_name>
@@ -128,13 +131,16 @@ type SemanticViewConfig struct {
 	IfNotExists   bool   `json:"ifNotExists"`
 	// Body overrides Tables/Relationships/Facts/Dimensions/Metrics when set, and
 	// is emitted verbatim between the name and the COMMENT clause.
-	Body                     string              `json:"body"`
-	Tables                   []LogicalTable      `json:"tables"`
-	Relationships            []Relationship      `json:"relationships"`
-	Facts                    []Expression        `json:"facts"`
-	Dimensions               []Expression        `json:"dimensions"`
-	Metrics                  []Expression        `json:"metrics"`
-	Comment                  string              `json:"comment"`
+	Body          string         `json:"body"`
+	Tables        []LogicalTable `json:"tables"`
+	Relationships []Relationship `json:"relationships"`
+	Facts         []Expression   `json:"facts"`
+	Dimensions    []Expression   `json:"dimensions"`
+	Metrics       []Expression   `json:"metrics"`
+	Comment       string         `json:"comment"`
+	// MaxStaleness is seconds; 0 means unset. Snowflake requires at least
+	// MinMaxStaleness when set — BuildCreateSemanticViewSql rejects anything
+	// lower rather than emit a statement Snowflake will refuse.
 	MaxStaleness             int                 `json:"maxStaleness"`
 	AISqlGeneration          string              `json:"aiSqlGeneration"`
 	AIQuestionCategorization string              `json:"aiQuestionCategorization"`
@@ -168,16 +174,22 @@ func (r renderer) identList(names []string) string {
 // half separately — quoting the whole string would produce one identifier
 // containing a dot. Used for a metric's NON ADDITIVE BY dimensions, which are
 // the only references in the grammar the form supplies pre-qualified.
+//
+// Split on the *last* dot, not the first: the table alias is a free-text form
+// field with no restriction against containing one (e.g. "ord.v2"), while the
+// dimension name after it is a single field. Splitting on the first dot would
+// fold the rest of the alias into the name half, quoting it as one identifier
+// that doesn't exist instead of alias.name.
 func (r renderer) qualifiedIdent(ref string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""
 	}
-	alias, name, dotted := strings.Cut(ref, ".")
-	if !dotted {
+	at := strings.LastIndex(ref, ".")
+	if at < 0 {
 		return r.ident(ref)
 	}
-	return r.ident(alias) + "." + r.ident(name)
+	return r.ident(ref[:at]) + "." + r.ident(ref[at+1:])
 }
 
 // renderEach maps items through render and drops the entries it rejects (an
@@ -447,6 +459,10 @@ func (r renderer) definitionBody(cfg SemanticViewConfig) string {
 //	  [WITH TAG ( … )]
 //	  [COPY GRANTS];
 func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (string, error) {
+	if cfg.MaxStaleness > 0 && cfg.MaxStaleness < MinMaxStaleness {
+		return "", fmt.Errorf("MAX_STALENESS must be at least %d seconds", MinMaxStaleness)
+	}
+
 	var sb strings.Builder
 
 	// The case flag governs every identifier in the statement, not just the

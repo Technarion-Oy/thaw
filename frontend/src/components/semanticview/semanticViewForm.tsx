@@ -11,7 +11,7 @@ import type { semanticview, snowflake } from "../../../wailsjs/go/models";
 import TagInput from "../shared/TagInput";
 import { TABLE_LIKE_KINDS } from "../shared/objectKinds";
 import type { TagItem } from "../shared/TagInput";
-import { quoteIdent } from "../shared/ObjectNameCaseControl";
+import { quoteQualifiedIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -27,10 +27,10 @@ export type SemVerifiedQuery = semanticview.VerifiedQuery;
 /**
  * Builds the quoted `"db"."schema"."name"` reference the Go builder emits
  * verbatim, or "" when no object is picked. Quoting is delegated to the shared
- * `quoteIdent` so Snowflake's escaping rule lives in one place.
+ * `quoteQualifiedIdent` so Snowflake's escaping rule lives in one place.
  */
 const quoteFqn = (db: string, schema: string, name: string) =>
-  (name ? [db, schema, name].map(quoteIdent).join(".") : "");
+  (name ? quoteQualifiedIdent(db, schema, name) : "");
 
 /** The clause an ExpressionsSection edits — gates the clause-specific fields. */
 export type ExpressionKind = "FACTS" | "DIMENSIONS" | "METRICS";
@@ -98,15 +98,54 @@ export const emptyVerifiedQuery = (): SemVerifiedQuery => ({
 export const aliasOf = (r: TableRow) => (r.alias.trim() || r.table);
 
 /**
- * Whether a row is complete enough for the builder to emit it. Rows that fail
- * these are dropped from the statement, so anything that references them by name
- * — a metric's USING, a metric's NON ADDITIVE BY — must not offer them either,
- * or the emitted SQL points at something that isn't there. They mirror the
- * completeness checks in `internal/semanticview/sql.go`.
+ * Aliases shared by more than one TABLES row. `semanticViewAliases.ts`
+ * deliberately leaves a duplicated alias unremapped on rename/removal — a bare
+ * string can't say which of the rows sharing it a reference meant — and the
+ * column pickers here have the same ambiguity (`useTableColumns`' alias-keyed
+ * lookup resolves to whichever row comes first). Rather than guess, the form
+ * flags the rows and `structuredValid` blocks Create until every alias is
+ * unique.
  */
-export const isCompleteRelationship = (r: SemRelationship) =>
-  !!r.name.trim() && !!r.table.trim() && !!r.refTable.trim() && r.columns.length > 0;
+export const duplicateAliases = (tables: TableRow[]): Set<string> => {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const t of tables) {
+    const a = aliasOf(t);
+    if (!a) continue;
+    if (seen.has(a)) dupes.add(a);
+    else seen.add(a);
+  }
+  return dupes;
+};
 
+/**
+ * Whether a relationship can be safely offered as a metric's USING option.
+ * This is *stricter* than "will the builder emit this row": Snowflake's
+ * `[ <name> AS ] <table_alias> ( … )` grammar (and `renderer.relationship` in
+ * `internal/semanticview/sql.go`) makes the name optional, but USING refers to
+ * a relationship *by* that name — a nameless relationship can render into
+ * RELATIONSHIPS just fine, it just can never be a USING option. The
+ * table/refTable/columns/join-type-specific checks otherwise mirror
+ * `renderer.relationship`'s own drop conditions, so a relationship that fails
+ * them is dropped from RELATIONSHIPS the same way and must not be offered
+ * either.
+ */
+export const isCompleteRelationship = (r: SemRelationship) => {
+  if (!r.name.trim() || !r.table.trim() || !r.refTable.trim() || r.columns.length === 0) return false;
+  if (r.joinType === "ASOF") return r.refColumns.length > 0;
+  if (r.joinType === "BETWEEN") return !!r.rangeStart.trim() && !!r.rangeEnd.trim();
+  return true;
+};
+
+/**
+ * Whether a FACTS/DIMENSIONS/METRICS row is complete enough for the builder to
+ * emit it — mirrors `renderer.expression` in `internal/semanticview/sql.go`
+ * exactly, since that grammar has no alias-less form (unlike relationships,
+ * every one of alias/name/expr is required to emit the row at all). Anything
+ * that references such a row by name — a metric's USING, NON ADDITIVE BY —
+ * must not offer an incomplete one either, or the emitted SQL points at
+ * something that isn't there.
+ */
 export const isCompleteExpression = (e: ExpressionRow) =>
   !!e.tableAlias.trim() && !!e.name.trim() && !!e.expr.trim();
 
@@ -130,19 +169,37 @@ export const qualifiedNameOf = (e: ExpressionRow) => {
  */
 export const tableKey = (r: TableRow) => colKey(r);
 
-/** Converts a form row to the builder's LogicalTable (quoted 3-part name). */
-export const toLogicalTable = (r: TableRow): SemTable => ({
-  ...r,
-  name: quoteFqn(r.db, r.schema, r.table),
-});
+/**
+ * Converts a form row to the builder's LogicalTable (quoted 3-part name). Every
+ * other clause references this table by `aliasOf(r)` (the table name when no
+ * alias was typed) — so that resolved value is what gets sent, not the
+ * possibly-blank `alias` field, or the builder would render `TABLES ( name )`
+ * with no `AS alias` while other clauses still reference it by name.
+ *
+ * Destructures out the form-only `db`/`schema`/`table` parts rather than
+ * spreading the whole row — the IPC call casts its payload to `any`, so
+ * TypeScript's excess-property check never gets a chance to catch them
+ * leaking into the LogicalTable JSON if it ever grows a same-named field.
+ */
+export const toLogicalTable = (r: TableRow): SemTable => {
+  const { db, schema, table, ...rest } = r;
+  return {
+    ...rest,
+    alias: aliasOf(r),
+    name: quoteFqn(db, schema, table),
+  };
+};
 
 const colKey = (r: TableRow) => (r.db && r.schema && r.table ? quoteFqn(r.db, r.schema, r.table) : "");
 
 /**
  * A keyed, fetch-once cache: `ensure(key, …)` runs the fetcher the first time a
  * key is asked for and stores the result under it. A failed fetch forgets its
- * key, so a transient error can be retried on a later render rather than
- * leaving the caller looking at an empty list for the life of the modal.
+ * key so it's eligible to be retried, and bumps `retryTick` so a caller whose
+ * own effect wouldn't otherwise re-run (its dependencies didn't change — the
+ * key did, but that's internal to this hook) has something to depend on to
+ * actually trigger that retry, rather than leaving the caller looking at an
+ * empty list for the life of the modal.
  *
  * Both caches in this form are built on it — the per-table column lists and the
  * shared schema/object lists — so the caching and retry policy lives in one
@@ -151,6 +208,7 @@ const colKey = (r: TableRow) => (r.db && r.schema && r.table ? quoteFqn(r.db, r.
 function useKeyedFetch<T>() {
   const [values, setValues] = useState<Record<string, T>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [retryTick, setRetryTick] = useState(0);
   const requested = useRef<Set<string>>(new Set());
 
   const ensure = useCallback((key: string, fetcher: () => Promise<T>) => {
@@ -159,11 +217,14 @@ function useKeyedFetch<T>() {
     setLoading((l) => ({ ...l, [key]: true }));
     fetcher()
       .then((v) => setValues((c) => ({ ...c, [key]: v })))
-      .catch(() => requested.current.delete(key))
+      .catch(() => {
+        requested.current.delete(key);
+        setRetryTick((t) => t + 1);
+      })
       .finally(() => setLoading((l) => ({ ...l, [key]: false })));
   }, []);
 
-  return { values, loading, ensure };
+  return { values, loading, ensure, retryTick };
 }
 
 /**
@@ -173,18 +234,32 @@ function useKeyedFetch<T>() {
  * database.schema.table path (rows may point at different databases).
  */
 export function useTableColumns(rows: TableRow[]) {
-  const { values, ensure } = useKeyedFetch<string[]>();
+  const { values, ensure, retryTick } = useKeyedFetch<string[]>();
 
   useEffect(() => {
     for (const r of rows) {
       ensure(colKey(r), () => GetTableColumns(r.db, r.schema, r.table).then((c) => c ?? []));
     }
-  }, [ensure, rows]);
+    // retryTick: `rows` gets a new identity on most table edits, which
+    // happens to retry a failed fetch too, but not reliably (e.g. a failure
+    // on the only TABLES row, untouched afterward) — retryTick makes that
+    // explicit instead of relying on it as a side effect.
+  }, [ensure, rows, retryTick]);
 
-  /** Columns of the row with this alias (empty until the fetch resolves). */
-  return (alias: string): string[] => {
-    const row = rows.find((r) => aliasOf(r) === alias);
-    return row ? values[colKey(row)] ?? [] : [];
+  /**
+   * Columns of the row with this alias (empty until the fetch resolves).
+   * Ambiguous when two rows share an alias — `rows.find` picks whichever
+   * comes first, which can hand a row the columns of a same-aliased sibling.
+   * A caller that already holds the actual row (TablesSection, iterating its
+   * own rows) should pass it as `row` to resolve unambiguously instead; a
+   * caller with only a copied alias string (RelationshipsSection, which
+   * stores references as alias text) has no way around the ambiguity short of
+   * the form refusing duplicate aliases outright, which `structuredValid`
+   * does (see `duplicateAliases`).
+   */
+  return (alias: string, row?: TableRow): string[] => {
+    const target = row ?? rows.find((r) => aliasOf(r) === alias);
+    return target ? values[colKey(target)] ?? [] : [];
   };
 }
 
@@ -206,7 +281,7 @@ const objKey = (db: string, schema: string) => JSON.stringify(["objects", db, sc
  * lookups apart.
  */
 export function useObjectCache() {
-  const { values, loading, ensure } = useKeyedFetch<string[] | snowflake.SnowflakeObject[]>();
+  const { values, loading, ensure, retryTick } = useKeyedFetch<string[] | snowflake.SnowflakeObject[]>();
 
   const ensureSchemas = useCallback((db: string) => {
     if (!db) return;
@@ -221,12 +296,17 @@ export function useObjectCache() {
   return useMemo(() => ({
     ensureSchemas,
     ensureObjects,
+    // Exposed only so ObjectPicker's effects can depend on it — its own
+    // ensureSchemas/ensureObjects calls are stable across renders, so without
+    // this a failed fetch would never actually be retried despite the cache
+    // forgetting the key.
+    retryTick,
     schemasOf: (db: string) => (values[schemaKey(db)] ?? []) as string[],
     schemasLoading: (db: string) => !!loading[schemaKey(db)],
     objectsOf: (db: string, schema: string) =>
       (values[objKey(db, schema)] ?? []) as snowflake.SnowflakeObject[],
     objectsLoading: (db: string, schema: string) => !!loading[objKey(db, schema)],
-  }), [values, loading, ensureSchemas, ensureObjects]);
+  }), [values, loading, retryTick, ensureSchemas, ensureObjects]);
 }
 
 export type ObjectCache = ReturnType<typeof useObjectCache>;
@@ -293,9 +373,9 @@ function ObjectPicker({
   onChange: (db: string, schema: string, name: string) => void;
   width?: number;
 }) {
-  const { ensureSchemas, ensureObjects } = cache;
-  useEffect(() => { ensureSchemas(db); }, [ensureSchemas, db]);
-  useEffect(() => { ensureObjects(db, schema); }, [ensureObjects, db, schema]);
+  const { ensureSchemas, ensureObjects, retryTick } = cache;
+  useEffect(() => { ensureSchemas(db); }, [ensureSchemas, db, retryTick]);
+  useEffect(() => { ensureObjects(db, schema); }, [ensureObjects, db, schema, retryTick]);
 
   const schemas = cache.schemasOf(db);
   const objects = cache.objectsOf(db, schema);
@@ -344,10 +424,11 @@ export function TablesSection({
   cache: ObjectCache;
   dbOptions: string[]; defaultDb: string; defaultSchema: string; rows: TableRow[];
   onChange: (rows: TableRow[]) => void;
-  columnsFor: (alias: string) => string[];
+  columnsFor: (alias: string, row?: TableRow) => string[];
 }) {
   const patch = (i: number, next: Partial<TableRow>) =>
     onChange(patchAt(rows, i, next));
+  const dupes = duplicateAliases(rows);
 
   return (
     <Section
@@ -358,7 +439,8 @@ export function TablesSection({
       onAdd={() => onChange([...rows, emptyTableRow(defaultDb, defaultSchema)])}
     >
       {rows.map((r, i) => {
-        const columns = columnsFor(aliasOf(r));
+        const columns = columnsFor(aliasOf(r), r);
+        const duplicate = dupes.has(aliasOf(r));
         return (
           <RowCard key={i} onRemove={() => onChange(removeAt(rows, i))}>
             <ObjectPicker
@@ -371,12 +453,14 @@ export function TablesSection({
                 patch(i, {
                   db, schema, table,
                   alias: !r.alias || r.alias === r.table ? table : r.alias,
-                  primaryKey: [], unique: [], rangeStart: "", rangeEnd: "",
+                  primaryKey: [], unique: [], rangeStart: "", rangeEnd: "", constraintName: "",
                 })
               }
             />
             <Input
               size="small" style={{ width: 130 }} placeholder="alias"
+              status={duplicate ? "error" : undefined}
+              title={duplicate ? "This alias is used by more than one table — every reference to it is ambiguous." : undefined}
               value={r.alias} onChange={(e) => patch(i, { alias: e.target.value })}
             />
             <Select
@@ -446,7 +530,7 @@ export function RelationshipsSection({
 }: {
   rows: SemRelationship[]; tables: TableRow[];
   onChange: (rows: SemRelationship[]) => void;
-  columnsFor: (alias: string) => string[];
+  columnsFor: (alias: string, row?: TableRow) => string[];
 }) {
   const aliases = tables.map(aliasOf).filter(Boolean);
   const patch = (i: number, next: Partial<SemRelationship>) =>
@@ -461,7 +545,7 @@ export function RelationshipsSection({
   return (
     <Section
       label="RELATIONSHIPS"
-      help="How the logical tables join. Referenced columns must be a PRIMARY KEY or UNIQUE key of the target."
+      help="How the logical tables join. Referenced columns must be a PRIMARY KEY or UNIQUE key of the target, except for ASOF (any type-compatible column, e.g. a timestamp)."
       empty={rows.length === 0}
       addText="Add relationship"
       onAdd={() => onChange([...rows, emptyRelationship()])}
@@ -514,9 +598,12 @@ export function RelationshipsSection({
           ) : (
             <Select
               size="small" mode="multiple" allowClear style={{ minWidth: 180 }}
-              placeholder="referenced key columns" value={r.refColumns}
+              placeholder={r.joinType === "ASOF" ? "referenced columns" : "referenced key columns"}
+              value={r.refColumns}
               onChange={(v) => patch(i, { refColumns: v })}
-              options={opts(keyColumnsOf(r.refTable))}
+              // ASOF references a type-compatible column (e.g. a timestamp), not
+              // necessarily a declared key — only the standard join requires one.
+              options={opts(r.joinType === "ASOF" ? columnsFor(r.refTable) : keyColumnsOf(r.refTable))}
             />
           )}
         </RowCard>
@@ -745,6 +832,7 @@ export function VerifiedQueriesSection({
           />
           <InputNumber
             size="small" style={{ width: 170 }} placeholder="VERIFIED_AT (epoch)"
+            min={0} precision={0}
             value={r.verifiedAt ? Number(r.verifiedAt) : null}
             onChange={(v) => patch(i, { verifiedAt: v == null ? "" : String(v) })}
           />
