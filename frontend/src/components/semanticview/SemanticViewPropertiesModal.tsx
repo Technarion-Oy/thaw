@@ -30,6 +30,9 @@ import type { snowflake } from "../../../wailsjs/go/models";
 // CreateSemanticViewModal.tsx.
 const MIN_MAX_STALENESS = 120;
 
+// The four name-driven materialization actions — see matAction below.
+type MatVerb = "SUSPEND" | "RESUME" | "REFRESH" | "DROP";
+
 const { Text } = Typography;
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -262,12 +265,13 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
 
   // Materializations — Snowflake exposes no SHOW/DESCRIBE for existing ones
   // (see semanticview README), so Suspend/Resume/Refresh/Drop act by
-  // typed-in name rather than a picked row. matBusy only covers those four
-  // actions; the Add Materialization form has its own addMatBusy so the two
-  // don't visually spin/disable each other.
+  // typed-in name rather than a picked row. matAction tracks which one of
+  // those four is currently in flight (or null when idle), so clicking one
+  // doesn't spin every button's loading state — the Add Materialization form
+  // has its own separate addMatBusy so the two groups don't affect each other.
   const [maxStaleness, setMaxStaleness] = useState("");
   const [matName, setMatName] = useState("");
-  const [matBusy, setMatBusy] = useState(false);
+  const [matAction, setMatAction] = useState<MatVerb | null>(null);
   const [addMatBusy, setAddMatBusy] = useState(false);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
@@ -276,6 +280,23 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
   const [dimOptions, setDimOptions] = useState<string[]>([]);
   const [metricOptions, setMetricOptions] = useState<string[]>([]);
   const [newMat, setNewMat] = useState<NewMaterialization>(NEW_MATERIALIZATION);
+
+  // Cache of the last SHOW SEMANTIC DIMENSIONS/METRICS result, shared between
+  // the Dimensions/Metrics LazySection above and openAddMaterialization below
+  // — expanding those sections first and then opening the Add form shouldn't
+  // fire the same two live Snowflake round-trips again.
+  const [dimsResult, setDimsResult] = useState<snowflake.QueryResult | null>(null);
+  const [metricsResult, setMetricsResult] = useState<snowflake.QueryResult | null>(null);
+  const loadDimensions = useCallback(async () => {
+    const res = await ListSemanticDimensions(db, schema, name);
+    setDimsResult(res);
+    return res;
+  }, [db, schema, name]);
+  const loadMetrics = useCallback(async () => {
+    const res = await ListSemanticMetrics(db, schema, name);
+    setMetricsResult(res);
+    return res;
+  }, [db, schema, name]);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -311,6 +332,14 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
 
   const saveMaxStaleness = async (val: string) => {
     const n = Number(val);
+    // InputNumber's min prop isn't an absolute input-blocking constraint in
+    // every interaction path (paste, Enter before blur-clamp), so re-check
+    // here rather than relying on Snowflake's server-side rejection for a
+    // constraint the CREATE flow already enforces client-side
+    // (BuildCreateSemanticViewSql rejects the same floor in Go).
+    if (n < MIN_MAX_STALENESS) {
+      throw new Error(`MAX_STALENESS must be at least ${MIN_MAX_STALENESS} seconds`);
+    }
     await AlterSemanticView(db, schema, name, `SET MAX_STALENESS = ${n}`);
     setMaxStaleness(String(n));
   };
@@ -320,17 +349,17 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     setMaxStaleness("");
   };
 
-  const runMatAction = async (verb: "SUSPEND" | "RESUME" | "REFRESH" | "DROP", label: string) => {
+  const runMatAction = async (verb: MatVerb, label: string) => {
     const trimmed = matName.trim();
     if (trimmed === "") return;
-    setMatBusy(true);
+    setMatAction(verb);
     setActionError(null);
     try {
       await AlterSemanticView(db, schema, name, `${verb} MATERIALIZATION ${quoteIdent(trimmed)}`);
     } catch (e) {
       setActionError(`${label} materialization failed: ${String(e)}`);
     } finally {
-      setMatBusy(false);
+      setMatAction(null);
     }
   };
 
@@ -340,19 +369,21 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     setAddingMat(true);
     setLoadingMatOptions(true);
     setLoadingWarehouses(true);
+    setActionError(null);
     try {
       const [dims, metrics, whs] = await Promise.all([
-        ListSemanticDimensions(db, schema, name),
-        ListSemanticMetrics(db, schema, name),
+        dimsResult ?? loadDimensions(),
+        metricsResult ?? loadMetrics(),
         ListWarehouses(),
       ]);
       setDimOptions(qualifiedOptionsFromResult(dims));
       setMetricOptions(qualifiedOptionsFromResult(metrics));
       setWarehouses(whs ?? []);
-    } catch {
-      // Best-effort — the pickers just stay empty; dimension/metric options
-      // must exactly match the view's definition, so no free-typed fallback
-      // is offered here.
+    } catch (e) {
+      // Surface the failure rather than swallowing it — an empty picker from
+      // a real error (dropped session, no privilege) would otherwise look
+      // identical to "this view genuinely has no dimensions/metrics/warehouses."
+      setActionError(`Failed to load materialization form options: ${String(e)}`);
     } finally {
       setLoadingMatOptions(false);
       setLoadingWarehouses(false);
@@ -481,7 +512,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
           <LazySection
             title="Dimensions"
             description="SHOW SEMANTIC DIMENSIONS — the dimensions exposed by this view."
-            loader={() => ListSemanticDimensions(db, schema, name)}
+            loader={loadDimensions}
           />
 
           <LazySection
@@ -493,7 +524,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
           <LazySection
             title="Metrics"
             description="SHOW SEMANTIC METRICS — the metrics exposed by this view."
-            loader={() => ListSemanticMetrics(db, schema, name)}
+            loader={loadMetrics}
           />
 
           <div style={SECTION_HEAD}>Materializations</div>
@@ -509,21 +540,21 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
               onChange={(e) => setMatName(e.target.value)}
               style={{ width: 200 }}
             />
-            <Button size="small" icon={<PauseCircleOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("SUSPEND", "Suspend")}>
+            <Button size="small" icon={<PauseCircleOutlined />} loading={matAction === "SUSPEND"} disabled={!matName.trim() || matAction !== null} onClick={() => runMatAction("SUSPEND", "Suspend")}>
               Suspend
             </Button>
-            <Button size="small" icon={<PlayCircleOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("RESUME", "Resume")}>
+            <Button size="small" icon={<PlayCircleOutlined />} loading={matAction === "RESUME"} disabled={!matName.trim() || matAction !== null} onClick={() => runMatAction("RESUME", "Resume")}>
               Resume
             </Button>
-            <Button size="small" icon={<SyncOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("REFRESH", "Refresh")}>
+            <Button size="small" icon={<SyncOutlined />} loading={matAction === "REFRESH"} disabled={!matName.trim() || matAction !== null} onClick={() => runMatAction("REFRESH", "Refresh")}>
               Refresh
             </Button>
             <Popconfirm
               title={`Drop materialization "${matName.trim()}"?`}
               onConfirm={() => runMatAction("DROP", "Drop")}
-              disabled={!matName.trim()}
+              disabled={!matName.trim() || matAction !== null}
             >
-              <Button size="small" danger icon={<DeleteOutlined />} loading={matBusy} disabled={!matName.trim()}>
+              <Button size="small" danger icon={<DeleteOutlined />} loading={matAction === "DROP"} disabled={!matName.trim() || matAction !== null}>
                 Drop
               </Button>
             </Popconfirm>

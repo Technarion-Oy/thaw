@@ -613,4 +613,20 @@ func TestBuildAddMaterializationSql(t *testing.T) {
 			t.Error("expected an error for no metrics")
 		}
 	})
+
+	t.Run("rejects a dimension list that is blank after trimming", func(t *testing.T) {
+		cfg := base
+		cfg.Dimensions = []string{"   "}
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a whitespace-only dimension, not a rendered empty DIMENSIONS clause")
+		}
+	})
+
+	t.Run("rejects a metric list that is blank after trimming", func(t *testing.T) {
+		cfg := base
+		cfg.Metrics = []string{"   "}
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a whitespace-only metric, not a rendered empty METRICS clause")
+		}
+	})
 }

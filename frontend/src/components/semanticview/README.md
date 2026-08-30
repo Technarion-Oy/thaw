@@ -157,20 +157,28 @@ describe the data.
   structure on demand: **Structure** (`DescribeSemanticView`), **Dimensions**
   (`ListSemanticDimensions`), **Facts** (`ListSemanticFacts`), **Metrics**
   (`ListSemanticMetrics`), a **Materializations** section (Suspend / Resume /
-  Refresh / Drop by typed-in name — its own `matBusy`, independent of the Add
-  form's `addMatBusy` so triggering one doesn't spin/disable the other — plus
-  an **Add materialization…** form: warehouse, `REFRESH_MODE`, optional
-  `IMMUTABLE WHERE` / `WHERE` raw-SQL conditions, and dimension/metric
-  multi-selects; warehouses and dimension/metric options are all fetched
-  lazily when the form opens, not on modal mount. Submitting calls
-  `BuildAddSemanticViewMaterializationSql` for the SQL, then `ExecDDL` to run
-  it — the same two-step split as `AddDbtProjectVersionModal.tsx` — since,
-  unlike the single-clause `SET`/`UNSET`/`SUSPEND`/… actions elsewhere in this
-  modal, `ADD MATERIALIZATION` is a multi-part statement on par with the
-  CREATE builders, so it belongs in Go
-  (`internal/semanticview/sql.go`'s `BuildAddMaterializationSql`) rather than
-  assembled as a string in this file; see `semanticViewMaterialization.ts`),
-  and a **Dimensions for metric** lookup (`ListSemanticDimensionsForMetric`).
+  Refresh / Drop by typed-in name — `matAction` tracks which *one* of those
+  four is in flight, or `null` when idle, so only the clicked button's
+  `loading` prop lights up instead of all four sharing one flag; the Add
+  form's own `addMatBusy` keeps that group separate too — plus an **Add
+  materialization…** form: warehouse, `REFRESH_MODE`, optional `IMMUTABLE
+  WHERE` / `WHERE` raw-SQL conditions, and dimension/metric multi-selects.
+  Warehouses are fetched when the form opens (not on modal mount), while
+  dimensions/metrics reuse `loadDimensions`/`loadMetrics` — the same loaders
+  the adjacent Dimensions/Metrics `LazySection`s call — via a `dimsResult`/
+  `metricsResult` cache, so expanding those sections first and then opening
+  this form doesn't repeat the same two live `SHOW` round-trips. A failed
+  fetch here sets `actionError` rather than leaving the pickers silently
+  empty, since "no dimensions defined" and "the fetch failed" would otherwise
+  look identical. Submitting calls `BuildAddSemanticViewMaterializationSql`
+  for the SQL, then `ExecDDL` to run it — the same two-step split as
+  `AddDbtProjectVersionModal.tsx` — since, unlike the single-clause
+  `SET`/`UNSET`/`SUSPEND`/… actions elsewhere in this modal, `ADD
+  MATERIALIZATION` is a multi-part statement on par with the CREATE builders,
+  so it belongs in Go (`internal/semanticview/sql.go`'s
+  `BuildAddMaterializationSql`) rather than assembled as a string in this
+  file; see `semanticViewMaterialization.ts`), and a **Dimensions for metric**
+  lookup (`ListSemanticDimensionsForMetric`).
 
   `EditRow` (this file's own — not the shared component of the same name used
   elsewhere) grew a `numeric`/`min`/`precision` mode rather than a separate
@@ -179,10 +187,15 @@ describe the data.
   `MAX_STALENESS` has no read path — `SHOW SEMANTIC VIEWS` / `DESCRIBE
   SEMANTIC VIEW` don't report it — so the field only ever reflects what this
   modal itself has just set, not the view's actual current value.
-  Materializations have the same gap one level further: Snowflake exposes no
-  `SHOW`/`DESCRIBE` for a view's *existing* materializations at all, so the
-  action row acts on a name the user types rather than a row picked from a
-  list.
+  `saveMaxStaleness` re-checks the same floor `BuildCreateSemanticViewSql`
+  already enforces in Go for the CREATE path, rather than trusting
+  `InputNumber`'s `min` prop alone — that prop doesn't block every input path
+  (paste, Enter before blur-clamp), so without the re-check a sub-floor value
+  could reach Snowflake and come back as a raw server error instead of
+  `EditRow`'s own inline one. Materializations have the same read-path gap one
+  level further: Snowflake exposes no `SHOW`/`DESCRIBE` for a view's *existing*
+  materializations at all, so the action row acts on a name the user types
+  rather than a row picked from a list.
 - **`semanticViewMaterialization.ts`** — `qualifiedOptionsFromResult` turns a
   `SHOW SEMANTIC DIMENSIONS`/`METRICS` result into the Add Materialization
   form's multi-select options, case-insensitively reading the `table_name` /

@@ -132,13 +132,30 @@ WHERE (...)] AS DIMENSIONS ... METRICS ... [WHERE (...)]`) requires a
 warehouse and at least one dimension and one metric — each qualified by its
 logical table (`DIMENSIONS customers.customer_name`, per Snowflake's own
 example), since a bare name is ambiguous once a view joins more than one
-logical table; `BuildAddMaterializationSql` splits each `table.name` reference
-on its *last* dot and quotes both halves (`quoteMaterializationRef`) — always,
-unlike the CREATE builder's `renderer.qualifiedIdent`, since these names come
-from live `SHOW` output rather than a user-typed identifier gated by a
-case-sensitivity toggle. Snowflake exposes no `SHOW`/`DESCRIBE` for a view's
-existing materializations, so `DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` act
-on a typed-in name rather than a picked row.
+logical table. `BuildAddMaterializationSql` quotes each `table.name` reference
+via `quoteMaterializationRef`, which — like the CREATE builder's
+`renderer.qualifiedIdent` just above — splits on the *last* dot and quotes
+both halves; both now share that splitting rule through the package-level
+`splitLastDotQuoted(ref, quote)`, parameterized only by which quoting function
+to apply (`renderer.ident`, gated by the config's case-sensitivity flag, vs.
+the materialization builder's unconditional `snowflake.QuoteIdent` — these
+names come from live `SHOW` output, not a user-typed identifier). The
+dimension/metric emptiness check runs *after* that quoting/filtering, not
+before: an all-whitespace entry survives a raw `len()` check but
+`quoteMaterializationRef` drops it, so checking the filtered slice is what
+actually catches a materialization that would otherwise render an empty
+`DIMENSIONS`/`METRICS` clause. Snowflake exposes no `SHOW`/`DESCRIBE` for a
+view's existing materializations, so `DROP`/`SUSPEND`/`RESUME`/`REFRESH
+MATERIALIZATION` act on a typed-in name rather than a picked row.
+
+The SQL editor's own grammar validator (`internal/sqlgrammar`) has to know
+this syntax independently of the builders above — `ParseAlterSemanticView`
+models the full `SET`/`UNSET MAX_STALENESS` and
+`ADD`/`DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` forms (`WHERE ( … )`
+and `IMMUTABLE WHERE ( … )` accepted as a balanced parenthesized span via the
+shared `consumeBalancedParens`, the same tolerance `ParseCreateSemanticView`
+gives its own clause bodies), so a statement this package's builders and the
+Properties modal produce doesn't get flagged as a syntax error in the editor.
 
 `SHOW SEMANTIC VIEWS` reports only `created_on` / `name` / `database_name` /
 `schema_name` / `comment` / `owner` / `owner_role_type`, so the structure is

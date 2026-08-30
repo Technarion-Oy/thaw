@@ -174,22 +174,36 @@ func (r renderer) identList(names []string) string {
 // half separately — quoting the whole string would produce one identifier
 // containing a dot. Used for a metric's NON ADDITIVE BY dimensions, which are
 // the only references in the grammar the form supplies pre-qualified.
-//
-// Split on the *last* dot, not the first: the table alias is a free-text form
-// field with no restriction against containing one (e.g. "ord.v2"), while the
-// dimension name after it is a single field. Splitting on the first dot would
-// fold the rest of the alias into the name half, quoting it as one identifier
-// that doesn't exist instead of alias.name.
 func (r renderer) qualifiedIdent(ref string) string {
+	return splitLastDotQuoted(ref, r.ident)
+}
+
+// splitLastDotQuoted splits a possibly-dotted `alias.name` (or `table.name`)
+// reference and quotes each half separately via quote — quoting the whole
+// string unsplit would produce one identifier containing a dot instead of two.
+//
+// Split on the *last* dot, not the first: the alias/table half is free text
+// with no restriction against containing one (e.g. "ord.v2"), while the
+// name after it is a single field. Splitting on the first dot would fold the
+// rest of the alias into the name half, quoting it as one identifier that
+// doesn't exist instead of alias.name. A reference with no dot quotes as a
+// single identifier.
+//
+// Shared by renderer.qualifiedIdent (CREATE SEMANTIC VIEW's NON ADDITIVE BY,
+// gated by the config's case-sensitivity flag via r.ident) and
+// quoteMaterializationRef (ALTER ... ADD MATERIALIZATION's DIMENSIONS/METRICS,
+// always-quoted via snowflake.QuoteIdent) so the splitting rule can't drift
+// between the two call sites.
+func splitLastDotQuoted(ref string, quote func(string) string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""
 	}
 	at := strings.LastIndex(ref, ".")
 	if at < 0 {
-		return r.ident(ref)
+		return quote(ref)
 	}
-	return r.ident(ref[:at]) + "." + r.ident(ref[at+1:])
+	return quote(ref[:at]) + "." + quote(ref[at+1:])
 }
 
 // renderEach maps items through render and drops the entries it rejects (an
@@ -559,7 +573,14 @@ type MaterializationConfig struct {
 func BuildAddMaterializationSql(db, schema, name string, cfg MaterializationConfig) (string, error) {
 	matName := strings.TrimSpace(cfg.Name)
 	warehouse := strings.TrimSpace(cfg.Warehouse)
-	if matName == "" || warehouse == "" || len(cfg.Dimensions) == 0 || len(cfg.Metrics) == 0 {
+	// Quote (and drop-if-blank) the dimension/metric lists before checking
+	// them for emptiness, not after: an all-whitespace entry survives the
+	// len() check on the raw slice but quoteMaterializationRefs drops it, so
+	// checking the raw length would let a blank-only list through and render
+	// an empty DIMENSIONS/METRICS clause.
+	dims := quoteMaterializationRefs(cfg.Dimensions)
+	metrics := quoteMaterializationRefs(cfg.Metrics)
+	if matName == "" || warehouse == "" || len(dims) == 0 || len(metrics) == 0 {
 		return "", fmt.Errorf("materialization requires a name, a warehouse, and at least one dimension and one metric")
 	}
 
@@ -580,8 +601,8 @@ func BuildAddMaterializationSql(db, schema, name string, cfg MaterializationConf
 		fmt.Fprintf(&sb, " IMMUTABLE WHERE (%s)", w)
 	}
 
-	fmt.Fprintf(&sb, " AS\n  DIMENSIONS %s", strings.Join(quoteMaterializationRefs(cfg.Dimensions), ", "))
-	fmt.Fprintf(&sb, "\n  METRICS %s", strings.Join(quoteMaterializationRefs(cfg.Metrics), ", "))
+	fmt.Fprintf(&sb, " AS\n  DIMENSIONS %s", strings.Join(dims, ", "))
+	fmt.Fprintf(&sb, "\n  METRICS %s", strings.Join(metrics, ", "))
 	if w := strings.TrimSpace(cfg.Where); w != "" {
 		fmt.Fprintf(&sb, "\n  WHERE (%s)", w)
 	}
@@ -601,22 +622,11 @@ func quoteMaterializationRefs(refs []string) []string {
 	return out
 }
 
-// quoteMaterializationRef quotes one `table.name` reference, splitting on the
-// *last* dot — the same rule renderer.qualifiedIdent applies elsewhere in this
-// file: the table half is free text with no restriction against containing a
-// literal dot, while the entity name after it is a single field. A reference
-// with no dot (table_name absent from the SHOW result) quotes as a single
-// identifier instead of a qualified one. Unlike renderer.qualifiedIdent, this
-// always quotes both halves — these names come from live SHOW output, not a
-// user-typed identifier subject to a case-sensitivity toggle.
+// quoteMaterializationRef quotes one `table.name` reference for ADD
+// MATERIALIZATION's DIMENSIONS/METRICS list — see splitLastDotQuoted. Unlike
+// renderer.qualifiedIdent, this always quotes both halves: these names come
+// from live SHOW output, not a user-typed identifier subject to a
+// case-sensitivity toggle.
 func quoteMaterializationRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	at := strings.LastIndex(ref, ".")
-	if at < 0 {
-		return snowflake.QuoteIdent(ref)
-	}
-	return snowflake.Qualify(ref[:at], ref[at+1:])
+	return splitLastDotQuoted(ref, snowflake.QuoteIdent)
 }

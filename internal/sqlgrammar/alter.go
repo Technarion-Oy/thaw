@@ -6627,14 +6627,28 @@ func (v *Validator) ParseAlterSecurityIntegrationScim() bool {
 //	ALTER SEMANTIC VIEW [ IF EXISTS ] <name> RENAME TO <new_name>
 //
 //	ALTER SEMANTIC VIEW [ IF EXISTS ] <name> SET
-//	  COMMENT = '<string_literal>'
+//	  { COMMENT = '<string_literal>' | MAX_STALENESS = <integer> }
 //
 //	ALTER SEMANTIC VIEW [ IF EXISTS ] <name> UNSET
-//	  COMMENT
+//	  { COMMENT | MAX_STALENESS }
 //
 //	ALTER SEMANTIC VIEW <name> SET TAG <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' ... ]
 //
 //	ALTER SEMANTIC VIEW <name> UNSET TAG <tag_name> [ , <tag_name> ... ]
+//
+//	ALTER SEMANTIC VIEW <name> ADD MATERIALIZATION <materialization_name>
+//	  WAREHOUSE = <warehouse_name>
+//	  [ REFRESH_MODE = { AUTO | FULL | INCREMENTAL } ]
+//	  [ IMMUTABLE WHERE ( <immutable_condition> ) ]
+//	  AS
+//	    DIMENSIONS <dimension_name> [ , ... ]
+//	    METRICS <metric_name> [ , ... ]
+//	    [ WHERE ( <filter_condition> ) ]
+//
+//	ALTER SEMANTIC VIEW <name> DROP MATERIALIZATION <materialization_name>
+//	ALTER SEMANTIC VIEW <name> SUSPEND MATERIALIZATION <materialization_name>
+//	ALTER SEMANTIC VIEW <name> RESUME MATERIALIZATION <materialization_name>
+//	ALTER SEMANTIC VIEW <name> REFRESH MATERIALIZATION <materialization_name>
 func (v *Validator) ParseAlterSemanticView() bool {
 	name := v.parseIdentPath
 	commaList := func(item Rule) Rule {
@@ -6652,6 +6666,7 @@ func (v *Validator) ParseAlterSemanticView() bool {
 			return v.Choice(
 				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
 				v.commentOption(),
+				v.option("MAX_STALENESS", v.parseNumber),
 			)
 		})
 	}
@@ -6660,8 +6675,46 @@ func (v *Validator) ParseAlterSemanticView() bool {
 			return v.Choice(
 				func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(name)) },
 				func() bool { return v.MatchWord("COMMENT") },
+				func() bool { return v.MatchWord("MAX_STALENESS") },
 			)
 		})
+	}
+	// whereCond matches `WHERE ( <condition> )`; the condition itself is a
+	// free-form boolean expression, so — like ParseCreateSemanticView's own
+	// clause bodies — it's accepted as any balanced parenthesized span rather
+	// than modeled expression-by-expression.
+	whereCond := func() bool {
+		return v.Sequence(func() bool { return v.MatchWord("WHERE") }, v.consumeBalancedParens)
+	}
+	addMaterialization := func() bool {
+		return v.Sequence(
+			func() bool { return v.phrase("ADD", "MATERIALIZATION") },
+			name,
+			v.option("WAREHOUSE", name),
+			func() bool { return v.Optional(v.option("REFRESH_MODE", v.wordsValue("AUTO", "FULL", "INCREMENTAL"))) },
+			func() bool {
+				return v.Optional(func() bool {
+					return v.Sequence(func() bool { return v.MatchWord("IMMUTABLE") }, whereCond)
+				})
+			},
+			func() bool { return v.MatchWord("AS") },
+			func() bool { return v.MatchWord("DIMENSIONS") },
+			commaList(name),
+			func() bool { return v.MatchWord("METRICS") },
+			commaList(name),
+			func() bool { return v.Optional(whereCond) },
+		)
+	}
+	// materializationAction matches `<word> MATERIALIZATION <name>` — DROP,
+	// SUSPEND, RESUME, and REFRESH all share this shape.
+	materializationAction := func(word string) Rule {
+		return func() bool {
+			return v.Sequence(
+				func() bool { return v.MatchWord(word) },
+				func() bool { return v.MatchWord("MATERIALIZATION") },
+				name,
+			)
+		}
 	}
 	return v.Sequence(
 		func() bool { return v.MatchWord("ALTER") },
@@ -6673,6 +6726,11 @@ func (v *Validator) ParseAlterSemanticView() bool {
 				func() bool { return v.phrase("RENAME", "TO") && v.parseIdentPath() },
 				setForm,
 				unsetForm,
+				addMaterialization,
+				materializationAction("DROP"),
+				materializationAction("SUSPEND"),
+				materializationAction("RESUME"),
+				materializationAction("REFRESH"),
 			)
 		},
 	)
