@@ -11,12 +11,13 @@ import (
 
 // AlterSemanticView runs an ALTER SEMANTIC VIEW statement for the given view.
 // clause is everything that follows the view name, e.g. "RENAME TO <new>",
-// "SET COMMENT = '...'", "UNSET COMMENT", "SET TAG <tag> = '...'", or
-// "UNSET TAG <tag>". Snowflake's ALTER SEMANTIC VIEW only supports renaming,
-// the comment, and tags — the definition body (TABLES/RELATIONSHIPS/FACTS/
-// DIMENSIONS/METRICS) is changed via CREATE OR REPLACE, not ALTER. The caller is
-// responsible for correct SQL quoting inside the clause; this method only
-// double-quotes the view identifier.
+// "SET COMMENT = '...'", "UNSET COMMENT", "SET TAG <tag> = '...'",
+// "UNSET TAG <tag>", "SET MAX_STALENESS = <n>", or
+// "ADD/DROP/SUSPEND/RESUME/REFRESH MATERIALIZATION ...". The definition body
+// (TABLES/RELATIONSHIPS/FACTS/DIMENSIONS/METRICS) is still only changed via
+// CREATE OR REPLACE, not ALTER. The caller is responsible for correct SQL
+// quoting inside the clause; this method only double-quotes the view
+// identifier.
 func (a *App) AlterSemanticView(database, schema, name, clause string) error {
 	return a.alterObject("SEMANTIC VIEW", database, schema, name, clause)
 }

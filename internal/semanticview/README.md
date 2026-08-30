@@ -101,11 +101,26 @@ that describe the business meaning of the data.
 
 ## ALTER / lifecycle
 
-`ALTER SEMANTIC VIEW` can only **rename** the view, set/unset its **comment**,
-or set/unset **tags** — the definition body cannot be altered (change it via
-`CREATE OR REPLACE`). These run through `App.AlterSemanticView(db, schema, name,
-clause)` in `internal/app/semanticview.go` (a thin wrapper over the shared
-`alterObject` helper).
+`ALTER SEMANTIC VIEW` can **rename** the view, set/unset its **comment**,
+set/unset **tags**, set/unset **MAX_STALENESS**, and add / drop / suspend /
+resume / refresh **materializations** — the definition body itself
+(`TABLES`/`RELATIONSHIPS`/`FACTS`/`DIMENSIONS`/`METRICS`) still cannot be
+altered (change it via `CREATE OR REPLACE`). All of these run through
+`App.AlterSemanticView(db, schema, name, clause)` in
+`internal/app/semanticview.go` (a thin wrapper over the shared `alterObject`
+helper) — the clause is built by the frontend (`SemanticViewPropertiesModal.tsx`
+/ `semanticViewMaterialization.ts`), since it needs no SQL construction this
+package doesn't already do for `CREATE`.
+
+`MAX_STALENESS` must be set (minimum 120 seconds, matching `MinMaxStaleness`
+above) before a materialization can be added, and Snowflake rejects `UNSET
+MAX_STALENESS` while one exists. Adding a materialization
+(`ADD MATERIALIZATION <name> WAREHOUSE = <wh> [REFRESH_MODE = ...] [IMMUTABLE
+WHERE (...)] AS DIMENSIONS ... METRICS ... [WHERE (...)]`) requires a
+warehouse and at least one dimension and one metric. Snowflake exposes no
+`SHOW`/`DESCRIBE` for a view's existing materializations, so
+`DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` act on a typed-in name
+rather than a picked row.
 
 `SHOW SEMANTIC VIEWS` reports only `created_on` / `name` / `database_name` /
 `schema_name` / `comment` / `owner` / `owner_role_type`, so the structure is

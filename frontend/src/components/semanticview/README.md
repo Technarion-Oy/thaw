@@ -149,22 +149,45 @@ describe the data.
   does: the alias half is a free-text field with no restriction against
   containing one.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
-  comment via `AlterSemanticView`), a **Tags** section (the shared
+  comment via `AlterSemanticView`, plus an editable `MAX_STALENESS` —
+  `NumberEditRow`, minimum 120 seconds), a **Tags** section (the shared
   `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /
-  remove via `AlterSemanticView`), and lazily-loaded
+  remove via `AlterSemanticView`), lazily-loaded
   sections that surface the view's structure on demand: **Structure**
   (`DescribeSemanticView`), **Dimensions** (`ListSemanticDimensions`), **Facts**
-  (`ListSemanticFacts`), **Metrics** (`ListSemanticMetrics`), and a
-  **Dimensions for metric** lookup (`ListSemanticDimensionsForMetric`).
+  (`ListSemanticFacts`), **Metrics** (`ListSemanticMetrics`), a
+  **Materializations** section (Suspend / Resume / Refresh / Drop by typed-in
+  name, plus an **Add materialization…** form — warehouse picked from
+  `ListWarehouses`, `REFRESH_MODE`, optional `IMMUTABLE WHERE` / `WHERE` raw-SQL
+  conditions, and dimension/metric multi-selects populated from
+  `ListSemanticDimensions` / `ListSemanticMetrics` when the form opens; see
+  `semanticViewMaterialization.ts`), and a **Dimensions for metric** lookup
+  (`ListSemanticDimensionsForMetric`).
+
+  `MAX_STALENESS` has no read path — `SHOW SEMANTIC VIEWS` / `DESCRIBE SEMANTIC
+  VIEW` don't report it — so `NumberEditRow` only ever reflects what this modal
+  itself has just set, not the view's actual current value. Materializations
+  have the same gap one level further: Snowflake exposes no `SHOW`/`DESCRIBE`
+  for a view's *existing* materializations at all, so the action row acts on a
+  name the user types rather than a row picked from a list.
+- **`semanticViewMaterialization.ts`** — `buildAddMaterializationClause` (the
+  pure `ADD MATERIALIZATION ...` clause builder — quotes the name/warehouse/
+  dimension/metric identifiers via `quoteIdent`, and parenthesizes
+  `IMMUTABLE WHERE` / `WHERE` as raw SQL conditions rather than literal-quoting
+  them, since they're boolean expressions typed by the user, not text) and
+  `isMaterializationValid` (Snowflake's own requirement: a name, a warehouse,
+  and at least one dimension and one metric). Covered by
+  `semanticViewMaterialization.test.ts`.
 
 ## Lifecycle
 
-`ALTER SEMANTIC VIEW` only changes the comment, tags, or name — the definition
-body is changed via `CREATE OR REPLACE`. **Rename** (context-menu) and **View
-Definition** / object **comparison** are offered, because `GET_DDL` supports
-semantic views (object_type `'SEMANTIC VIEW'`). Semantic views are queried with
-the special `SELECT … FROM SEMANTIC_VIEW(…)` syntax, so they are not offered in
-the "Select Top 1000" action.
+`ALTER SEMANTIC VIEW` changes the comment, tags, name, `MAX_STALENESS`, and
+materializations — the definition body itself is still only changed via
+`CREATE OR REPLACE`. **Rename** (context-menu) and **View Definition** / object
+**comparison** are offered, because `GET_DDL` supports semantic views
+(object_type `'SEMANTIC VIEW'`). Semantic views are queried with the special
+`SELECT … FROM SEMANTIC_VIEW(…)` syntax, so they are not offered in the "Select
+Top 1000" action.
 
 See also: `components/mcpserver` (MCP servers can expose semantic views to Cortex
 Analyst) and `components/materializedview` (another view type).

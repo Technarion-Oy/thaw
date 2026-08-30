@@ -4,19 +4,30 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Space, Typography, Alert, Tooltip, Table, Empty,
+  Modal, Spin, Button, Input, InputNumber, Select, Space, Typography, Alert, Tooltip, Table, Empty, Popconfirm,
 } from "antd";
 import {
   ApartmentOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, SyncOutlined, DeleteOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterSemanticView,
+  GetObjectProperties, AlterSemanticView, ListWarehouses,
   DescribeSemanticView, ListSemanticDimensions, ListSemanticFacts, ListSemanticMetrics,
   ListSemanticDimensionsForMetric,
 } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
+import {
+  buildAddMaterializationClause, isMaterializationValid, NEW_MATERIALIZATION,
+  type NewMaterialization, type RefreshMode,
+} from "./semanticViewMaterialization";
 import type { snowflake } from "../../../wailsjs/go/models";
+
+// Snowflake's documented floor for MAX_STALENESS (seconds) — mirrors
+// MinMaxStaleness in internal/semanticview/sql.go and MIN_MAX_STALENESS in
+// CreateSemanticViewModal.tsx.
+const MIN_MAX_STALENESS = 120;
 
 const { Text } = Typography;
 
@@ -40,6 +51,15 @@ const LABEL_TD: React.CSSProperties = {
 // backslashes (Snowflake interprets backslash escapes in string literals) then
 // single quotes — so a comment like C:\temp round-trips intact.
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
+
+// Pulls the "name" column out of a SHOW SEMANTIC DIMENSIONS/METRICS result,
+// for the Add Materialization form's dimension/metric multi-selects.
+function namesFromResult(res: snowflake.QueryResult | null): string[] {
+  if (!res) return [];
+  const i = res.columns.indexOf("name");
+  if (i < 0) return [];
+  return res.rows.map((r) => String(r[i]));
+}
 
 // Render a raw QueryResult (columns + rows) as an antd Table. Shared by the
 // Dimensions / Facts / Metrics / Describe sections, all of which expose
@@ -204,6 +224,96 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
   );
 }
 
+// ─── NumberEditRow (MAX_STALENESS) ───────────────────────────────────────────
+// Like EditRow but edits via a bounded InputNumber. Snowflake's SHOW SEMANTIC
+// VIEWS / DESCRIBE SEMANTIC VIEW report no MAX_STALENESS property, so `value`
+// is only ever what this modal itself has just set — there is no way to read
+// back the view's actual current setting.
+
+interface NumberEditRowProps {
+  label: string;
+  value: string;
+  min: number;
+  help?: string;
+  onSave: (val: number) => Promise<void>;
+  onUnset: () => Promise<void>;
+}
+
+function NumberEditRow({ label, value, min, help, onSave, onUnset }: NumberEditRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<number | null>(value ? Number(value) : null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (draft == null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unset = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onUnset();
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+        {editing ? (
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            <Space>
+              <InputNumber size="small" min={min} value={draft} onChange={setDraft} style={{ width: 140 }} onPressEnter={save} />
+              <Tooltip title="Save">
+                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} disabled={draft == null} />
+              </Tooltip>
+              <Tooltip title="Unset (remove)">
+                <Button size="small" onClick={unset} loading={saving}>Unset</Button>
+              </Tooltip>
+              <Tooltip title="Cancel">
+                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value ? Number(value) : null); setError(null); }} />
+              </Tooltip>
+            </Space>
+            {help && <Text type="secondary" style={{ fontSize: 11 }}>{help}</Text>}
+            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+          </Space>
+        ) : (
+          <Space>
+            <span style={{ color: "var(--text)" }}>
+              {value || <Text type="secondary">(unknown — Snowflake doesn't report this back)</Text>}
+            </span>
+            <Tooltip title="Edit">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined style={{ fontSize: 11 }} />}
+                onClick={() => { setDraft(value ? Number(value) : null); setEditing(true); }}
+                style={{ color: "var(--text-muted)" }}
+              />
+            </Tooltip>
+          </Space>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -224,6 +334,28 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
   const [forMetric, setForMetric] = useState<snowflake.QueryResult | null>(null);
   const [forMetricError, setForMetricError] = useState<string | null>(null);
   const [forMetricLoading, setForMetricLoading] = useState(false);
+
+  // Materializations — Snowflake exposes no SHOW/DESCRIBE for existing ones
+  // (see semanticview README), so Suspend/Resume/Refresh/Drop act by
+  // typed-in name rather than a picked row.
+  const [maxStaleness, setMaxStaleness] = useState("");
+  const [matName, setMatName] = useState("");
+  const [matBusy, setMatBusy] = useState(false);
+  const [warehouses, setWarehouses] = useState<string[]>([]);
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [addingMat, setAddingMat] = useState(false);
+  const [loadingMatOptions, setLoadingMatOptions] = useState(false);
+  const [dimOptions, setDimOptions] = useState<string[]>([]);
+  const [metricOptions, setMetricOptions] = useState<string[]>([]);
+  const [newMat, setNewMat] = useState<NewMaterialization>(NEW_MATERIALIZATION);
+
+  useEffect(() => {
+    setLoadingWarehouses(true);
+    ListWarehouses()
+      .then((names) => setWarehouses(names ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingWarehouses(false));
+  }, []);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -255,6 +387,63 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
       await AlterSemanticView(db, schema, name, `SET COMMENT = ${q1(comment)}`);
     }
     await reload();
+  };
+
+  const saveMaxStaleness = async (n: number) => {
+    await AlterSemanticView(db, schema, name, `SET MAX_STALENESS = ${n}`);
+    setMaxStaleness(String(n));
+  };
+
+  const unsetMaxStaleness = async () => {
+    await AlterSemanticView(db, schema, name, "UNSET MAX_STALENESS");
+    setMaxStaleness("");
+  };
+
+  const runMatAction = async (verb: "SUSPEND" | "RESUME" | "REFRESH" | "DROP", label: string) => {
+    const trimmed = matName.trim();
+    if (trimmed === "") return;
+    setMatBusy(true);
+    setActionError(null);
+    try {
+      await AlterSemanticView(db, schema, name, `${verb} MATERIALIZATION ${quoteIdent(trimmed)}`);
+    } catch (e) {
+      setActionError(`${label} materialization failed: ${String(e)}`);
+    } finally {
+      setMatBusy(false);
+    }
+  };
+
+  const openAddMaterialization = async () => {
+    setAddingMat(true);
+    setLoadingMatOptions(true);
+    try {
+      const [dims, metrics] = await Promise.all([
+        ListSemanticDimensions(db, schema, name),
+        ListSemanticMetrics(db, schema, name),
+      ]);
+      setDimOptions(namesFromResult(dims));
+      setMetricOptions(namesFromResult(metrics));
+    } catch {
+      // Best-effort — the multi-selects just stay empty; dimension/metric
+      // names must exactly match the view's definition, so no free-typed
+      // fallback is offered here.
+    } finally {
+      setLoadingMatOptions(false);
+    }
+  };
+
+  const submitAddMaterialization = async () => {
+    setMatBusy(true);
+    setActionError(null);
+    try {
+      await AlterSemanticView(db, schema, name, buildAddMaterializationClause(newMat));
+      setAddingMat(false);
+      setNewMat(NEW_MATERIALIZATION);
+    } catch (e) {
+      setActionError(`Add materialization failed: ${String(e)}`);
+    } finally {
+      setMatBusy(false);
+    }
   };
 
   const loadForMetric = async () => {
@@ -333,6 +522,14 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
+              <NumberEditRow
+                label="Max Staleness (sec)"
+                value={maxStaleness}
+                min={MIN_MAX_STALENESS}
+                help={`Seconds a materialization result may lag behind the source. Minimum ${MIN_MAX_STALENESS}. Must be set before adding a materialization, and can't be unset while one exists.`}
+                onSave={saveMaxStaleness}
+                onUnset={unsetMaxStaleness}
+              />
             </tbody>
           </table>
 
@@ -366,6 +563,129 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
             description="SHOW SEMANTIC METRICS — the metrics exposed by this view."
             loader={() => ListSemanticMetrics(db, schema, name)}
           />
+
+          <div style={SECTION_HEAD}>Materializations</div>
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+            Snowflake exposes no SHOW/DESCRIBE for existing materializations, so act by name.
+            Requires MAX_STALENESS to be set above.
+          </Text>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Input
+              size="small"
+              placeholder="materialization name"
+              value={matName}
+              onChange={(e) => setMatName(e.target.value)}
+              style={{ width: 200 }}
+            />
+            <Button size="small" icon={<PauseCircleOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("SUSPEND", "Suspend")}>
+              Suspend
+            </Button>
+            <Button size="small" icon={<PlayCircleOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("RESUME", "Resume")}>
+              Resume
+            </Button>
+            <Button size="small" icon={<SyncOutlined />} loading={matBusy} disabled={!matName.trim()} onClick={() => runMatAction("REFRESH", "Refresh")}>
+              Refresh
+            </Button>
+            <Popconfirm
+              title={`Drop materialization "${matName.trim()}"?`}
+              onConfirm={() => runMatAction("DROP", "Drop")}
+              disabled={!matName.trim()}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} loading={matBusy} disabled={!matName.trim()}>
+                Drop
+              </Button>
+            </Popconfirm>
+          </Space>
+
+          {!addingMat ? (
+            <Button size="small" icon={<PlusOutlined />} onClick={openAddMaterialization} style={{ marginBottom: 12 }}>
+              Add materialization…
+            </Button>
+          ) : (
+            <Space direction="vertical" size={8} style={{ width: "100%", marginBottom: 12 }}>
+              <Space wrap>
+                <Input
+                  size="small"
+                  placeholder="name"
+                  value={newMat.name}
+                  onChange={(e) => setNewMat({ ...newMat, name: e.target.value })}
+                  style={{ width: 160 }}
+                />
+                <Select
+                  size="small"
+                  showSearch
+                  loading={loadingWarehouses}
+                  placeholder="Warehouse"
+                  value={newMat.warehouse || undefined}
+                  onChange={(v) => setNewMat({ ...newMat, warehouse: v ?? "" })}
+                  style={{ width: 160 }}
+                  options={warehouses.map((w) => ({ value: w, label: w }))}
+                  notFoundContent={loadingWarehouses ? "Loading…" : "No warehouses found"}
+                />
+                <Select<RefreshMode>
+                  size="small"
+                  value={newMat.refreshMode}
+                  onChange={(v) => setNewMat({ ...newMat, refreshMode: v })}
+                  style={{ width: 140 }}
+                  options={[
+                    { value: "AUTO", label: "REFRESH_MODE: AUTO" },
+                    { value: "FULL", label: "REFRESH_MODE: FULL" },
+                    { value: "INCREMENTAL", label: "REFRESH_MODE: INCREMENTAL" },
+                  ]}
+                />
+              </Space>
+              <Space wrap style={{ width: "100%" }}>
+                <Select
+                  mode="multiple"
+                  size="small"
+                  loading={loadingMatOptions}
+                  placeholder="Dimensions"
+                  value={newMat.dimensions}
+                  onChange={(v) => setNewMat({ ...newMat, dimensions: v })}
+                  style={{ minWidth: 220 }}
+                  options={dimOptions.map((d) => ({ value: d, label: d }))}
+                  notFoundContent={loadingMatOptions ? "Loading…" : "No dimensions found"}
+                />
+                <Select
+                  mode="multiple"
+                  size="small"
+                  loading={loadingMatOptions}
+                  placeholder="Metrics"
+                  value={newMat.metrics}
+                  onChange={(v) => setNewMat({ ...newMat, metrics: v })}
+                  style={{ minWidth: 220 }}
+                  options={metricOptions.map((m) => ({ value: m, label: m }))}
+                  notFoundContent={loadingMatOptions ? "Loading…" : "No metrics found"}
+                />
+              </Space>
+              <Input
+                size="small"
+                placeholder="IMMUTABLE WHERE condition (optional, raw SQL)"
+                value={newMat.immutableWhere}
+                onChange={(e) => setNewMat({ ...newMat, immutableWhere: e.target.value })}
+              />
+              <Input
+                size="small"
+                placeholder="WHERE filter (optional, raw SQL)"
+                value={newMat.where}
+                onChange={(e) => setNewMat({ ...newMat, where: e.target.value })}
+              />
+              <Space>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={matBusy}
+                  disabled={!isMaterializationValid(newMat)}
+                  onClick={submitAddMaterialization}
+                >
+                  Add
+                </Button>
+                <Button size="small" onClick={() => { setAddingMat(false); setNewMat(NEW_MATERIALIZATION); }}>
+                  Cancel
+                </Button>
+              </Space>
+            </Space>
+          )}
 
           <div style={SECTION_HEAD}>Dimensions for metric</div>
           <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
