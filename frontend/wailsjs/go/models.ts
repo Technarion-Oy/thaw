@@ -4030,6 +4030,30 @@ export namespace semanticview {
 		    return a;
 		}
 	}
+	export class MaterializationConfig {
+	    name: string;
+	    warehouse: string;
+	    refreshMode: string;
+	    immutableWhere: string;
+	    dimensions: string[];
+	    metrics: string[];
+	    where: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MaterializationConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.warehouse = source["warehouse"];
+	        this.refreshMode = source["refreshMode"];
+	        this.immutableWhere = source["immutableWhere"];
+	        this.dimensions = source["dimensions"];
+	        this.metrics = source["metrics"];
+	        this.where = source["where"];
+	    }
+	}
 	
 	export class Relationship {
 	    name: string;

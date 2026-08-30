@@ -232,6 +232,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/semanticview/SemanticViewPropertiesModal.tsx",
         "frontend/src/components/semanticview/semanticViewAliases.ts",
         "frontend/src/components/semanticview/semanticViewForm.tsx",
+        "frontend/src/components/semanticview/semanticViewMaterialization.ts",
         "frontend/src/components/sequence/CreateSequenceModal.tsx",
         "frontend/src/components/sequence/SequencePropertiesModal.tsx",
         "frontend/src/components/service/CreateServiceModal.tsx",

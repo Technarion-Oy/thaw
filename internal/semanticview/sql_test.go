@@ -484,3 +484,179 @@ func TestBuildCreateSemanticViewSql_MaxStalenessFloor(t *testing.T) {
 		t.Errorf("MaxStaleness at the floor: unexpected error: %v", err)
 	}
 }
+
+func TestBuildAddMaterializationSql(t *testing.T) {
+	base := MaterializationConfig{
+		Name: "mv1", Warehouse: "WH_XS",
+		Dimensions: []string{"customers.region"},
+		Metrics:    []string{"orders.revenue"},
+	}
+
+	t.Run("minimal clause omits the default AUTO refresh mode", func(t *testing.T) {
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", base)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := `ALTER SEMANTIC VIEW "DB"."SC"."sales" ADD MATERIALIZATION mv1 WAREHOUSE = "WH_XS" AS` +
+			"\n  DIMENSIONS \"customers\".\"region\"\n  METRICS \"orders\".\"revenue\";"
+		if sql != want {
+			t.Errorf("got:\n%s\nwant:\n%s", sql, want)
+		}
+	})
+
+	t.Run("includes REFRESH_MODE when it isn't AUTO", func(t *testing.T) {
+		cfg := base
+		cfg.RefreshMode = "full"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, "REFRESH_MODE = FULL") {
+			t.Errorf("expected REFRESH_MODE = FULL, got:\n%s", sql)
+		}
+	})
+
+	t.Run("rejects an invalid REFRESH_MODE", func(t *testing.T) {
+		cfg := base
+		cfg.RefreshMode = "BOGUS"
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for an invalid REFRESH_MODE")
+		}
+	})
+
+	t.Run("parenthesizes IMMUTABLE WHERE and WHERE as raw SQL, not string literals", func(t *testing.T) {
+		cfg := base
+		cfg.ImmutableWhere = "region = 'US'"
+		cfg.Where = "revenue > 0"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, "IMMUTABLE WHERE (region = 'US')") {
+			t.Errorf("expected IMMUTABLE WHERE clause, got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "WHERE (revenue > 0)") {
+			t.Errorf("expected WHERE clause, got:\n%s", sql)
+		}
+	})
+
+	t.Run("qualifies each dimension/metric by table, splitting on the last dot", func(t *testing.T) {
+		cfg := MaterializationConfig{
+			Name: "mv1", Warehouse: "WH_XS",
+			Dimensions: []string{"customers.region", "orders.segment"},
+			Metrics:    []string{"orders.revenue"},
+		}
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, `DIMENSIONS "customers"."region", "orders"."segment"`) {
+			t.Errorf("expected qualified dimensions, got:\n%s", sql)
+		}
+	})
+
+	t.Run("falls back to a bare quoted identifier when there's no dot", func(t *testing.T) {
+		cfg := MaterializationConfig{
+			Name: "mv1", Warehouse: "WH_XS",
+			Dimensions: []string{"region"},
+			Metrics:    []string{"revenue"},
+		}
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, `DIMENSIONS "region"`) || !strings.Contains(sql, `METRICS "revenue"`) {
+			t.Errorf("expected bare quoted identifiers, got:\n%s", sql)
+		}
+	})
+
+	t.Run("quotes a name containing special characters", func(t *testing.T) {
+		cfg := base
+		cfg.Name = `my "mv"`
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, `ADD MATERIALIZATION "my ""mv"""`) {
+			t.Errorf("expected doubled embedded quotes, got:\n%s", sql)
+		}
+	})
+
+	t.Run("leaves a plain bare name unquoted, letting Snowflake fold its case", func(t *testing.T) {
+		// A materialization name is free-typed (unlike Warehouse, picked from
+		// an existing ListWarehouses value), so unlike the warehouse it must
+		// not be force-quoted: forcing quotes would make an unquoted
+		// `ADD MATERIALIZATION sales_mv` (folded by Snowflake to SALES_MV)
+		// unmatchable by a later SUSPEND/RESUME/REFRESH/DROP typed the same
+		// lowercase way.
+		cfg := base
+		cfg.Name = "sales_mv"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, "ADD MATERIALIZATION sales_mv WAREHOUSE") {
+			t.Errorf("expected an unquoted bare name, got:\n%s", sql)
+		}
+	})
+
+	t.Run("still quotes the warehouse even when its name is bare-safe", func(t *testing.T) {
+		cfg := base
+		cfg.Warehouse = "wh_xs"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, `WAREHOUSE = "wh_xs"`) {
+			t.Errorf(`expected WAREHOUSE = "wh_xs", got:%s`, sql)
+		}
+	})
+
+	t.Run("requires a name", func(t *testing.T) {
+		cfg := base
+		cfg.Name = ""
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a missing name")
+		}
+	})
+
+	t.Run("requires a warehouse", func(t *testing.T) {
+		cfg := base
+		cfg.Warehouse = ""
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a missing warehouse")
+		}
+	})
+
+	t.Run("requires at least one dimension", func(t *testing.T) {
+		cfg := base
+		cfg.Dimensions = nil
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for no dimensions")
+		}
+	})
+
+	t.Run("requires at least one metric", func(t *testing.T) {
+		cfg := base
+		cfg.Metrics = nil
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for no metrics")
+		}
+	})
+
+	t.Run("rejects a dimension list that is blank after trimming", func(t *testing.T) {
+		cfg := base
+		cfg.Dimensions = []string{"   "}
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a whitespace-only dimension, not a rendered empty DIMENSIONS clause")
+		}
+	})
+
+	t.Run("rejects a metric list that is blank after trimming", func(t *testing.T) {
+		cfg := base
+		cfg.Metrics = []string{"   "}
+		if _, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg); err == nil {
+			t.Error("expected an error for a whitespace-only metric, not a rendered empty METRICS clause")
+		}
+	})
+}

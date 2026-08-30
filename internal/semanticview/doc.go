@@ -18,9 +18,10 @@
 // SHOW SEMANTIC VIEWS reports only metadata (owner,
 // comment); the full structure comes from DESCRIBE SEMANTIC VIEW and the
 // SHOW SEMANTIC DIMENSIONS / FACTS / METRICS commands, read by the properties
-// panel. ALTER SEMANTIC VIEW only changes the comment, tags, or name; the body
-// is changed via CREATE OR REPLACE. GET_DDL supports semantic views directly
-// (object_type 'SEMANTIC VIEW').
+// panel. ALTER SEMANTIC VIEW changes the comment, tags, name, MAX_STALENESS,
+// and materializations (ADD/DROP/SUSPEND/RESUME/REFRESH); the definition body
+// itself is still only changed via CREATE OR REPLACE. GET_DDL supports
+// semantic views directly (object_type 'SEMANTIC VIEW').
 //
 // thaw:domain: Object Browser & Administration
 package semanticview

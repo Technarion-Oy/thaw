@@ -3,6 +3,7 @@
 import {migration} from '../models';
 import {authenticationpolicy} from '../models';
 import {column} from '../models';
+import {semanticview} from '../models';
 import {dbtproject} from '../models';
 import {stage} from '../models';
 import {integrations} from '../models';
@@ -41,7 +42,6 @@ import {privacypolicy} from '../models';
 import {projectionpolicy} from '../models';
 import {rowaccesspolicy} from '../models';
 import {secret} from '../models';
-import {semanticview} from '../models';
 import {sequence} from '../models';
 import {service} from '../models';
 import {sessionpolicy} from '../models';
@@ -210,6 +210,8 @@ export function AuthenticationPolicyMFAEnrollmentOptions():Promise<Array<string>
 export function BuildAddColumnSql(arg1:string,arg2:string,arg3:string,arg4:column.AddColumnConfig):Promise<string>;
 
 export function BuildAddDbtProjectVersionSql(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
+export function BuildAddSemanticViewMaterializationSql(arg1:string,arg2:string,arg3:string,arg4:semanticview.MaterializationConfig):Promise<string>;
 
 export function BuildAlterDbtProjectSetSql(arg1:string,arg2:string,arg3:string,arg4:dbtproject.AlterSetConfig,arg5:string,arg6:string,arg7:string,arg8:Array<string>):Promise<Array<string>>;
 

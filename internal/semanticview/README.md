@@ -101,11 +101,74 @@ that describe the business meaning of the data.
 
 ## ALTER / lifecycle
 
-`ALTER SEMANTIC VIEW` can only **rename** the view, set/unset its **comment**,
-or set/unset **tags** — the definition body cannot be altered (change it via
-`CREATE OR REPLACE`). These run through `App.AlterSemanticView(db, schema, name,
-clause)` in `internal/app/semanticview.go` (a thin wrapper over the shared
-`alterObject` helper).
+`ALTER SEMANTIC VIEW` can **rename** the view, set/unset its **comment**,
+set/unset **tags**, set/unset **MAX_STALENESS**, and add / drop / suspend /
+resume / refresh **materializations** — the definition body itself
+(`TABLES`/`RELATIONSHIPS`/`FACTS`/`DIMENSIONS`/`METRICS`) still cannot be
+altered (change it via `CREATE OR REPLACE`). The rename / comment / tag /
+MAX_STALENESS / suspend / resume / refresh / drop actions are single, fixed
+clauses, so — like the equivalent single-clause actions in every other
+Properties modal (`DynamicTablePropertiesModal.tsx`'s target lag/warehouse,
+`ServicePropertiesModal.tsx`'s numeric settings, …) — they're assembled as a
+plain string by the frontend (`SemanticViewPropertiesModal.tsx`) and run
+through `App.AlterSemanticView(db, schema, name, clause)` in
+`internal/app/semanticview.go` (a thin wrapper over the shared `alterObject`
+helper).
+
+`ADD MATERIALIZATION` is different: a multi-part statement (required
+warehouse, optional `REFRESH_MODE`/`IMMUTABLE WHERE`, required dimension/metric
+lists, optional `WHERE`) on par with the CREATE builder above, not a one-line
+`SET`. So it gets its own Go builder, `BuildAddMaterializationSql`, exposed as
+`App.BuildAddSemanticViewMaterializationSql` in `internal/app/builders.go` —
+the frontend calls it for the SQL, then `ExecDDL` to run it, the same
+two-step split `internal/dbtproject`'s `BuildAddVersionSql` /
+`AddDbtProjectVersionModal.tsx` use for `ADD VERSION`.
+
+`MAX_STALENESS` must be set (minimum 120 seconds, matching `MinMaxStaleness`
+above) before a materialization can be added, and Snowflake rejects `UNSET
+MAX_STALENESS` while one exists. Adding a materialization
+(`ADD MATERIALIZATION <name> WAREHOUSE = <wh> [REFRESH_MODE = ...] [IMMUTABLE
+WHERE (...)] AS DIMENSIONS ... METRICS ... [WHERE (...)]`) requires a
+warehouse and at least one dimension and one metric — each qualified by its
+logical table (`DIMENSIONS customers.customer_name`, per Snowflake's own
+example), since a bare name is ambiguous once a view joins more than one
+logical table. `BuildAddMaterializationSql` quotes each `table.name` reference
+via `quoteMaterializationRef`, which — like the CREATE builder's
+`renderer.qualifiedIdent` just above — splits on the *last* dot and quotes
+both halves; both now share that splitting rule through the package-level
+`splitLastDotQuoted(ref, quote)`, parameterized only by which quoting function
+to apply (`renderer.ident`, gated by the config's case-sensitivity flag, vs.
+the materialization builder's unconditional `snowflake.QuoteIdent` — these
+names come from live `SHOW` output, not a user-typed identifier). The
+dimension/metric emptiness check runs *after* that quoting/filtering, not
+before: an all-whitespace entry survives a raw `len()` check but
+`quoteMaterializationRef` drops it, so checking the filtered slice is what
+actually catches a materialization that would otherwise render an empty
+`DIMENSIONS`/`METRICS` clause. Snowflake exposes no `SHOW`/`DESCRIBE` for a
+view's existing materializations, so `DROP`/`SUSPEND`/`RESUME`/`REFRESH
+MATERIALIZATION` act on a typed-in name rather than a picked row.
+
+`Name` — the materialization's own name, free-typed by the user, unlike
+`Warehouse`, which is picked from an existing `ListWarehouses` value — is
+quoted via `snowflake.QuoteOrBare(matName, false)`, not the unconditional
+`snowflake.QuoteIdent` the warehouse itself still gets. Forcing quotes on a
+free-typed name would make a materialization created unquoted (and folded to
+uppercase by Snowflake, e.g. `sales_mv` → `SALES_MV`) unmatchable by the same
+lowercase spelling later, since a quoted `"sales_mv"` is a *different*,
+case-sensitive identifier from the bare, uppercase-folded one Snowflake
+actually stored. The Properties modal applies the identical treatment
+client-side for `SUSPEND`/`RESUME`/`REFRESH`/`DROP MATERIALIZATION` via
+`identToken(trimmed, false)` (`ObjectNameCaseControl.tsx`), so a name typed
+once resolves the same way through every one of these five clauses.
+
+The SQL editor's own grammar validator (`internal/sqlgrammar`) has to know
+this syntax independently of the builders above — `ParseAlterSemanticView`
+models the full `SET`/`UNSET MAX_STALENESS` and
+`ADD`/`DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` forms (`WHERE ( … )`
+and `IMMUTABLE WHERE ( … )` accepted as a balanced parenthesized span via the
+shared `consumeBalancedParens`, the same tolerance `ParseCreateSemanticView`
+gives its own clause bodies), so a statement this package's builders and the
+Properties modal produce doesn't get flagged as a syntax error in the editor.
 
 `SHOW SEMANTIC VIEWS` reports only `created_on` / `name` / `database_name` /
 `schema_name` / `comment` / `owner` / `owner_role_type`, so the structure is

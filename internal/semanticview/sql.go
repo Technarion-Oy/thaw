@@ -174,22 +174,36 @@ func (r renderer) identList(names []string) string {
 // half separately — quoting the whole string would produce one identifier
 // containing a dot. Used for a metric's NON ADDITIVE BY dimensions, which are
 // the only references in the grammar the form supplies pre-qualified.
-//
-// Split on the *last* dot, not the first: the table alias is a free-text form
-// field with no restriction against containing one (e.g. "ord.v2"), while the
-// dimension name after it is a single field. Splitting on the first dot would
-// fold the rest of the alias into the name half, quoting it as one identifier
-// that doesn't exist instead of alias.name.
 func (r renderer) qualifiedIdent(ref string) string {
+	return splitLastDotQuoted(ref, r.ident)
+}
+
+// splitLastDotQuoted splits a possibly-dotted `alias.name` (or `table.name`)
+// reference and quotes each half separately via quote — quoting the whole
+// string unsplit would produce one identifier containing a dot instead of two.
+//
+// Split on the *last* dot, not the first: the alias/table half is free text
+// with no restriction against containing one (e.g. "ord.v2"), while the
+// name after it is a single field. Splitting on the first dot would fold the
+// rest of the alias into the name half, quoting it as one identifier that
+// doesn't exist instead of alias.name. A reference with no dot quotes as a
+// single identifier.
+//
+// Shared by renderer.qualifiedIdent (CREATE SEMANTIC VIEW's NON ADDITIVE BY,
+// gated by the config's case-sensitivity flag via r.ident) and
+// quoteMaterializationRef (ALTER ... ADD MATERIALIZATION's DIMENSIONS/METRICS,
+// always-quoted via snowflake.QuoteIdent) so the splitting rule can't drift
+// between the two call sites.
+func splitLastDotQuoted(ref string, quote func(string) string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""
 	}
 	at := strings.LastIndex(ref, ".")
 	if at < 0 {
-		return r.ident(ref)
+		return quote(ref)
 	}
-	return r.ident(ref[:at]) + "." + r.ident(ref[at+1:])
+	return quote(ref[:at]) + "." + quote(ref[at+1:])
 }
 
 // renderEach maps items through render and drops the entries it rejects (an
@@ -517,4 +531,110 @@ func BuildCreateSemanticViewSql(db, schema string, cfg SemanticViewConfig) (stri
 	}
 
 	return sb.String() + ";", nil
+}
+
+// MaterializationConfig is the Properties modal's "Add materialization" form
+// state, passed to BuildAddMaterializationSql. Dimensions/Metrics are
+// `table.name` references exactly as SHOW SEMANTIC DIMENSIONS/METRICS reports
+// them (unquoted) — Snowflake's own ADD MATERIALIZATION example qualifies
+// every reference (docs.snowflake.com/en/sql-reference/sql/alter-semantic-view:
+// `DIMENSIONS customers.customer_name`), since a bare name is ambiguous the
+// moment a view joins more than one logical table, which is the normal case.
+type MaterializationConfig struct {
+	Name      string `json:"name"`
+	Warehouse string `json:"warehouse"`
+	// RefreshMode is "", "AUTO", "FULL", or "INCREMENTAL"; "" and "AUTO" both
+	// omit the clause, matching Snowflake's own default.
+	RefreshMode string `json:"refreshMode"`
+	// ImmutableWhere and Where are raw SQL boolean expressions typed by the
+	// user, not free text — parenthesized as given, never literal-quoted.
+	ImmutableWhere string   `json:"immutableWhere"`
+	Dimensions     []string `json:"dimensions"`
+	Metrics        []string `json:"metrics"`
+	Where          string   `json:"where"`
+}
+
+// BuildAddMaterializationSql constructs an ALTER SEMANTIC VIEW ... ADD
+// MATERIALIZATION statement, per
+// https://docs.snowflake.com/en/sql-reference/sql/alter-semantic-view:
+//
+//	ALTER SEMANTIC VIEW <fqn> ADD MATERIALIZATION <name> WAREHOUSE = <wh>
+//	  [REFRESH_MODE = {AUTO|FULL|INCREMENTAL}]
+//	  [IMMUTABLE WHERE (<condition>)]
+//	AS
+//	  DIMENSIONS <table>.<dim> [, ...]
+//	  METRICS <table>.<metric> [, ...]
+//	  [WHERE (<condition>)]
+//
+// Requires a name, a warehouse, and at least one dimension and metric —
+// Snowflake's own rule (the Properties modal also gates its Add button on
+// this, but the check is repeated here since this function, not the modal, is
+// what actually assembles the SQL sent to Snowflake).
+func BuildAddMaterializationSql(db, schema, name string, cfg MaterializationConfig) (string, error) {
+	matName := strings.TrimSpace(cfg.Name)
+	warehouse := strings.TrimSpace(cfg.Warehouse)
+	// Quote (and drop-if-blank) the dimension/metric lists before checking
+	// them for emptiness, not after: an all-whitespace entry survives the
+	// len() check on the raw slice but quoteMaterializationRefs drops it, so
+	// checking the raw length would let a blank-only list through and render
+	// an empty DIMENSIONS/METRICS clause.
+	dims := quoteMaterializationRefs(cfg.Dimensions)
+	metrics := quoteMaterializationRefs(cfg.Metrics)
+	if matName == "" || warehouse == "" || len(dims) == 0 || len(metrics) == 0 {
+		return "", fmt.Errorf("materialization requires a name, a warehouse, and at least one dimension and one metric")
+	}
+
+	var sb strings.Builder
+	// matName is free-typed (unlike warehouse, picked from an existing
+	// canonical ListWarehouses name), so it's quoted only when Snowflake
+	// actually requires it (QuoteOrBare) rather than forced into a
+	// case-sensitive identifier — an unquoted CREATE folds to uppercase, and
+	// forcing quotes here would make that same name unmatchable by its
+	// original lowercase spelling from the Suspend/Resume/Refresh/Drop
+	// actions (which apply the same QuoteOrBare-equivalent identToken
+	// treatment client-side; see SemanticViewPropertiesModal.tsx).
+	fmt.Fprintf(&sb, "ALTER SEMANTIC VIEW %s ADD MATERIALIZATION %s WAREHOUSE = %s",
+		snowflake.Qualify(db, schema, name), snowflake.QuoteOrBare(matName, false), snowflake.QuoteIdent(warehouse))
+
+	if mode := strings.TrimSpace(cfg.RefreshMode); mode != "" {
+		validated, err := snowflake.ValidateEnumValue("REFRESH_MODE", mode, "AUTO", "FULL", "INCREMENTAL")
+		if err != nil {
+			return "", err
+		}
+		if validated != "AUTO" {
+			fmt.Fprintf(&sb, " REFRESH_MODE = %s", validated)
+		}
+	}
+	if w := strings.TrimSpace(cfg.ImmutableWhere); w != "" {
+		fmt.Fprintf(&sb, " IMMUTABLE WHERE (%s)", w)
+	}
+
+	fmt.Fprintf(&sb, " AS\n  DIMENSIONS %s", strings.Join(dims, ", "))
+	fmt.Fprintf(&sb, "\n  METRICS %s", strings.Join(metrics, ", "))
+	if w := strings.TrimSpace(cfg.Where); w != "" {
+		fmt.Fprintf(&sb, "\n  WHERE (%s)", w)
+	}
+
+	return sb.String() + ";", nil
+}
+
+// quoteMaterializationRefs quotes each DIMENSIONS/METRICS reference for ADD
+// MATERIALIZATION, dropping any that are blank after trimming.
+func quoteMaterializationRefs(refs []string) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if q := quoteMaterializationRef(ref); q != "" {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// quoteMaterializationRef quotes one `table.name` reference for ADD
+// MATERIALIZATION's DIMENSIONS/METRICS list — see splitLastDotQuoted. Unlike
+// renderer.qualifiedIdent, this always quotes both halves: these names come
+// from live SHOW output, not a user-typed identifier subject to a
+// case-sensitivity toggle.
+func quoteMaterializationRef(ref string) string {
+	return splitLastDotQuoted(ref, snowflake.QuoteIdent)
 }
