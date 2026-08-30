@@ -148,6 +148,19 @@ actually catches a materialization that would otherwise render an empty
 view's existing materializations, so `DROP`/`SUSPEND`/`RESUME`/`REFRESH
 MATERIALIZATION` act on a typed-in name rather than a picked row.
 
+`Name` — the materialization's own name, free-typed by the user, unlike
+`Warehouse`, which is picked from an existing `ListWarehouses` value — is
+quoted via `snowflake.QuoteOrBare(matName, false)`, not the unconditional
+`snowflake.QuoteIdent` the warehouse itself still gets. Forcing quotes on a
+free-typed name would make a materialization created unquoted (and folded to
+uppercase by Snowflake, e.g. `sales_mv` → `SALES_MV`) unmatchable by the same
+lowercase spelling later, since a quoted `"sales_mv"` is a *different*,
+case-sensitive identifier from the bare, uppercase-folded one Snowflake
+actually stored. The Properties modal applies the identical treatment
+client-side for `SUSPEND`/`RESUME`/`REFRESH`/`DROP MATERIALIZATION` via
+`identToken(trimmed, false)` (`ObjectNameCaseControl.tsx`), so a name typed
+once resolves the same way through every one of these five clauses.
+
 The SQL editor's own grammar validator (`internal/sqlgrammar`) has to know
 this syntax independently of the builders above — `ParseAlterSemanticView`
 models the full `SET`/`UNSET MAX_STALENESS` and

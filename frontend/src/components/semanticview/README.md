@@ -150,14 +150,19 @@ describe the data.
   containing one.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
   comment via `AlterSemanticView`, plus an editable `MAX_STALENESS` — the
-  shared `EditRow`'s `numeric` mode, minimum 120 seconds, integer-only via
-  `precision={0}`), a **Tags** section (the shared `TagsRow` + `useObjectTags`
-  hook — tags read via `GetObjectTagReferences`, add / remove via
-  `AlterSemanticView`), lazily-loaded sections that surface the view's
-  structure on demand: **Structure** (`DescribeSemanticView`), **Dimensions**
+  shared `EditRow`'s `numeric` mode, bounded `[MIN_MAX_STALENESS,
+  Number.MAX_SAFE_INTEGER]` and integer-only via `precision={0}`), a **Tags**
+  section (the shared `TagsRow` + `useObjectTags` hook — tags read via
+  `GetObjectTagReferences`, add / remove via `AlterSemanticView`),
+  lazily-loaded sections that surface the view's structure on demand:
+  **Structure** (`DescribeSemanticView`), **Dimensions**
   (`ListSemanticDimensions`), **Facts** (`ListSemanticFacts`), **Metrics**
   (`ListSemanticMetrics`), a **Materializations** section (Suspend / Resume /
-  Refresh / Drop by typed-in name — `matAction` tracks which *one* of those
+  Refresh / Drop by typed-in name — quoted via `identToken(trimmed, false)`,
+  not an unconditional `quoteIdent`, so a name typed exactly as it was
+  originally written (and thus uppercase-folded by Snowflake if left
+  unquoted) still resolves instead of being forced into a case-sensitive,
+  now-nonexistent quoted identifier; `matAction` tracks which *one* of those
   four is in flight, or `null` when idle, so only the clicked button's
   `loading` prop lights up instead of all four sharing one flag; the Add
   form's own `addMatBusy` keeps that group separate too — plus an **Add
@@ -168,10 +173,12 @@ describe the data.
   the adjacent Dimensions/Metrics `LazySection`s call — via a `dimsResult`/
   `metricsResult` cache, so expanding those sections first and then opening
   this form doesn't repeat the same two live `SHOW` round-trips. A failed
-  fetch here sets `actionError` rather than leaving the pickers silently
-  empty, since "no dimensions defined" and "the fetch failed" would otherwise
-  look identical. Submitting calls `BuildAddSemanticViewMaterializationSql`
-  for the SQL, then `ExecDDL` to run it — the same two-step split as
+  fetch here sets `actionError` **and** closes the form (`setAddingMat(false)`)
+  rather than leaving it rendered with dead, misleadingly-empty pickers — the
+  form was just opened with nothing typed into it yet, so there's nothing to
+  preserve, and the user retries with a fresh "Add materialization…" click.
+  Submitting calls `BuildAddSemanticViewMaterializationSql` for the SQL, then
+  `ExecDDL` to run it — the same two-step split as
   `AddDbtProjectVersionModal.tsx` — since, unlike the single-clause
   `SET`/`UNSET`/`SUSPEND`/… actions elsewhere in this modal, `ADD
   MATERIALIZATION` is a multi-part statement on par with the CREATE builders,
@@ -181,25 +188,29 @@ describe the data.
   lookup (`ListSemanticDimensionsForMetric`).
 
   `EditRow` (this file's own — not the shared component of the same name used
-  elsewhere) grew a `numeric`/`min`/`precision` mode rather than a separate
-  component, following the pattern of `ServicePropertiesModal.tsx`'s
+  elsewhere) grew a `numeric`/`min`/`max`/`precision` mode rather than a
+  separate component, following the pattern of `ServicePropertiesModal.tsx`'s
   `numeric?: boolean` flag and `TaskPropertiesModal.tsx`'s `type`/`min`.
   `MAX_STALENESS` has no read path — `SHOW SEMANTIC VIEWS` / `DESCRIBE
   SEMANTIC VIEW` don't report it — so the field only ever reflects what this
   modal itself has just set, not the view's actual current value.
-  `saveMaxStaleness` re-checks the same floor `BuildCreateSemanticViewSql`
-  already enforces in Go for the CREATE path, rather than trusting
-  `InputNumber`'s `min` prop alone — that prop doesn't block every input path
-  (paste, Enter before blur-clamp), so without the re-check a sub-floor value
-  could reach Snowflake and come back as a raw server error instead of
-  `EditRow`'s own inline one. Materializations have the same read-path gap one
-  level further: Snowflake exposes no `SHOW`/`DESCRIBE` for a view's *existing*
+  `saveMaxStaleness` re-checks `!Number.isSafeInteger(n) || n <
+  MIN_MAX_STALENESS` rather than trusting `InputNumber`'s `min`/`max` props
+  alone — those props don't block every input path (paste, Enter before
+  blur-clamp), and a large-enough pasted value serializes through
+  `${n}` as JS exponential notation (`"1e+20"`), an invalid Snowflake integer
+  literal — matching the floor `BuildCreateSemanticViewSql` already enforces
+  in Go for the CREATE path with a client-side error instead of a raw server
+  one. Materializations have the same read-path gap one level further:
+  Snowflake exposes no `SHOW`/`DESCRIBE` for a view's *existing*
   materializations at all, so the action row acts on a name the user types
   rather than a row picked from a list.
 - **`semanticViewMaterialization.ts`** — `qualifiedOptionsFromResult` turns a
   `SHOW SEMANTIC DIMENSIONS`/`METRICS` result into the Add Materialization
   form's multi-select options, case-insensitively reading the `table_name` /
-  `name` columns (matching `internal/snowflake/result.go`'s `ColIdx`) and
+  `name` columns (matching `internal/snowflake/result.go`'s `ColIdx`,
+  guarding both with `?? []` rather than assuming a non-null `columns`/`rows`
+  the way every other SHOW/DESCRIBE reader in this codebase does) and
   qualifying each option as the unquoted `table.name` — Snowflake's own `ADD
   MATERIALIZATION` example qualifies every reference, since a bare name is
   ambiguous the moment a view joins more than one logical table (the normal

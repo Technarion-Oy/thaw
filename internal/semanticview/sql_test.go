@@ -497,7 +497,7 @@ func TestBuildAddMaterializationSql(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := `ALTER SEMANTIC VIEW "DB"."SC"."sales" ADD MATERIALIZATION "mv1" WAREHOUSE = "WH_XS" AS` +
+		want := `ALTER SEMANTIC VIEW "DB"."SC"."sales" ADD MATERIALIZATION mv1 WAREHOUSE = "WH_XS" AS` +
 			"\n  DIMENSIONS \"customers\".\"region\"\n  METRICS \"orders\".\"revenue\";"
 		if sql != want {
 			t.Errorf("got:\n%s\nwant:\n%s", sql, want)
@@ -570,7 +570,7 @@ func TestBuildAddMaterializationSql(t *testing.T) {
 		}
 	})
 
-	t.Run("quotes a name or warehouse containing special characters", func(t *testing.T) {
+	t.Run("quotes a name containing special characters", func(t *testing.T) {
 		cfg := base
 		cfg.Name = `my "mv"`
 		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
@@ -579,6 +579,36 @@ func TestBuildAddMaterializationSql(t *testing.T) {
 		}
 		if !strings.Contains(sql, `ADD MATERIALIZATION "my ""mv"""`) {
 			t.Errorf("expected doubled embedded quotes, got:\n%s", sql)
+		}
+	})
+
+	t.Run("leaves a plain bare name unquoted, letting Snowflake fold its case", func(t *testing.T) {
+		// A materialization name is free-typed (unlike Warehouse, picked from
+		// an existing ListWarehouses value), so unlike the warehouse it must
+		// not be force-quoted: forcing quotes would make an unquoted
+		// `ADD MATERIALIZATION sales_mv` (folded by Snowflake to SALES_MV)
+		// unmatchable by a later SUSPEND/RESUME/REFRESH/DROP typed the same
+		// lowercase way.
+		cfg := base
+		cfg.Name = "sales_mv"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, "ADD MATERIALIZATION sales_mv WAREHOUSE") {
+			t.Errorf("expected an unquoted bare name, got:\n%s", sql)
+		}
+	})
+
+	t.Run("still quotes the warehouse even when its name is bare-safe", func(t *testing.T) {
+		cfg := base
+		cfg.Warehouse = "wh_xs"
+		sql, err := BuildAddMaterializationSql("DB", "SC", "sales", cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(sql, `WAREHOUSE = "wh_xs"`) {
+			t.Errorf(`expected WAREHOUSE = "wh_xs", got:%s`, sql)
 		}
 	})
 

@@ -585,8 +585,16 @@ func BuildAddMaterializationSql(db, schema, name string, cfg MaterializationConf
 	}
 
 	var sb strings.Builder
+	// matName is free-typed (unlike warehouse, picked from an existing
+	// canonical ListWarehouses name), so it's quoted only when Snowflake
+	// actually requires it (QuoteOrBare) rather than forced into a
+	// case-sensitive identifier — an unquoted CREATE folds to uppercase, and
+	// forcing quotes here would make that same name unmatchable by its
+	// original lowercase spelling from the Suspend/Resume/Refresh/Drop
+	// actions (which apply the same QuoteOrBare-equivalent identToken
+	// treatment client-side; see SemanticViewPropertiesModal.tsx).
 	fmt.Fprintf(&sb, "ALTER SEMANTIC VIEW %s ADD MATERIALIZATION %s WAREHOUSE = %s",
-		snowflake.Qualify(db, schema, name), snowflake.QuoteIdent(matName), snowflake.QuoteIdent(warehouse))
+		snowflake.Qualify(db, schema, name), snowflake.QuoteOrBare(matName, false), snowflake.QuoteIdent(warehouse))
 
 	if mode := strings.TrimSpace(cfg.RefreshMode); mode != "" {
 		validated, err := snowflake.ValidateEnumValue("REFRESH_MODE", mode, "AUTO", "FULL", "INCREMENTAL")

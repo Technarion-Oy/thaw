@@ -49,11 +49,16 @@ export function isMaterializationValid(m: NewMaterialization): boolean {
 // (internal/snowflake/result.go's ColIdx).
 export function qualifiedOptionsFromResult(res: snowflake.QueryResult | null): string[] {
   if (!res) return [];
-  const cols = res.columns.map((c) => c.toLowerCase());
+  // `?? []`, not just the top-level !res check — matching every other
+  // SHOW/DESCRIBE reader in this codebase (ResultTable in this same file,
+  // useObjectTags.ts, PropertyRows.tsx, …), since a QueryResult whose
+  // columns/rows come back null/undefined should degrade to "no options"
+  // rather than throw out of openAddMaterialization's Promise.all.
+  const cols = (res.columns ?? []).map((c) => c.toLowerCase());
   const nameI = cols.indexOf("name");
   const tableI = cols.indexOf("table_name");
   if (nameI < 0) return [];
-  return res.rows.map((r) => {
+  return (res.rows ?? []).map((r) => {
     const nm = String(r[nameI]);
     const tbl = tableI >= 0 && r[tableI] != null ? String(r[tableI]) : "";
     return tbl ? `${tbl}.${nm}` : nm;

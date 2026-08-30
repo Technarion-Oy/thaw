@@ -18,7 +18,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import { quoteIdent } from "../shared/ObjectNameCaseControl";
+import { identToken } from "../shared/ObjectNameCaseControl";
 import {
   isMaterializationValid, qualifiedOptionsFromResult, NEW_MATERIALIZATION,
   type NewMaterialization, type RefreshMode,
@@ -140,6 +140,7 @@ interface EditRowProps {
   // string so the two modes share one save/unset/render implementation.
   numeric?: boolean;
   min?: number;
+  max?: number;
   precision?: number;
   help?: string;
   emptyHint?: string;
@@ -148,7 +149,7 @@ interface EditRowProps {
 }
 
 function EditRow({
-  label, value, canUnset, numeric, min, precision, help, emptyHint = "not set", onSave, onUnset,
+  label, value, canUnset, numeric, min, max, precision, help, emptyHint = "not set", onSave, onUnset,
 }: EditRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -193,6 +194,7 @@ function EditRow({
                 <InputNumber
                   size="small"
                   min={min}
+                  max={max}
                   precision={precision}
                   value={draft === "" ? undefined : Number(draft)}
                   onChange={(v) => setDraft(v == null ? "" : String(v))}
@@ -332,13 +334,18 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
 
   const saveMaxStaleness = async (val: string) => {
     const n = Number(val);
-    // InputNumber's min prop isn't an absolute input-blocking constraint in
-    // every interaction path (paste, Enter before blur-clamp), so re-check
-    // here rather than relying on Snowflake's server-side rejection for a
-    // constraint the CREATE flow already enforces client-side
-    // (BuildCreateSemanticViewSql rejects the same floor in Go).
-    if (n < MIN_MAX_STALENESS) {
-      throw new Error(`MAX_STALENESS must be at least ${MIN_MAX_STALENESS} seconds`);
+    // InputNumber's min/max props aren't an absolute input-blocking
+    // constraint in every interaction path (paste, Enter before blur-clamp),
+    // so re-check here rather than relying on Snowflake's server-side
+    // rejection for a constraint the CREATE flow already enforces
+    // client-side (BuildCreateSemanticViewSql rejects the same floor in Go).
+    // Number.isSafeInteger also catches a value too large to round-trip
+    // through `${n}` as a valid integer literal — e.g. pasting
+    // 99999999999999999999 serializes via JS exponential notation
+    // ("1e+20"), which Snowflake rejects as a syntax error rather than the
+    // clear client-side message this check gives instead.
+    if (!Number.isSafeInteger(n) || n < MIN_MAX_STALENESS) {
+      throw new Error(`MAX_STALENESS must be a whole number of at least ${MIN_MAX_STALENESS} seconds`);
     }
     await AlterSemanticView(db, schema, name, `SET MAX_STALENESS = ${n}`);
     setMaxStaleness(String(n));
@@ -355,7 +362,13 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     setMatAction(verb);
     setActionError(null);
     try {
-      await AlterSemanticView(db, schema, name, `${verb} MATERIALIZATION ${quoteIdent(trimmed)}`);
+      // identToken(trimmed, false): only quote when Snowflake actually
+      // requires it (special characters, reserved word), rather than forcing
+      // a case-sensitive match — a materialization created unquoted (folded
+      // to uppercase by Snowflake) still resolves when the user types it back
+      // in its original lowercase form. Matches ViewPropertiesModal.tsx's
+      // identToken(t, false) for the same kind of free-typed identifier.
+      await AlterSemanticView(db, schema, name, `${verb} MATERIALIZATION ${identToken(trimmed, false)}`);
     } catch (e) {
       setActionError(`${label} materialization failed: ${String(e)}`);
     } finally {
@@ -383,7 +396,12 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
       // Surface the failure rather than swallowing it — an empty picker from
       // a real error (dropped session, no privilege) would otherwise look
       // identical to "this view genuinely has no dimensions/metrics/warehouses."
+      // Close the form too: it was just opened (nothing typed into it yet),
+      // so leaving it rendered would show dead "No … found" pickers instead
+      // of a clear failure state; the user retries via "Add materialization…"
+      // again, which re-runs this same fetch.
       setActionError(`Failed to load materialization form options: ${String(e)}`);
+      setAddingMat(false);
     } finally {
       setLoadingMatOptions(false);
       setLoadingWarehouses(false);
@@ -487,6 +505,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                 canUnset
                 numeric
                 min={MIN_MAX_STALENESS}
+                max={Number.MAX_SAFE_INTEGER}
                 precision={0}
                 help={`Seconds a materialization result may lag behind the source. Minimum ${MIN_MAX_STALENESS}. Must be set before adding a materialization, and can't be unset while one exists.`}
                 emptyHint="unknown — Snowflake doesn't report this back"
