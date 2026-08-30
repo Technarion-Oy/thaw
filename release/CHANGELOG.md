@@ -1,3 +1,17 @@
+# [0.7.0](https://github.com/Technarion-Oy/thaw/compare/v0.6.3...v0.7.0) (2026-08-30)
+
+
+### Bug Fixes
+
+* Update module github.com/labstack/echo/v4 to v4.15.3 [SECURITY] ([#910](https://github.com/Technarion-Oy/thaw/issues/910)) ([08005c6](https://github.com/Technarion-Oy/thaw/commit/08005c6ae7b9802e53da4a96835dbd145f0978e9))
+
+
+### Features
+
+* drive CREATE SEMANTIC VIEW from a structured form ([#913](https://github.com/Technarion-Oy/thaw/issues/913)) ([9b035c7](https://github.com/Technarion-Oy/thaw/commit/9b035c7490c07f9dd9e6e8b203610a3d9e50077a))
+* filter Object Summaries by type, schema, and empty tables ([#909](https://github.com/Technarion-Oy/thaw/issues/909)) ([9be63b2](https://github.com/Technarion-Oy/thaw/commit/9be63b2fb9594feff6c9f81ee5eb24100e7d8220))
+* upport MAX_STALENESS and materialization ALTER operations in semantic view properties ([#914](https://github.com/Technarion-Oy/thaw/issues/914)) ([45d3096](https://github.com/Technarion-Oy/thaw/commit/45d3096a15ca555df96e8da3629834f34aa77d9f)), closes [#912](https://github.com/Technarion-Oy/thaw/issues/912)
+
 ## [0.6.3](https://github.com/Technarion-Oy/thaw/compare/v0.6.2...v0.6.3) (2026-08-16)
 
 
