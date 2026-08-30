@@ -105,22 +105,40 @@ that describe the business meaning of the data.
 set/unset **tags**, set/unset **MAX_STALENESS**, and add / drop / suspend /
 resume / refresh **materializations** — the definition body itself
 (`TABLES`/`RELATIONSHIPS`/`FACTS`/`DIMENSIONS`/`METRICS`) still cannot be
-altered (change it via `CREATE OR REPLACE`). All of these run through
-`App.AlterSemanticView(db, schema, name, clause)` in
+altered (change it via `CREATE OR REPLACE`). The rename / comment / tag /
+MAX_STALENESS / suspend / resume / refresh / drop actions are single, fixed
+clauses, so — like the equivalent single-clause actions in every other
+Properties modal (`DynamicTablePropertiesModal.tsx`'s target lag/warehouse,
+`ServicePropertiesModal.tsx`'s numeric settings, …) — they're assembled as a
+plain string by the frontend (`SemanticViewPropertiesModal.tsx`) and run
+through `App.AlterSemanticView(db, schema, name, clause)` in
 `internal/app/semanticview.go` (a thin wrapper over the shared `alterObject`
-helper) — the clause is built by the frontend (`SemanticViewPropertiesModal.tsx`
-/ `semanticViewMaterialization.ts`), since it needs no SQL construction this
-package doesn't already do for `CREATE`.
+helper).
+
+`ADD MATERIALIZATION` is different: a multi-part statement (required
+warehouse, optional `REFRESH_MODE`/`IMMUTABLE WHERE`, required dimension/metric
+lists, optional `WHERE`) on par with the CREATE builder above, not a one-line
+`SET`. So it gets its own Go builder, `BuildAddMaterializationSql`, exposed as
+`App.BuildAddSemanticViewMaterializationSql` in `internal/app/builders.go` —
+the frontend calls it for the SQL, then `ExecDDL` to run it, the same
+two-step split `internal/dbtproject`'s `BuildAddVersionSql` /
+`AddDbtProjectVersionModal.tsx` use for `ADD VERSION`.
 
 `MAX_STALENESS` must be set (minimum 120 seconds, matching `MinMaxStaleness`
 above) before a materialization can be added, and Snowflake rejects `UNSET
 MAX_STALENESS` while one exists. Adding a materialization
 (`ADD MATERIALIZATION <name> WAREHOUSE = <wh> [REFRESH_MODE = ...] [IMMUTABLE
 WHERE (...)] AS DIMENSIONS ... METRICS ... [WHERE (...)]`) requires a
-warehouse and at least one dimension and one metric. Snowflake exposes no
-`SHOW`/`DESCRIBE` for a view's existing materializations, so
-`DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` act on a typed-in name
-rather than a picked row.
+warehouse and at least one dimension and one metric — each qualified by its
+logical table (`DIMENSIONS customers.customer_name`, per Snowflake's own
+example), since a bare name is ambiguous once a view joins more than one
+logical table; `BuildAddMaterializationSql` splits each `table.name` reference
+on its *last* dot and quotes both halves (`quoteMaterializationRef`) — always,
+unlike the CREATE builder's `renderer.qualifiedIdent`, since these names come
+from live `SHOW` output rather than a user-typed identifier gated by a
+case-sensitivity toggle. Snowflake exposes no `SHOW`/`DESCRIBE` for a view's
+existing materializations, so `DROP`/`SUSPEND`/`RESUME`/`REFRESH MATERIALIZATION` act
+on a typed-in name rather than a picked row.
 
 `SHOW SEMANTIC VIEWS` reports only `created_on` / `name` / `database_name` /
 `schema_name` / `comment` / `owner` / `owner_role_type`, so the structure is

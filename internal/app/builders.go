@@ -337,6 +337,13 @@ func (a *App) BuildCreateSemanticViewSql(database, schema string, cfg semanticvi
 	return semanticview.BuildCreateSemanticViewSql(database, schema, cfg)
 }
 
+// BuildAddSemanticViewMaterializationSql returns the SQL for an
+// ALTER SEMANTIC VIEW ... ADD MATERIALIZATION statement, used by the
+// Properties modal's Add materialization form.
+func (a *App) BuildAddSemanticViewMaterializationSql(database, schema, name string, cfg semanticview.MaterializationConfig) (string, error) {
+	return semanticview.BuildAddMaterializationSql(database, schema, name, cfg)
+}
+
 // BuildCreateCortexSearchServiceSql returns the SQL for creating a Snowflake
 // CORTEX SEARCH SERVICE.
 func (a *App) BuildCreateCortexSearchServiceSql(database, schema string, cfg cortexsearchservice.CortexSearchServiceConfig) (string, error) {

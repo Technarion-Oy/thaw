@@ -149,35 +149,61 @@ describe the data.
   does: the alias half is a free-text field with no restriction against
   containing one.
 - **`SemanticViewPropertiesModal.tsx`** — Overview (owner, created, editable
-  comment via `AlterSemanticView`, plus an editable `MAX_STALENESS` —
-  `NumberEditRow`, minimum 120 seconds), a **Tags** section (the shared
-  `TagsRow` + `useObjectTags` hook — tags read via `GetObjectTagReferences`, add /
-  remove via `AlterSemanticView`), lazily-loaded
-  sections that surface the view's structure on demand: **Structure**
-  (`DescribeSemanticView`), **Dimensions** (`ListSemanticDimensions`), **Facts**
-  (`ListSemanticFacts`), **Metrics** (`ListSemanticMetrics`), a
-  **Materializations** section (Suspend / Resume / Refresh / Drop by typed-in
-  name, plus an **Add materialization…** form — warehouse picked from
-  `ListWarehouses`, `REFRESH_MODE`, optional `IMMUTABLE WHERE` / `WHERE` raw-SQL
-  conditions, and dimension/metric multi-selects populated from
-  `ListSemanticDimensions` / `ListSemanticMetrics` when the form opens; see
-  `semanticViewMaterialization.ts`), and a **Dimensions for metric** lookup
-  (`ListSemanticDimensionsForMetric`).
+  comment via `AlterSemanticView`, plus an editable `MAX_STALENESS` — the
+  shared `EditRow`'s `numeric` mode, minimum 120 seconds, integer-only via
+  `precision={0}`), a **Tags** section (the shared `TagsRow` + `useObjectTags`
+  hook — tags read via `GetObjectTagReferences`, add / remove via
+  `AlterSemanticView`), lazily-loaded sections that surface the view's
+  structure on demand: **Structure** (`DescribeSemanticView`), **Dimensions**
+  (`ListSemanticDimensions`), **Facts** (`ListSemanticFacts`), **Metrics**
+  (`ListSemanticMetrics`), a **Materializations** section (Suspend / Resume /
+  Refresh / Drop by typed-in name — its own `matBusy`, independent of the Add
+  form's `addMatBusy` so triggering one doesn't spin/disable the other — plus
+  an **Add materialization…** form: warehouse, `REFRESH_MODE`, optional
+  `IMMUTABLE WHERE` / `WHERE` raw-SQL conditions, and dimension/metric
+  multi-selects; warehouses and dimension/metric options are all fetched
+  lazily when the form opens, not on modal mount. Submitting calls
+  `BuildAddSemanticViewMaterializationSql` for the SQL, then `ExecDDL` to run
+  it — the same two-step split as `AddDbtProjectVersionModal.tsx` — since,
+  unlike the single-clause `SET`/`UNSET`/`SUSPEND`/… actions elsewhere in this
+  modal, `ADD MATERIALIZATION` is a multi-part statement on par with the
+  CREATE builders, so it belongs in Go
+  (`internal/semanticview/sql.go`'s `BuildAddMaterializationSql`) rather than
+  assembled as a string in this file; see `semanticViewMaterialization.ts`),
+  and a **Dimensions for metric** lookup (`ListSemanticDimensionsForMetric`).
 
-  `MAX_STALENESS` has no read path — `SHOW SEMANTIC VIEWS` / `DESCRIBE SEMANTIC
-  VIEW` don't report it — so `NumberEditRow` only ever reflects what this modal
-  itself has just set, not the view's actual current value. Materializations
-  have the same gap one level further: Snowflake exposes no `SHOW`/`DESCRIBE`
-  for a view's *existing* materializations at all, so the action row acts on a
-  name the user types rather than a row picked from a list.
-- **`semanticViewMaterialization.ts`** — `buildAddMaterializationClause` (the
-  pure `ADD MATERIALIZATION ...` clause builder — quotes the name/warehouse/
-  dimension/metric identifiers via `quoteIdent`, and parenthesizes
-  `IMMUTABLE WHERE` / `WHERE` as raw SQL conditions rather than literal-quoting
-  them, since they're boolean expressions typed by the user, not text) and
-  `isMaterializationValid` (Snowflake's own requirement: a name, a warehouse,
-  and at least one dimension and one metric). Covered by
-  `semanticViewMaterialization.test.ts`.
+  `EditRow` (this file's own — not the shared component of the same name used
+  elsewhere) grew a `numeric`/`min`/`precision` mode rather than a separate
+  component, following the pattern of `ServicePropertiesModal.tsx`'s
+  `numeric?: boolean` flag and `TaskPropertiesModal.tsx`'s `type`/`min`.
+  `MAX_STALENESS` has no read path — `SHOW SEMANTIC VIEWS` / `DESCRIBE
+  SEMANTIC VIEW` don't report it — so the field only ever reflects what this
+  modal itself has just set, not the view's actual current value.
+  Materializations have the same gap one level further: Snowflake exposes no
+  `SHOW`/`DESCRIBE` for a view's *existing* materializations at all, so the
+  action row acts on a name the user types rather than a row picked from a
+  list.
+- **`semanticViewMaterialization.ts`** — `qualifiedOptionsFromResult` turns a
+  `SHOW SEMANTIC DIMENSIONS`/`METRICS` result into the Add Materialization
+  form's multi-select options, case-insensitively reading the `table_name` /
+  `name` columns (matching `internal/snowflake/result.go`'s `ColIdx`) and
+  qualifying each option as the unquoted `table.name` — Snowflake's own `ADD
+  MATERIALIZATION` example qualifies every reference, since a bare name is
+  ambiguous the moment a view joins more than one logical table (the normal
+  case). The reference is left unquoted; `BuildAddMaterializationSql`
+  (`internal/semanticview/sql.go`) does the quoting server-side when it
+  assembles the actual statement, splitting on the last dot the same way that
+  file's `qualifiedIdent` does for the CREATE builder. `NewMaterialization` is
+  this form's draft state — the same shape as the Go
+  `semanticview.MaterializationConfig` the generated `wailsjs` binding for
+  `BuildAddSemanticViewMaterializationSql` expects, so the modal can pass it
+  straight through. `isMaterializationValid` mirrors
+  `BuildAddMaterializationSql`'s own requirement (a name, a warehouse, and at
+  least one dimension and one metric) purely to gate the Add button before a
+  doomed round-trip — the Go function is what's actually authoritative.
+  Covered by `semanticViewMaterialization.test.ts`; the SQL construction
+  itself is covered by `internal/semanticview/sql_test.go`'s
+  `TestBuildAddMaterializationSql`.
 
 ## Lifecycle
 

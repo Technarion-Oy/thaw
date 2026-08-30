@@ -274,6 +274,10 @@ export function BuildAddDbtProjectVersionSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildAddDbtProjectVersionSql'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildAddSemanticViewMaterializationSql(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['BuildAddSemanticViewMaterializationSql'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildAlterDbtProjectSetSql(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
   return window['go']['app']['App']['BuildAlterDbtProjectSetSql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }

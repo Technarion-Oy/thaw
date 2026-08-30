@@ -13,11 +13,13 @@ import (
 // clause is everything that follows the view name, e.g. "RENAME TO <new>",
 // "SET COMMENT = '...'", "UNSET COMMENT", "SET TAG <tag> = '...'",
 // "UNSET TAG <tag>", "SET MAX_STALENESS = <n>", or
-// "ADD/DROP/SUSPEND/RESUME/REFRESH MATERIALIZATION ...". The definition body
-// (TABLES/RELATIONSHIPS/FACTS/DIMENSIONS/METRICS) is still only changed via
-// CREATE OR REPLACE, not ALTER. The caller is responsible for correct SQL
-// quoting inside the clause; this method only double-quotes the view
-// identifier.
+// "DROP/SUSPEND/RESUME/REFRESH MATERIALIZATION <name>". Adding a
+// materialization is a multi-part statement, not a single clause — that goes
+// through BuildAddSemanticViewMaterializationSql (builders.go) + ExecDDL
+// instead. The definition body (TABLES/RELATIONSHIPS/FACTS/DIMENSIONS/METRICS)
+// is still only changed via CREATE OR REPLACE, not ALTER. The caller is
+// responsible for correct SQL quoting inside the clause; this method only
+// double-quotes the view identifier.
 func (a *App) AlterSemanticView(database, schema, name, clause string) error {
 	return a.alterObject("SEMANTIC VIEW", database, schema, name, clause)
 }

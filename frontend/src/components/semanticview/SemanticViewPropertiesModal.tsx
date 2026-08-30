@@ -11,7 +11,8 @@ import {
   PauseCircleOutlined, PlayCircleOutlined, SyncOutlined, DeleteOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import {
-  GetObjectProperties, AlterSemanticView, ListWarehouses,
+  GetObjectProperties, AlterSemanticView, ListWarehouses, ExecDDL,
+  BuildAddSemanticViewMaterializationSql,
   DescribeSemanticView, ListSemanticDimensions, ListSemanticFacts, ListSemanticMetrics,
   ListSemanticDimensionsForMetric,
 } from "../../../wailsjs/go/app/App";
@@ -19,7 +20,7 @@ import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import {
-  buildAddMaterializationClause, isMaterializationValid, NEW_MATERIALIZATION,
+  isMaterializationValid, qualifiedOptionsFromResult, NEW_MATERIALIZATION,
   type NewMaterialization, type RefreshMode,
 } from "./semanticViewMaterialization";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -51,15 +52,6 @@ const LABEL_TD: React.CSSProperties = {
 // backslashes (Snowflake interprets backslash escapes in string literals) then
 // single quotes — so a comment like C:\temp round-trips intact.
 function q1(s: string) { return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "''") + "'"; }
-
-// Pulls the "name" column out of a SHOW SEMANTIC DIMENSIONS/METRICS result,
-// for the Add Materialization form's dimension/metric multi-selects.
-function namesFromResult(res: snowflake.QueryResult | null): string[] {
-  if (!res) return [];
-  const i = res.columns.indexOf("name");
-  if (i < 0) return [];
-  return res.rows.map((r) => String(r[i]));
-}
 
 // Render a raw QueryResult (columns + rows) as an antd Table. Shared by the
 // Dimensions / Facts / Metrics / Describe sections, all of which expose
@@ -140,11 +132,21 @@ interface EditRowProps {
   label: string;
   value: string;
   canUnset?: boolean;
+  // Numeric fields (currently just MAX_STALENESS) render a bounded
+  // InputNumber instead of a free-text Input; draft/onSave still carry a
+  // string so the two modes share one save/unset/render implementation.
+  numeric?: boolean;
+  min?: number;
+  precision?: number;
+  help?: string;
+  emptyHint?: string;
   onSave: (val: string) => Promise<void>;
   onUnset?: () => Promise<void>;
 }
 
-function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
+function EditRow({
+  label, value, canUnset, numeric, min, precision, help, emptyHint = "not set", onSave, onUnset,
+}: EditRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -184,15 +186,27 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
         {editing ? (
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             <Space>
-              <Input
-                size="small"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                style={{ width: 280 }}
-                onPressEnter={save}
-              />
+              {numeric ? (
+                <InputNumber
+                  size="small"
+                  min={min}
+                  precision={precision}
+                  value={draft === "" ? undefined : Number(draft)}
+                  onChange={(v) => setDraft(v == null ? "" : String(v))}
+                  style={{ width: 140 }}
+                  onPressEnter={save}
+                />
+              ) : (
+                <Input
+                  size="small"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  style={{ width: 280 }}
+                  onPressEnter={save}
+                />
+              )}
               <Tooltip title="Save">
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} />
+                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} disabled={numeric && draft === ""} />
               </Tooltip>
               {canUnset && onUnset && (
                 <Tooltip title="Unset (remove)">
@@ -203,107 +217,18 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
                 <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
               </Tooltip>
             </Space>
+            {help && <Text type="secondary" style={{ fontSize: 11 }}>{help}</Text>}
             {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
           </Space>
         ) : (
           <Space>
-            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
+            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">({emptyHint})</Text>}</span>
             <Tooltip title="Edit">
               <Button
                 type="text"
                 size="small"
                 icon={<EditOutlined style={{ fontSize: 11 }} />}
                 onClick={() => { setDraft(value); setEditing(true); }}
-                style={{ color: "var(--text-muted)" }}
-              />
-            </Tooltip>
-          </Space>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-// ─── NumberEditRow (MAX_STALENESS) ───────────────────────────────────────────
-// Like EditRow but edits via a bounded InputNumber. Snowflake's SHOW SEMANTIC
-// VIEWS / DESCRIBE SEMANTIC VIEW report no MAX_STALENESS property, so `value`
-// is only ever what this modal itself has just set — there is no way to read
-// back the view's actual current setting.
-
-interface NumberEditRowProps {
-  label: string;
-  value: string;
-  min: number;
-  help?: string;
-  onSave: (val: number) => Promise<void>;
-  onUnset: () => Promise<void>;
-}
-
-function NumberEditRow({ label, value, min, help, onSave, onUnset }: NumberEditRowProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<number | null>(value ? Number(value) : null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    if (draft == null) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave(draft);
-      setEditing(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const unset = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await onUnset();
-      setEditing(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        {editing ? (
-          <Space direction="vertical" size={4} style={{ width: "100%" }}>
-            <Space>
-              <InputNumber size="small" min={min} value={draft} onChange={setDraft} style={{ width: 140 }} onPressEnter={save} />
-              <Tooltip title="Save">
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} disabled={draft == null} />
-              </Tooltip>
-              <Tooltip title="Unset (remove)">
-                <Button size="small" onClick={unset} loading={saving}>Unset</Button>
-              </Tooltip>
-              <Tooltip title="Cancel">
-                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value ? Number(value) : null); setError(null); }} />
-              </Tooltip>
-            </Space>
-            {help && <Text type="secondary" style={{ fontSize: 11 }}>{help}</Text>}
-            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
-          </Space>
-        ) : (
-          <Space>
-            <span style={{ color: "var(--text)" }}>
-              {value || <Text type="secondary">(unknown — Snowflake doesn't report this back)</Text>}
-            </span>
-            <Tooltip title="Edit">
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined style={{ fontSize: 11 }} />}
-                onClick={() => { setDraft(value ? Number(value) : null); setEditing(true); }}
                 style={{ color: "var(--text-muted)" }}
               />
             </Tooltip>
@@ -337,10 +262,13 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
 
   // Materializations — Snowflake exposes no SHOW/DESCRIBE for existing ones
   // (see semanticview README), so Suspend/Resume/Refresh/Drop act by
-  // typed-in name rather than a picked row.
+  // typed-in name rather than a picked row. matBusy only covers those four
+  // actions; the Add Materialization form has its own addMatBusy so the two
+  // don't visually spin/disable each other.
   const [maxStaleness, setMaxStaleness] = useState("");
   const [matName, setMatName] = useState("");
   const [matBusy, setMatBusy] = useState(false);
+  const [addMatBusy, setAddMatBusy] = useState(false);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
   const [addingMat, setAddingMat] = useState(false);
@@ -348,14 +276,6 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
   const [dimOptions, setDimOptions] = useState<string[]>([]);
   const [metricOptions, setMetricOptions] = useState<string[]>([]);
   const [newMat, setNewMat] = useState<NewMaterialization>(NEW_MATERIALIZATION);
-
-  useEffect(() => {
-    setLoadingWarehouses(true);
-    ListWarehouses()
-      .then((names) => setWarehouses(names ?? []))
-      .catch(() => {})
-      .finally(() => setLoadingWarehouses(false));
-  }, []);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -389,7 +309,8 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     await reload();
   };
 
-  const saveMaxStaleness = async (n: number) => {
+  const saveMaxStaleness = async (val: string) => {
+    const n = Number(val);
     await AlterSemanticView(db, schema, name, `SET MAX_STALENESS = ${n}`);
     setMaxStaleness(String(n));
   };
@@ -413,36 +334,43 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
     }
   };
 
+  // Warehouses/dimensions/metrics are only needed for this form, so they're
+  // fetched lazily here rather than unconditionally on modal mount.
   const openAddMaterialization = async () => {
     setAddingMat(true);
     setLoadingMatOptions(true);
+    setLoadingWarehouses(true);
     try {
-      const [dims, metrics] = await Promise.all([
+      const [dims, metrics, whs] = await Promise.all([
         ListSemanticDimensions(db, schema, name),
         ListSemanticMetrics(db, schema, name),
+        ListWarehouses(),
       ]);
-      setDimOptions(namesFromResult(dims));
-      setMetricOptions(namesFromResult(metrics));
+      setDimOptions(qualifiedOptionsFromResult(dims));
+      setMetricOptions(qualifiedOptionsFromResult(metrics));
+      setWarehouses(whs ?? []);
     } catch {
-      // Best-effort — the multi-selects just stay empty; dimension/metric
-      // names must exactly match the view's definition, so no free-typed
-      // fallback is offered here.
+      // Best-effort — the pickers just stay empty; dimension/metric options
+      // must exactly match the view's definition, so no free-typed fallback
+      // is offered here.
     } finally {
       setLoadingMatOptions(false);
+      setLoadingWarehouses(false);
     }
   };
 
   const submitAddMaterialization = async () => {
-    setMatBusy(true);
+    setAddMatBusy(true);
     setActionError(null);
     try {
-      await AlterSemanticView(db, schema, name, buildAddMaterializationClause(newMat));
+      const sql = await BuildAddSemanticViewMaterializationSql(db, schema, name, newMat);
+      await ExecDDL(sql);
       setAddingMat(false);
       setNewMat(NEW_MATERIALIZATION);
     } catch (e) {
       setActionError(`Add materialization failed: ${String(e)}`);
     } finally {
-      setMatBusy(false);
+      setAddMatBusy(false);
     }
   };
 
@@ -522,11 +450,15 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                 onSave={saveComment}
                 onUnset={() => saveComment("")}
               />
-              <NumberEditRow
+              <EditRow
                 label="Max Staleness (sec)"
                 value={maxStaleness}
+                canUnset
+                numeric
                 min={MIN_MAX_STALENESS}
+                precision={0}
                 help={`Seconds a materialization result may lag behind the source. Minimum ${MIN_MAX_STALENESS}. Must be set before adding a materialization, and can't be unset while one exists.`}
+                emptyHint="unknown — Snowflake doesn't report this back"
                 onSave={saveMaxStaleness}
                 onUnset={unsetMaxStaleness}
               />
@@ -639,7 +571,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                   mode="multiple"
                   size="small"
                   loading={loadingMatOptions}
-                  placeholder="Dimensions"
+                  placeholder="Dimensions (table.name)"
                   value={newMat.dimensions}
                   onChange={(v) => setNewMat({ ...newMat, dimensions: v })}
                   style={{ minWidth: 220 }}
@@ -650,7 +582,7 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                   mode="multiple"
                   size="small"
                   loading={loadingMatOptions}
-                  placeholder="Metrics"
+                  placeholder="Metrics (table.name)"
                   value={newMat.metrics}
                   onChange={(v) => setNewMat({ ...newMat, metrics: v })}
                   style={{ minWidth: 220 }}
@@ -674,13 +606,13 @@ export default function SemanticViewPropertiesModal({ db, schema, name, onClose 
                 <Button
                   size="small"
                   type="primary"
-                  loading={matBusy}
+                  loading={addMatBusy}
                   disabled={!isMaterializationValid(newMat)}
                   onClick={submitAddMaterialization}
                 >
                   Add
                 </Button>
-                <Button size="small" onClick={() => { setAddingMat(false); setNewMat(NEW_MATERIALIZATION); }}>
+                <Button size="small" disabled={addMatBusy} onClick={() => { setAddingMat(false); setNewMat(NEW_MATERIALIZATION); }}>
                   Cancel
                 </Button>
               </Space>
