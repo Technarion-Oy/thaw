@@ -112,7 +112,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/zeebo/xxh3` | v1.0.2 | BSD-2-Clause |
 | `go.opentelemetry.io/otel` | v1.42.0 | Apache-2.0 |
 | `go.opentelemetry.io/otel/trace` | v1.42.0 | Apache-2.0 |
-| `golang.org/x/crypto` | v0.55.0 | BSD-3-Clause |
+| `golang.org/x/crypto` | v0.56.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
 | `golang.org/x/mod` | v0.40.0 | BSD-3-Clause |
 | `golang.org/x/net` | v0.58.0 | BSD-3-Clause |
@@ -8682,7 +8682,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/crypto
 
-- **Version:** v0.55.0
+- **Version:** v0.56.0
 - **License:** BSD-3-Clause
 
 ```
