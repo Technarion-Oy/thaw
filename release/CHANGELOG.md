@@ -1,3 +1,10 @@
+## [0.7.1](https://github.com/Technarion-Oy/thaw/compare/v0.7.0...v0.7.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* Update module golang.org/x/crypto to v0.56.0 [SECURITY] ([#915](https://github.com/Technarion-Oy/thaw/issues/915)) ([dbf07d0](https://github.com/Technarion-Oy/thaw/commit/dbf07d098f1e0183438e8f3b541e60c3e4dede80))
+
 # [0.7.0](https://github.com/Technarion-Oy/thaw/compare/v0.6.3...v0.7.0) (2026-08-30)
 
 
