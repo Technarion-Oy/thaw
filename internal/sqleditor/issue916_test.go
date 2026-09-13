@@ -187,6 +187,8 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 	tRefs, tCols := prod("T", "Y")
 	tRefs[0].Alias = "t"
 	xRefs, xCols := prod("CAT", "A")
+	t2Refs, t2Cols := prod("T", "X")
+	t2Refs[0].Alias = "t2"
 	xRefs[0].Alias = "x"
 	otherRefs, otherCols := prod("OTHER_TBL", "X")
 	otherRefs[0].Alias = "t"
@@ -237,6 +239,12 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 		{"ALTER on a table with no parsed columns still registers the column",
 			"CREATE TABLE T ();\nALTER TABLE T ADD COLUMN NEW_COL INT;\nINSERT INTO T (NEW_COL, TYPO) VALUES (1, 2);",
 			nil, nil, []string{"TYPO"}},
+		{"unrelated ref sharing a guessed in-script table's name doesn't win in either validator",
+			"SELECT X FROM DB1.PROD.T AS t2;\nCREATE TABLE OTHERSCHEMA.T (BOGUS INT);\nSELECT BOGUS FROM T;",
+			t2Refs, t2Cols, nil},
+		{"comma-introduced derived table's alias isn't read as a source",
+			"CREATE TABLE X (SECRET_COL INT);\nCREATE TABLE OTHER_TABLE (M INT, N INT);\nCREATE TABLE FOO AS SELECT * FROM OTHER_TABLE, (SELECT P FROM X) x;\nSELECT SECRET_COL, TOTALLY_BOGUS_COL FROM FOO;",
+			nil, nil, nil},
 		{"comma after JOIN condition starts another source",
 			"CREATE TABLE A (X INT);\nCREATE TABLE B (X INT);\nCREATE TABLE C (Y INT);\nSELECT c.Y, c.TYPO FROM A JOIN B ON A.X = B.X, C c;",
 			nil, nil, []string{"TYPO"}},

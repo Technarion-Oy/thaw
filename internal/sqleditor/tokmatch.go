@@ -986,7 +986,13 @@ type tableAlias struct {
 // for the statement (issue #793 D3).
 func hasSubquerySource(sig []sqltok.Token, sql string) bool {
 	depth := 0
+	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
+		// A comma continuing a FROM source list introduces a source too
+		// (`FROM a, (SELECT …) x`).
+		if from.sourceComma(sig[i], sql) && depth == 0 && i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
+			return true
+		}
 		switch sig[i].Kind {
 		case sqltok.LParen:
 			depth++
@@ -1092,19 +1098,27 @@ var (
 	}
 )
 
-// topLevelTokens returns the tokens of sig outside any parentheses (the parens
-// themselves dropped), so a source scan sees only a query's own FROM/JOIN
-// sources — not those of a scalar subquery in its select list or a nested
-// subquery in its WHERE clause.
+// topLevelTokens returns the tokens of sig outside any parentheses, so a source
+// scan sees only a query's own FROM/JOIN sources — not those of a scalar
+// subquery in its select list or a nested subquery in its WHERE clause. Each
+// outermost group is kept as an empty `( )` pair: dropping it outright would
+// leave a derived table's alias (`FROM a, (SELECT …) x`) looking like a plain
+// source named `x`.
 func topLevelTokens(sig []sqltok.Token) []sqltok.Token {
 	var out []sqltok.Token
 	depth := 0
 	for _, t := range sig {
 		switch t.Kind {
 		case sqltok.LParen:
+			if depth == 0 {
+				out = append(out, t)
+			}
 			depth++
 		case sqltok.RParen:
 			depth = max(depth-1, 0)
+			if depth == 0 {
+				out = append(out, t)
+			}
 		default:
 			if depth == 0 {
 				out = append(out, t)

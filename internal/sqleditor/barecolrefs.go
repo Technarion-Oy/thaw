@@ -668,8 +668,12 @@ func mergeAddedCols(existing, added []ColInfo) []ColInfo {
 }
 
 // sameColSlice reports whether a and b share the same backing array — i.e. they
-// are the *same* cache entry stored under multiple keys, not merely equal. Empty
-// slices have no identity, so they never match.
+// are the *same* cache entry stored under multiple keys, not merely equal.
+//
+// Identity needs a backing array: an entry with known-but-zero columns must be
+// stored with cap > 0 (parsedCols does this); a cap-0 slice never matches, so
+// its alias keys would stop sharing ALTER merges. nil stays the "columns
+// unknown" sentinel.
 func sameColSlice(a, b []ColInfo) bool {
 	return cap(a) > 0 && cap(b) > 0 && &a[:1][0] == &b[:1][0]
 }
@@ -691,20 +695,21 @@ func parsedCols(cols []ColInfo) []ColInfo {
 // Returns (nil, false) if the table is not found in either cache, which
 // triggers the caller to skip column validation for that statement.
 func lookupColsForRef(
-	name, db, schema string,
+	name, alias, db, schema string,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) ([]ColInfo, bool) {
-	cols, found, _ := lookupColsForRefTagged(name, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+	cols, found, _ := lookupColsForRefTagged(name, alias, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	return cols, found
 }
 
 // lookupColsForRefTagged is like lookupColsForRef but additionally reports
 // whether the returned columns came from the localColCache (fromLocal=true)
-// or from the colInfoCache/resolvedRefs metadata (fromLocal=false).
+// or from the colInfoCache/resolvedRefs metadata (fromLocal=false). alias is
+// the reference's alias as written ("" when unaliased).
 func lookupColsForRefTagged(
-	name, db, schema string,
+	name, alias, db, schema string,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
@@ -727,8 +732,19 @@ func lookupColsForRefTagged(
 		return nil, false, false
 	}
 
-	// Try to resolve via resolvedRefs (Snowflake live objects).
+	// Try to resolve via resolvedRefs (Snowflake live objects). Refs are
+	// resolved script-wide, so when a same-named in-script table is the guessed
+	// referent, only a ref for this very source (same alias, or name when
+	// unaliased) lets the catalog win — the rule resolvedByRefs applies in
+	// ValidateSemantics (issue #916).
+	aliasOrName := alias
+	if aliasOrName == "" {
+		aliasOrName = name
+	}
 	for _, ref := range resolvedRefs {
+		if match == guessedScriptTable && !strings.EqualFold(ref.Alias, aliasOrName) {
+			continue
+		}
 		if checkEq(ref.Name, name) &&
 			(db == "" || checkEq(ref.DB, db)) &&
 			(schema == "" || checkEq(ref.Schema, schema)) {
@@ -776,7 +792,7 @@ func validateInsertCols(
 		schema = parts[0]
 	}
 
-	cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+	cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	if !ok {
 		return nil // Table not in cache; skip to avoid false-positives.
 	}
@@ -828,7 +844,7 @@ func validateReferencesCols(
 			schema = parts[0]
 		}
 
-		cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+		cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !ok {
 			continue
 		}
@@ -1124,17 +1140,18 @@ func validateSelectCols(
 	selEnd := selOffset + len("SELECT")
 
 	// Extract FROM/JOIN table refs from the full stripped statement.
-	type tableRef struct{ db, schema, name string }
+	type tableRef struct{ db, schema, name, alias string }
 	var tables []tableRef
-	for _, path := range findFromJoinTables2(strippedSig, stripped) {
-		parts := extractIdentParts(path, ic)
+	for _, ta := range scanFromSources(strippedSig, stripped, fromSingleKW, bareColsTwoPartKW) {
+		parts := extractIdentParts(ta.tablePath, ic)
+		alias := normIdent(ta.alias, ic)
 		switch len(parts) {
 		case 3:
-			tables = append(tables, tableRef{parts[0], parts[1], parts[2]})
+			tables = append(tables, tableRef{parts[0], parts[1], parts[2], alias})
 		case 2:
-			tables = append(tables, tableRef{"", parts[0], parts[1]})
+			tables = append(tables, tableRef{"", parts[0], parts[1], alias})
 		case 1:
-			tables = append(tables, tableRef{"", "", parts[0]})
+			tables = append(tables, tableRef{"", "", parts[0], alias})
 		}
 	}
 
@@ -1145,7 +1162,7 @@ func validateSelectCols(
 	metaCols := make(map[string]struct{})
 	localCols := make(map[string]struct{})
 	for _, t := range tables {
-		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.alias, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !found {
 			// A source without known columns (an unresolved table, or an in-script
 			// CTAS whose columns can't be derived) could supply any bare column, so
@@ -1218,7 +1235,7 @@ func validateSelectCols(
 			default:
 				continue
 			}
-			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, aliasU, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 			if !found {
 				continue // Table not cached; cannot validate — skip to avoid false positives.
 			}
