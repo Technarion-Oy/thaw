@@ -186,6 +186,8 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 	logRefs, logCols := prod("LOGS", "MSG")
 	tRefs, tCols := prod("T", "Y")
 	tRefs[0].Alias = "t"
+	xRefs, xCols := prod("CAT", "A")
+	xRefs[0].Alias = "x"
 	otherRefs, otherCols := prod("OTHER_TBL", "X")
 	otherRefs[0].Alias = "t"
 
@@ -211,6 +213,15 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 		{"unknown CTAS among known sources skips bare validation",
 			"CREATE TABLE ORDERS AS SELECT * FROM SRC;\nCREATE TABLE CUSTOMERS (ID INT, NAME VARCHAR);\nSELECT TOTAL, NAME FROM ORDERS o, CUSTOMERS c;",
 			nil, nil, nil},
+		{"CTAS wildcard over a qualified source ignores a same-named table elsewhere",
+			"CREATE TABLE STAGING.ORDERS (X INT);\nCREATE TABLE ANALYTICS.SUMMARY AS SELECT * FROM PROD.S.ORDERS;\nSELECT A FROM ANALYTICS.SUMMARY;",
+			nil, nil, nil},
+		{"CTAS over a UNION takes columns from the first branch only",
+			"CREATE TABLE A (X INT);\nCREATE TABLE B (Y INT);\nCREATE TABLE C AS SELECT * FROM A UNION SELECT * FROM B;\nSELECT Y FROM C;",
+			nil, nil, []string{"Y"}},
+		{"unknown in-script table under another qualification owns its alias",
+			"USE SCHEMA S1;\nCREATE TABLE T AS SELECT * FROM SRC;\nUSE SCHEMA S2;\nSELECT x.COL FROM T x;\nSELECT x.A FROM DB1.PROD.CAT x;",
+			xRefs, xCols, nil},
 		{"comma after JOIN condition starts another source",
 			"CREATE TABLE A (X INT);\nCREATE TABLE B (X INT);\nCREATE TABLE C (Y INT);\nSELECT c.Y, c.TYPO FROM A JOIN B ON A.X = B.X, C c;",
 			nil, nil, []string{"TYPO"}},
@@ -252,5 +263,18 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 				t.Errorf("%s: %s not flagged", tc.name, w)
 			}
 		}
+	}
+}
+
+// A comma-joined source is existence-checked too, not only the first one after
+// FROM (PR #917 review).
+func TestIssue916_CommaSourceExistence(t *testing.T) {
+	sql := "SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION n, SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATIONZ z;"
+	markers, err := Diagnose(context.Background(), issue916Provider(false), sql)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if len(markers) != 1 || !strings.Contains(markers[0].Message, "NATIONZ") {
+		t.Errorf("want one marker for NATIONZ, got %+v", markers)
 	}
 }

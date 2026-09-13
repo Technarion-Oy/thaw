@@ -89,7 +89,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 			// CTAS: register the projected columns (nil when underivable) so the
 			// in-script table shadows a same-named catalog table (issue #916).
 			if parts := extractIdentParts(ctasPath, ic); len(parts) > 0 {
-				storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], tableOnlyScope(localColCache)))
+				storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], ctasScope(raw[bodyOff:], localColCache, use)))
 			}
 			continue
 		}
@@ -585,6 +585,31 @@ func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 		if db, schema, table, ok := splitBcrCacheKey(k); ok && db == "" && schema == "" {
 			scope[strings.ToUpper(table)] = cols
 		}
+	}
+	return scope
+}
+
+// ctasScope is the projection scope for a CTAS query: each FROM/JOIN source,
+// keyed by bare name as extractSelectProjections expects, maps to the in-script
+// table with the same USE-qualified name (scriptUse.keyParts) — not to whichever
+// in-script table merely shares the bare name, so `SELECT * FROM PROD.S.ORDERS`
+// never expands to an unrelated STAGING.ORDERS (issue #916). A source not created
+// in-script, or two sources sharing a bare name under different qualifications,
+// map to nil: columns unknown.
+func ctasScope(query string, localColCache map[string][]ColInfo, use scriptUse) map[string][]ColInfo {
+	scope := make(map[string][]ColInfo)
+	keyOf := make(map[string]string) // bare name → qualified key ("" = ambiguous)
+	for _, path := range findFromJoinTables2(sigTokens(query), query) {
+		parts := extractIdentParts(path, true)
+		if len(parts) == 0 {
+			continue
+		}
+		name, key := parts[len(parts)-1], use.keyParts(parts)
+		if prev, seen := keyOf[name]; seen && prev != key {
+			key = ""
+		}
+		keyOf[name] = key
+		scope[name] = localColCache[key] // nil when absent or ambiguous
 	}
 	return scope
 }

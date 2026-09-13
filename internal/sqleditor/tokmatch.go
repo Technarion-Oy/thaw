@@ -675,41 +675,26 @@ var fromJoinKeywords = map[string]bool{
 }
 
 // fromJoinTwoPartKeywords are two-keyword combinations that precede table refs.
-var fromJoinTwoPartKeywords = map[string]string{
-	"MERGE":  "INTO",
-	"INSERT": "INTO",
-	"COPY":   "INTO",
-	"THEN":   "INTO",
-	"ELSE":   "INTO",
+var fromJoinTwoPartKeywords = map[string][]string{
+	"MERGE":  {"INTO"},
+	"INSERT": {"INTO"},
+	"COPY":   {"INTO"},
+	"THEN":   {"INTO"},
+	"ELSE":   {"INTO"},
 }
 
 // findFromJoinTables scans significant tokens for FROM/JOIN/MERGE INTO/etc.
-// keywords followed by identifier paths. Returns the raw path text for each.
-// This replaces reFromJoinFallback.
+// keywords followed by identifier paths, including comma-joined source lists
+// (issue #916). Returns the raw path text for each.
 func findFromJoinTables(sig []sqltok.Token, sql string) []string {
-	var paths []string
-	for i := 0; i < len(sig); i++ {
-		u := tokUpper(sig[i], sql)
-		if u == "" {
-			continue
-		}
-		matched := false
-		if fromJoinKeywords[u] {
-			matched = true
-			i++
-		} else if second, ok := fromJoinTwoPartKeywords[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
-			}
-		}
-		if matched && i < len(sig) && isIdent(sig[i]) {
-			path, end := readIdentPath(sig, sql, i)
-			if path != "" {
-				paths = append(paths, path)
-				i = end - 1 // loop will i++
-			}
-		}
+	return sourcePaths(scanFromSources(sig, sql, fromJoinKeywords, fromJoinTwoPartKeywords))
+}
+
+// sourcePaths returns the table paths of srcs.
+func sourcePaths(srcs []tableAlias) []string {
+	paths := make([]string, 0, len(srcs))
+	for _, ta := range srcs {
+		paths = append(paths, ta.tablePath)
 	}
 	return paths
 }
@@ -1066,18 +1051,14 @@ func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
 }
 
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
-	return scanFromSources(sig, sql, joinTwoPartKW)
+	return scanFromSources(sig, sql, fromSingleKW, joinTwoPartKW)
 }
 
 // findFromJoinTables2 is like findFromJoinWithAlias but uses the barecolrefs
 // FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.) and
 // returns only the paths.
 func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
-	var paths []string
-	for _, ta := range scanFromSources(sig, sql, bareColsTwoPartKW) {
-		paths = append(paths, ta.tablePath)
-	}
-	return paths
+	return sourcePaths(scanFromSources(sig, sql, fromSingleKW, bareColsTwoPartKW))
 }
 
 // Keywords that start a FROM/JOIN clause (single-word). USING introduces the
@@ -1107,11 +1088,11 @@ var (
 	}
 )
 
-// scanFromSources reads every table source introduced by fromSingleKW / a
+// scanFromSources reads every table source introduced by a singleKW / a
 // twoPartKW pair, including comma-joined source lists (`FROM a x, b y`, and a
 // comma after a JOIN condition via fromClauseTracker — issue #916), with its
 // optional `[AS] alias`.
-func scanFromSources(sig []sqltok.Token, sql string, twoPartKW map[string][]string) []tableAlias {
+func scanFromSources(sig []sqltok.Token, sql string, singleKW map[string]bool, twoPartKW map[string][]string) []tableAlias {
 	var results []tableAlias
 	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
@@ -1119,7 +1100,7 @@ func scanFromSources(sig []sqltok.Token, sql string, twoPartKW map[string][]stri
 		matched := from.sourceComma(sig[i], sql)
 		if matched {
 			i++
-		} else if fromSingleKW[u] {
+		} else if singleKW[u] {
 			matched = true
 			i++
 		} else if i+1 < len(sig) && slices.Contains(twoPartKW[u], tokUpper(sig[i+1], sql)) {
