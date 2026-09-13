@@ -511,12 +511,23 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 	// the shared-backing-array invariant CREATE established. Allocating a fresh
 	// slice per key instead would desync the siblings, so a second ALTER on the
 	// same table could no longer detect them via sameColSlice (issue #715).
-	merged := make([]ColInfo, 0, len(target)+len(cols))
-	merged = append(merged, target...)
-	merged = append(merged, cols...)
+	merged := mergeAddedCols(target, cols)
 	for _, k := range aliasKeys {
 		localColCache[k] = merged
 	}
+}
+
+// mergeAddedCols appends columns from an in-script ALTER TABLE … ADD to an
+// in-script table's cached columns. A nil existing slice is the "columns
+// unknown" sentinel (a CTAS whose projection can't be derived — issue #916):
+// it stays nil, since the added columns alone aren't the table's full set.
+func mergeAddedCols(existing, added []ColInfo) []ColInfo {
+	if existing == nil {
+		return nil
+	}
+	merged := make([]ColInfo, 0, len(existing)+len(added))
+	merged = append(merged, existing...)
+	return append(merged, added...)
 }
 
 // sameColSlice reports whether a and b share the same backing array — i.e. they

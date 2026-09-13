@@ -99,16 +99,46 @@ func TestIssue916_DemoScriptNoFalsePositives(t *testing.T) {
 // TestIssue916_CTASUnknownColumnsShadowCatalog: a CTAS whose columns can't be
 // derived (SELECT *) still shadows the same-named catalog table, disabling
 // validation instead of checking against the wrong table's columns.
+// An in-script ALTER … ADD COLUMN must not turn the "columns unknown" entry into
+// a known set holding only the added column (PR #917 review).
 func TestIssue916_CTASUnknownColumnsShadowCatalog(t *testing.T) {
-	sql := `CREATE DATABASE COCO_DEMO;
-USE SCHEMA COCO_DEMO.PUBLIC;
-CREATE OR REPLACE TABLE ORDERS AS SELECT *, 1 AS X FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS;
-SELECT o.ANYTHING, ANYTHING FROM ORDERS o;`
-	markers, err := Diagnose(context.Background(), issue916Provider(false), sql)
-	if err != nil {
-		t.Fatalf("Diagnose: %v", err)
+	for name, alter := range map[string]string{
+		"plain":      "",
+		"alter-add":  "ALTER TABLE ORDERS ADD COLUMN NOTES VARCHAR;\n",
+		"alter-qual": "ALTER TABLE COCO_DEMO.PUBLIC.ORDERS ADD COLUMN NOTES VARCHAR;\n",
+	} {
+		sql := "CREATE DATABASE COCO_DEMO;\nUSE SCHEMA COCO_DEMO.PUBLIC;\n" +
+			"CREATE OR REPLACE TABLE ORDERS AS SELECT *, 1 AS X FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS;\n" +
+			alter + "SELECT o.ANYTHING, ANYTHING FROM ORDERS o;"
+		markers, err := Diagnose(context.Background(), issue916Provider(false), sql)
+		if err != nil {
+			t.Fatalf("Diagnose: %v", err)
+		}
+		for _, m := range markers {
+			t.Errorf("%s: unexpected marker line %d: %s", name, m.StartLineNumber, m.Message)
+		}
+	}
+}
+
+// The CREATE header is skipped by position, not by name: header identifiers
+// (option values, a view's output-name list) aren't flagged, but a same-named
+// ref in the body still is (PR #917 review).
+func TestIssue916_CreateHeaderSkippedByPosition(t *testing.T) {
+	sql := `CREATE OR REPLACE TASK T1 WAREHOUSE = N_TYPO SCHEDULE = '5 MINUTE' AS
+  INSERT INTO SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION SELECT N_TYPO FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION;
+CREATE OR REPLACE VIEW SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.V (RENAMED, N_TYPO2) AS
+  SELECT N_NAME, N_TYPO2 FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION;`
+	markers := ValidateSemantics(sql, nil, []ColEntry{{
+		DB: "SNOWFLAKE_SAMPLE_DATA", Schema: "TPCH_SF1", Name: "NATION",
+		Cols: []ColInfo{{Name: "N_NATIONKEY"}, {Name: "N_NAME"}},
+	}})
+	want := map[int]string{2: "'N_TYPO'", 4: "'N_TYPO2'"}
+	if len(markers) != len(want) {
+		t.Errorf("want %d markers, got %d", len(want), len(markers))
 	}
 	for _, m := range markers {
-		t.Errorf("unexpected marker line %d: %s", m.StartLineNumber, m.Message)
+		if !strings.Contains(m.Message, want[m.StartLineNumber]) || want[m.StartLineNumber] == "" {
+			t.Errorf("unexpected marker line %d: %s", m.StartLineNumber, m.Message)
+		}
 	}
 }

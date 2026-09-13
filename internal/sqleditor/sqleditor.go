@@ -61,6 +61,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	sf "thaw/internal/snowflake"
 	"thaw/internal/sqlgrammar"
@@ -2651,6 +2652,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		colInfoCache      map[string][]ColInfo
 		activeKeys        []string // ordered list of tables in scope for bare col lookup
 		bareColValidation bool     // true only when every FROM/JOIN source table has known columns
+		headerEnd         int      // rune offset in sql where a CREATE header ends (0 = none)
 	}
 	stmtContexts := make([]stmtContext, len(stmtRanges))
 	localColCache := make(map[string][]ColInfo)
@@ -2681,10 +2683,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
 				tableNameU := strings.ToUpper(parts[len(parts)-1])
 				if existing, ok := localColCache[tableNameU]; ok {
-					merged := make([]ColInfo, 0, len(existing)+len(aCols))
-					merged = append(merged, existing...)
-					merged = append(merged, aCols...)
-					localColCache[tableNameU] = merged
+					localColCache[tableNameU] = mergeAddedCols(existing, aCols)
 				}
 			}
 		}
@@ -2715,15 +2714,12 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			}
 		}
 
-		// Identifiers in a CREATE header before the body's AS — the object name
-		// and option values like `TASK t WAREHOUSE = wh` — are not column refs
-		// (issue #916).
+		// A CREATE header before the body's AS — the object name, option values
+		// like `TASK t WAREHOUSE = wh`, a `VIEW v (c1, c2)` output-name list — holds
+		// no column refs (issue #916). Skipped by position, not by name, so a
+		// same-named ref in the body is still validated.
 		if asIdx := createBodyAsIdx(rawSig, raw); asIdx > 0 {
-			for _, t := range rawSig[:asIdx] {
-				if isAliasTok(t) {
-					ctx.aliasMap[normIdent(t.Text(raw), true)] = "__object__"
-				}
-			}
+			ctx.headerEnd = utf8.RuneCountInString(sql[:r.StartOffset+rawSig[asIdx].Start])
 		}
 
 		// Pre-scan for column aliases (AS alias) and add them to the aliasMap.
@@ -3120,7 +3116,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 							}
 						}
 
-						if !isFunction && !isDatePartUsage && ctx.bareColValidation {
+						if !isFunction && !isDatePartUsage && ctx.bareColValidation && word1Start >= ctx.headerEnd {
 							// Check if this column exists in ANY of the active tables.
 							foundInAny := false
 							for _, cacheKey := range ctx.activeKeys {
