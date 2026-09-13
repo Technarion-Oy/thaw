@@ -128,7 +128,8 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		raw := sqlStmt(req.SQL, r)
 		baseCol := stmtStartCol(req.SQL, r) // doc column of the statement's first char
 		firstTok := getFirstSQLToken(raw)
-		use = use.apply(sigTokens(raw), raw)
+		sig := sigTokens(raw)
+		use = use.apply(sig, raw)
 
 		if firstTok != "SELECT" && firstTok != "WITH" &&
 			firstTok != "INSERT" && firstTok != "CREATE" && firstTok != "UNDROP" {
@@ -137,7 +138,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		// False-positive guard: skip statements with Snowflake-specific syntax
 		// that would produce noise.
-		if matchesSnowflakeFP(sigTokens(raw), raw) {
+		if matchesSnowflakeFP(sig, raw) {
 			continue
 		}
 

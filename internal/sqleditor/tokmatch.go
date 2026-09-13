@@ -3,6 +3,7 @@
 package sqleditor
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -1065,20 +1066,52 @@ func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
 }
 
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
-	// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
-	// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
-	// form is not mis-captured because the next token there is `(`, not an
-	// identifier (see the isIdent guard below).
-	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
-	}
-	twoPartKW := map[string]string{
-		"CROSS":  "JOIN",
-		"INSERT": "INTO",
-		"DELETE": "FROM",
-		"MERGE":  "INTO",
-	}
+	return scanFromSources(sig, sql, joinTwoPartKW)
+}
 
+// findFromJoinTables2 is like findFromJoinWithAlias but uses the barecolrefs
+// FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.) and
+// returns only the paths.
+func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
+	var paths []string
+	for _, ta := range scanFromSources(sig, sql, bareColsTwoPartKW) {
+		paths = append(paths, ta.tablePath)
+	}
+	return paths
+}
+
+// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
+// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
+// form is not mis-captured because the next token there is `(`, not an
+// identifier (see the isIdent guard in scanFromSources).
+var fromSingleKW = map[string]bool{
+	"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
+}
+
+// Two-word source introducers: first word → accepted second words.
+var (
+	joinTwoPartKW = map[string][]string{
+		"CROSS":  {"JOIN"},
+		"INSERT": {"INTO"},
+		"DELETE": {"FROM"},
+		"MERGE":  {"INTO"},
+	}
+	bareColsTwoPartKW = map[string][]string{
+		"CROSS":    {"JOIN"},
+		"INSERT":   {"INTO"},
+		"TRUNCATE": {"TABLE"},
+		"DELETE":   {"FROM"},
+		"MERGE":    {"INTO"},
+		"DESCRIBE": {"TABLE", "VIEW"},
+		"DESC":     {"TABLE", "VIEW"},
+	}
+)
+
+// scanFromSources reads every table source introduced by fromSingleKW / a
+// twoPartKW pair, including comma-joined source lists (`FROM a x, b y`, and a
+// comma after a JOIN condition via fromClauseTracker — issue #916), with its
+// optional `[AS] alias`.
+func scanFromSources(sig []sqltok.Token, sql string, twoPartKW map[string][]string) []tableAlias {
 	var results []tableAlias
 	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
@@ -1086,20 +1119,22 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 		matched := from.sourceComma(sig[i], sql)
 		if matched {
 			i++
-		} else if singleKW[u] {
+		} else if fromSingleKW[u] {
 			matched = true
 			i++
-		} else if second, ok := twoPartKW[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
-			}
+		} else if i+1 < len(sig) && slices.Contains(twoPartKW[u], tokUpper(sig[i+1], sql)) {
+			matched = true
+			i += 2
 		}
-		if !matched || i >= len(sig) || !isIdent(sig[i]) {
+		if !matched {
 			continue
 		}
-		// A `,` after a source continues a comma-joined source list
-		// (`FROM a x, b y`), so keep reading paths until it ends (issue #916).
+		if i >= len(sig) || !isIdent(sig[i]) {
+			// Not a plain source (e.g. a derived table's `(`): hand the token
+			// back to the loop so the tracker still sees it.
+			i--
+			continue
+		}
 		for matched && i < len(sig) && isIdent(sig[i]) {
 			path, end := readIdentPath(sig, sql, i)
 			if path == "" {
@@ -1132,82 +1167,6 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 		i-- // loop will i++
 	}
 	return results
-}
-
-// findFromJoinTables2 is like findFromJoinTables but uses the barecolrefs
-// FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.)
-func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
-	// USING introduces the MERGE source table; `JOIN … USING (cols)` is not
-	// mis-captured (the next token is `(`, guarded by the isIdent check below).
-	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
-	}
-	twoPartKW := map[string]string{
-		"CROSS":    "JOIN",
-		"INSERT":   "INTO",
-		"TRUNCATE": "TABLE",
-		"DELETE":   "FROM",
-		"MERGE":    "INTO",
-		"DESCRIBE": "TABLE",
-		"DESC":     "TABLE",
-	}
-	// DESCRIBE/DESC VIEW is also checked
-	twoPartKW2 := map[string]string{
-		"DESCRIBE": "VIEW",
-		"DESC":     "VIEW",
-	}
-
-	var paths []string
-	var from fromClauseTracker
-	for i := 0; i < len(sig); i++ {
-		u := tokUpper(sig[i], sql)
-		matched := from.sourceComma(sig[i], sql)
-		if matched {
-			i++
-		} else if u == "" {
-			continue
-		} else if singleKW[u] {
-			matched = true
-			i++
-		} else if second, ok := twoPartKW[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
-			}
-		}
-		if !matched {
-			if second, ok := twoPartKW2[u]; ok {
-				if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-					matched = true
-					i += 2
-				}
-			}
-		}
-		// Comma-joined sources (`FROM a x, b y`) — issue #916.
-		if !matched || i >= len(sig) || !isIdent(sig[i]) {
-			continue
-		}
-		for matched && i < len(sig) && isIdent(sig[i]) {
-			path, end := readIdentPath(sig, sql, i)
-			if path == "" {
-				break
-			}
-			paths = append(paths, path)
-			i = end
-			if i < len(sig) && tokUpper(sig[i], sql) == "AS" {
-				i++
-			}
-			if i < len(sig) && isAliasTok(sig[i]) {
-				i++
-			}
-			matched = i+1 < len(sig) && sig[i].Kind == sqltok.Comma
-			if matched {
-				i++
-			}
-		}
-		i-- // loop will i++
-	}
-	return paths
 }
 
 // findAsAliases finds all AS <alias> patterns and returns the byte offsets

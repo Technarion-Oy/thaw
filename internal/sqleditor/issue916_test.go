@@ -167,8 +167,11 @@ func diag916(sql string, refs []ResolvedRef, cols []ColEntry) []DiagMarker {
 
 // TestIssue916_ReviewFollowUps covers the PR #917 review findings: shadowing is
 // USE-qualified (no cross-schema collisions), unknown-column CTAS chains stay
-// unknown, a partially-unknown FROM skips bare validation, and a comma after a
-// JOIN condition starts another source. want lists the column names that must
+// unknown, a partially-unknown FROM skips bare validation, a comma after a
+// JOIN condition starts another source, a derived table doesn't desync the
+// comma tracker, an ALTER after a USE switch reaches its table, a
+// script-global alias doesn't suppress the local fallback, and a CTE wildcard
+// over an unknown source stays unknown. want lists the column names that must
 // be flagged (every marker must name one of them).
 func TestIssue916_ReviewFollowUps(t *testing.T) {
 	prod := func(name string, cols ...string) ([]ResolvedRef, []ColEntry) {
@@ -183,6 +186,8 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 	logRefs, logCols := prod("LOGS", "MSG")
 	tRefs, tCols := prod("T", "Y")
 	tRefs[0].Alias = "t"
+	otherRefs, otherCols := prod("OTHER_TBL", "X")
+	otherRefs[0].Alias = "t"
 
 	cases := []struct {
 		name string
@@ -209,6 +214,24 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 		{"comma after JOIN condition starts another source",
 			"CREATE TABLE A (X INT);\nCREATE TABLE B (X INT);\nCREATE TABLE C (Y INT);\nSELECT c.Y, c.TYPO FROM A JOIN B ON A.X = B.X, C c;",
 			nil, nil, []string{"TYPO"}},
+		// Second-round review findings.
+		{"derived-table source doesn't desync the comma tracker",
+			"CREATE TABLE INNER_TBL (P INT, Q INT);\nCREATE TABLE OTHER_TABLE (M INT, N INT);\n" +
+				"CREATE TABLE T2 AS SELECT * FROM (SELECT P FROM INNER_TBL) x, OTHER_TABLE;\nSELECT N FROM T2;",
+			nil, nil, nil},
+		{"comma source after a derived table is read",
+			"CREATE TABLE INNER_TBL (P INT);\nCREATE TABLE OTHER_TABLE (M INT, N INT);\n" +
+				"SELECT o.N, o.TYPO FROM (SELECT P FROM INNER_TBL) x, OTHER_TABLE o;",
+			nil, nil, []string{"TYPO"}},
+		{"ALTER after a USE switch still reaches the table created earlier",
+			"USE SCHEMA A;\nCREATE TABLE FOO (A INT);\nUSE SCHEMA B;\nALTER TABLE FOO ADD COLUMN C INT;\nUSE SCHEMA A;\nSELECT C, TYPO FROM FOO;",
+			nil, nil, []string{"TYPO"}},
+		{"an earlier statement's alias doesn't suppress the local fallback",
+			"SELECT X FROM DB1.PROD.OTHER_TBL AS t;\nCREATE TABLE DEV.T (A INT);\nSELECT A, TYPO FROM T;",
+			otherRefs, otherCols, []string{"TYPO"}},
+		{"CTE wildcard over an unknown source stays unknown",
+			"CREATE TABLE KNOWN_TBL (K INT);\nWITH c AS (SELECT * FROM KNOWN_TBL, UNRESOLVED_TBL) SELECT c.ONLY_ON_UNRESOLVED FROM c;",
+			nil, nil, nil},
 	}
 	for _, tc := range cases {
 		markers := diag916(tc.sql, tc.refs, tc.cols)
