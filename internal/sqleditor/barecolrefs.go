@@ -87,7 +87,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 			// CTAS: register the projected columns (nil when underivable) so the
 			// in-script table shadows a same-named catalog table (issue #916).
 			if parts := extractIdentParts(ctasPath, ic); len(parts) > 0 {
-				storeLocalCols(localColCache, parts, ctasColumns(raw[bodyOff:], nil))
+				storeLocalCols(localColCache, parts, ctasColumns(raw[bodyOff:], tableOnlyScope(localColCache)))
 			}
 			continue
 		}
@@ -163,7 +163,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 // storeLocalCols records an in-script table's columns under its 1-part
 // (table), 2-part (schema.table) and 3-part (db.schema.table) keys, as far as
-// the normalised path parts allow.
+// the normalized path parts allow.
 func storeLocalCols(localColCache map[string][]ColInfo, parts []string, columns []ColInfo) {
 	tableName := parts[len(parts)-1]
 	localColCache[bcrCacheKey("", "", tableName)] = columns
@@ -515,6 +515,20 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 	for _, k := range aliasKeys {
 		localColCache[k] = merged
 	}
+}
+
+// tableOnlyScope re-keys localColCache's table-only entries by bare table name —
+// the scope shape extractSelectProjections (and ValidateSemantics' cache) uses —
+// so a CTAS over an earlier in-script table (`AS SELECT * FROM a`) derives its
+// columns here too.
+func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
+	scope := make(map[string][]ColInfo)
+	for k, cols := range localColCache {
+		if db, schema, table, ok := splitBcrCacheKey(k); ok && db == "" && schema == "" {
+			scope[strings.ToUpper(table)] = cols
+		}
+	}
+	return scope
 }
 
 // mergeAddedCols appends columns from an in-script ALTER TABLE … ADD to an

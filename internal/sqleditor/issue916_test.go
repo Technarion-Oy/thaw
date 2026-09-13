@@ -78,7 +78,7 @@ ALTER WAREHOUSE LEGACY_WH SUSPEND;  -- suspend manually after filming, not befor
 `
 
 // TestIssue916_DemoScriptNoFalsePositives: CTAS tables shadow same-named catalog
-// tables, comma-joined FROM sources are all recognised, and CREATE TASK header
+// tables, comma-joined FROM sources are all recognized, and CREATE TASK header
 // identifiers are not scanned as columns. The only marker left is the bug the
 // script plants on purpose: O_TOTALPRICE no longer exists in the CTAS'd ORDERS.
 func TestIssue916_DemoScriptNoFalsePositives(t *testing.T) {
@@ -139,6 +139,20 @@ CREATE OR REPLACE VIEW SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.V (RENAMED, N_TYPO2) AS
 	for _, m := range markers {
 		if !strings.Contains(m.Message, want[m.StartLineNumber]) || want[m.StartLineNumber] == "" {
 			t.Errorf("unexpected marker line %d: %s", m.StartLineNumber, m.Message)
+		}
+	}
+}
+
+// A CTAS over an earlier in-script table derives its columns in both
+// validators, so a typo against it is flagged by each (PR #917 review).
+func TestIssue916_ChainedCTASColumns(t *testing.T) {
+	sql := "CREATE TABLE A (ID INT);\nCREATE TABLE B AS SELECT * FROM A;\nSELECT ID, TYPO FROM B;"
+	ranges := GetStatementRanges(sql)
+	sem := ValidateSemantics(sql, nil, nil)
+	bare := ValidateBareColumnRefs(ValidateBareColsRequest{SQL: sql, StmtRanges: ranges})
+	for name, markers := range map[string][]DiagMarker{"ValidateSemantics": sem, "ValidateBareColumnRefs": bare} {
+		if len(markers) != 1 || !strings.Contains(markers[0].Message, "'TYPO'") {
+			t.Errorf("%s: want one TYPO marker, got %+v", name, markers)
 		}
 	}
 }
