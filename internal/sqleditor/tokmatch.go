@@ -1037,6 +1037,10 @@ func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
 		t.depth = max(t.depth-1, 0)
 	case sqltok.Comma:
 		return t.open[t.depth]
+	case sqltok.Semicolon:
+		// A statement boundary closes every clause (callers may pass multi-
+		// statement text, e.g. the editor content up to the cursor).
+		t.depth, t.open = 0, nil
 	default:
 		if u := tokUpper(tok, sql); u == "FROM" {
 			if t.open == nil {
@@ -1087,6 +1091,28 @@ var (
 		"DESC":     {"TABLE", "VIEW"},
 	}
 )
+
+// topLevelTokens returns the tokens of sig outside any parentheses (the parens
+// themselves dropped), so a source scan sees only a query's own FROM/JOIN
+// sources — not those of a scalar subquery in its select list or a nested
+// subquery in its WHERE clause.
+func topLevelTokens(sig []sqltok.Token) []sqltok.Token {
+	var out []sqltok.Token
+	depth := 0
+	for _, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth = max(depth-1, 0)
+		default:
+			if depth == 0 {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
+}
 
 // scanFromSources reads every table source introduced by a singleKW / a
 // twoPartKW pair, including comma-joined source lists (`FROM a x, b y`, and a

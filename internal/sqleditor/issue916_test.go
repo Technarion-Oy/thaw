@@ -222,6 +222,21 @@ func TestIssue916_ReviewFollowUps(t *testing.T) {
 		{"unknown in-script table under another qualification owns its alias",
 			"USE SCHEMA S1;\nCREATE TABLE T AS SELECT * FROM SRC;\nUSE SCHEMA S2;\nSELECT x.COL FROM T x;\nSELECT x.A FROM DB1.PROD.CAT x;",
 			xRefs, xCols, nil},
+		{"ALTER on a quoted mixed-case table refreshes its shadowing key",
+			"CREATE TABLE \"MyTable\" (\"Col1\" INT);\nALTER TABLE \"MyTable\" ADD COLUMN \"Col2\" INT;\nINSERT INTO \"MyTable\" (\"Col2\") VALUES (1);",
+			nil, nil, nil},
+		{"scalar subquery source doesn't leak into a CTAS wildcard",
+			"CREATE TABLE T (A INT, B INT);\nCREATE TABLE OTHER (X INT, Y INT);\nCREATE TABLE FOO AS SELECT *, (SELECT MAX(X) FROM OTHER) AS M FROM T;\nSELECT A, B, M, X, Z FROM FOO;",
+			nil, nil, []string{"X", "Z"}},
+		{"nested WHERE subquery source doesn't make a CTAS wildcard unknown",
+			"CREATE TABLE A (X INT);\nCREATE TABLE FOO AS SELECT * FROM A WHERE X IN (SELECT Y FROM UNRESOLVED_TBL);\nSELECT X, TYPO FROM FOO;",
+			nil, nil, []string{"TYPO"}},
+		{"same-named in-script table under a different USE schema is not validated against",
+			"USE SCHEMA A;\nCREATE TABLE T (ID INT);\nUSE SCHEMA B;\nSELECT BOGUS_COL FROM T;",
+			nil, nil, nil},
+		{"ALTER on a table with no parsed columns still registers the column",
+			"CREATE TABLE T ();\nALTER TABLE T ADD COLUMN NEW_COL INT;\nINSERT INTO T (NEW_COL, TYPO) VALUES (1, 2);",
+			nil, nil, []string{"TYPO"}},
 		{"comma after JOIN condition starts another source",
 			"CREATE TABLE A (X INT);\nCREATE TABLE B (X INT);\nCREATE TABLE C (Y INT);\nSELECT c.Y, c.TYPO FROM A JOIN B ON A.X = B.X, C c;",
 			nil, nil, []string{"TYPO"}},
@@ -276,5 +291,14 @@ func TestIssue916_CommaSourceExistence(t *testing.T) {
 	}
 	if len(markers) != 1 || !strings.Contains(markers[0].Message, "NATIONZ") {
 		t.Errorf("want one marker for NATIONZ, got %+v", markers)
+	}
+}
+
+// The FROM-clause tracker resets at a statement boundary, so a top-level comma
+// in a later statement isn't read as another source (PR #917 review).
+func TestIssue916_ParseJoinTablesStatementBoundary(t *testing.T) {
+	refs := ParseJoinTables("SELECT * FROM orders;\nALTER TABLE customers ADD COLUMN a INT, b INT;")
+	if len(refs) != 1 || refs[0].Name != "ORDERS" {
+		t.Errorf("want only ORDERS, got %+v", refs)
 	}
 }

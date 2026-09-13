@@ -2379,7 +2379,9 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) (cols
 	// We extract table references only from THIS select block.
 	activeContext := make(map[string][]ColInfo)
 	unresolvedSrc := hasSubquerySource(strippedSig, stripped)
-	for _, tablePath := range findFromJoinTables2(strippedSig, stripped) {
+	// Top-level sources only: a subquery's own tables (in the select list or
+	// WHERE clause) neither feed the wildcard nor make it unknown.
+	for _, tablePath := range findFromJoinTables2(topLevelTokens(strippedSig), stripped) {
 		parts := extractIdentParts(tablePath, true)
 		if len(parts) > 0 {
 			tableNameU := parts[len(parts)-1]
@@ -2668,6 +2670,15 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 
 // ── ValidateSemantics ─────────────────────────────────────────────────────────
 
+// partAt returns the n-th part from the end of a 1/2/3-part path (1 = the
+// name, 2 = the schema, 3 = the database), or "" when the path is shorter.
+func partAt(parts []string, n int) string {
+	if len(parts) < n {
+		return ""
+	}
+	return parts[len(parts)-n]
+}
+
 // resolvedByRefs reports whether the caller's resolved refs map this FROM/JOIN
 // source to a catalog table. Refs are resolved for the whole script, so both
 // the alias (the table name when unaliased — see ParseJoinTables) and the table
@@ -2744,7 +2755,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				colsRaw := extractBalancedBlock(raw, parenStart)
 				if len(colsRaw) >= 2 {
 					colsRaw = colsRaw[1 : len(colsRaw)-1]
-					storeLocalCols(localColCache, parts, use, parseCreateTableColDefs(colsRaw, true))
+					storeLocalCols(localColCache, parts, use, parsedCols(parseCreateTableColDefs(colsRaw, true)))
 				}
 			}
 		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
@@ -2853,10 +2864,12 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			// Priority: 1. CTE, 2. Local Table, 3. Global resolvedRef (already in aliasMap)
 			if key, isCTE := ctx.aliasMap[tableNameU]; isCTE && strings.HasPrefix(key, "__cte__") {
 				cacheKey = key
-			} else if cols, inScript := localColCache[use.keyParts(parts)]; inScript {
+			} else if cols, match := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), tableNameU); match == exactScriptTable ||
+				match == guessedScriptTable && !resolvedByRefs(resolvedRefs, ta) {
 				// A table created in-script under the same USE-qualified name
 				// shadows the catalog table the refs may have resolved to, so
-				// override that mapping (issue #916).
+				// override that mapping (issue #916). A guessed match (reference
+				// schema unknown, refs didn't resolve it) is used the same way.
 				if cols == nil {
 					markUnknown()
 					continue
@@ -2866,18 +2879,12 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				if v, already := ctx.aliasMap[tableNameU]; !already || !strings.HasPrefix(v, "__") {
 					ctx.aliasMap[tableNameU] = cacheKey
 				}
-			} else if cols, isLocal := localColCache[bcrCacheKey("", "", tableNameU)]; isLocal && !resolvedByRefs(resolvedRefs, ta) {
-				// Same-named in-script table under another qualification: only a
-				// fallback when the refs didn't resolve this source to the catalog.
-				if cols == nil {
-					markUnknown()
-					continue
-				}
-				cacheKey = "__local__\x00\x00" + tableNameU
-				ctx.colInfoCache[cacheKey] = cols
-				if _, already := ctx.aliasMap[tableNameU]; !already {
-					ctx.aliasMap[tableNameU] = cacheKey
-				}
+			} else if match == otherScriptTable && !resolvedByRefs(resolvedRefs, ta) {
+				// A same-named in-script table exists, but this reference's schema
+				// is known and differs — a different object — and the refs didn't
+				// resolve this source: unknown, not validated against its columns.
+				markUnknown()
+				continue
 			} else {
 				// Search in global colInfoCacheGlobal if it wasn't a CTE or local table
 				// and if the path matches a known table.
