@@ -83,6 +83,14 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		sig := sigToks(tokens)
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
+		if ctasPath, bodyOff, isCTAS := matchCreateTableAs(sig, raw); isCTAS {
+			// CTAS: register the projected columns (nil when underivable) so the
+			// in-script table shadows a same-named catalog table (issue #916).
+			if parts := extractIdentParts(ctasPath, ic); len(parts) > 0 {
+				storeLocalCols(localColCache, parts, ctasColumns(raw[bodyOff:], nil))
+			}
+			continue
+		}
 		if !ok {
 			// Apply ALTER TABLE … ADD [COLUMN] to tables already created in-script
 			// so later INSERT/SELECT can find the added columns (issue #715).
@@ -107,20 +115,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		}
 		columns := parseCreateTableColDefs(colsRaw, ic)
 
-		tableName := parts[len(parts)-1]
-		// 1-part key (table name only)
-		localColCache[bcrCacheKey("", "", tableName)] = columns
-		if len(parts) >= 2 {
-			schema := parts[len(parts)-2]
-			// 2-part key (schema.table)
-			localColCache[bcrCacheKey("", schema, tableName)] = columns
-		}
-		if len(parts) >= 3 {
-			db := parts[len(parts)-3]
-			schema := parts[len(parts)-2]
-			// 3-part key (db.schema.table)
-			localColCache[bcrCacheKey(db, schema, tableName)] = columns
-		}
+		storeLocalCols(localColCache, parts, columns)
 	}
 
 	// ── Second pass: validate column refs ─────────────────────────────────
@@ -165,6 +160,20 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+// storeLocalCols records an in-script table's columns under its 1-part
+// (table), 2-part (schema.table) and 3-part (db.schema.table) keys, as far as
+// the normalised path parts allow.
+func storeLocalCols(localColCache map[string][]ColInfo, parts []string, columns []ColInfo) {
+	tableName := parts[len(parts)-1]
+	localColCache[bcrCacheKey("", "", tableName)] = columns
+	if len(parts) >= 2 {
+		localColCache[bcrCacheKey("", parts[len(parts)-2], tableName)] = columns
+	}
+	if len(parts) >= 3 {
+		localColCache[bcrCacheKey(parts[len(parts)-3], parts[len(parts)-2], tableName)] = columns
+	}
+}
 
 // bcrCacheKey returns the null-separated cache key used by colInfoCache /
 // localColCache.  All parts should already be normalised (upper-cased when
@@ -543,16 +552,27 @@ func lookupColsForRefTagged(
 ) (cols []ColInfo, found bool, fromLocal bool) {
 	nameU := strings.ToUpper(name)
 
+	// A nil local entry is an in-script table with unknown columns (CTAS):
+	// it shadows any catalog table but can't be validated against.
+	local := func(key string) ([]ColInfo, bool, bool) {
+		c := localColCache[key]
+		return c, c != nil, c != nil
+	}
+
 	// If db+schema are fully qualified, look up directly.
 	if db != "" && schema != "" {
 		key := bcrCacheKey(strings.ToUpper(db), strings.ToUpper(schema), nameU)
 		if c, ok := colInfoCache[key]; ok {
 			return c, true, false
 		}
-		if c, ok := localColCache[key]; ok {
-			return c, true, true
-		}
-		return nil, false, false
+		return local(key)
+	}
+
+	// An in-script table shadows a same-named catalog table the refs may have
+	// resolved to (issue #916).
+	localKey := bcrCacheKey("", strings.ToUpper(schema), nameU)
+	if _, ok := localColCache[localKey]; ok {
+		return local(localKey)
 	}
 
 	// Try to resolve via resolvedRefs (Snowflake live objects).
@@ -568,19 +588,8 @@ func lookupColsForRefTagged(
 		}
 	}
 
-	// Fall back to local cache with schema.table or table-only key.
-	if schema != "" {
-		key := bcrCacheKey("", strings.ToUpper(schema), nameU)
-		if c, ok := localColCache[key]; ok {
-			return c, true, true
-		}
-	}
-	key := bcrCacheKey("", "", nameU)
-	if c, ok := localColCache[key]; ok {
-		return c, true, true
-	}
-
-	return nil, false, false
+	// A schema-qualified ref falls back to the table-only key.
+	return local(bcrCacheKey("", "", nameU))
 }
 
 // validateInsertCols validates the explicit column list in an INSERT statement.

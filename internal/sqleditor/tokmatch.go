@@ -831,6 +831,46 @@ func matchCreateTablePre(sig []sqltok.Token, sql string) (rawPath string, parenO
 	return
 }
 
+// matchCreateTableAs matches a CREATE TABLE … AS <query> (CTAS) with no column
+// block — `CREATE [OR REPLACE] TABLE <path> [options] AS SELECT …` — and returns
+// the raw table path and the byte offset of the query after AS.
+func matchCreateTableAs(sig []sqltok.Token, sql string) (rawPath string, bodyOff int, ok bool) {
+	rawPath, _, hasCols := matchCreateTablePre(sig, sql)
+	if rawPath == "" || hasCols {
+		return "", 0, false
+	}
+	asIdx := createBodyAsIdx(sig, sql)
+	if asIdx < 0 || asIdx+1 >= len(sig) {
+		return "", 0, false
+	}
+	return rawPath, sig[asIdx+1].Start, true
+}
+
+// createBodyAsIdx returns the index in sig of the first depth-0 AS of a CREATE
+// statement — the keyword separating the object header (name, WAREHOUSE = …,
+// SCHEDULE = …, TARGET_LAG = …) from its body — or -1.
+func createBodyAsIdx(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
+	}
+	depth := 0
+	for i, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(t, sql) == "AS" {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // matchCreateTableGuard checks if the statement starts with CREATE TABLE
 // (without requiring a paren). Replaces reCreateTableGuard.
 func matchCreateTableGuard(sig []sqltok.Token, sql string) bool {
@@ -1014,29 +1054,37 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 		if !matched || i >= len(sig) || !isIdent(sig[i]) {
 			continue
 		}
-		path, end := readIdentPath(sig, sql, i)
-		if path == "" {
-			continue
-		}
-		i = end
+		// A `,` after a source continues a comma-joined source list
+		// (`FROM a x, b y`), so keep reading paths until it ends (issue #916).
+		for matched && i < len(sig) && isIdent(sig[i]) {
+			path, end := readIdentPath(sig, sql, i)
+			if path == "" {
+				break
+			}
+			i = end
 
-		// Check for optional alias: [AS] <alias>. An implicit alias must be an
-		// Identifier or QuotedIdent — never a bare keyword — so a following clause
-		// keyword (FROM mytable WHERE …) is not captured as the alias.
-		var alias string
-		if i < len(sig) {
-			if tokUpper(sig[i], sql) == "AS" {
-				i++
-				if i < len(sig) && isAliasTok(sig[i]) {
+			// Check for optional alias: [AS] <alias>. An implicit alias must be an
+			// Identifier or QuotedIdent — never a bare keyword — so a following clause
+			// keyword (FROM mytable WHERE …) is not captured as the alias.
+			var alias string
+			if i < len(sig) {
+				if tokUpper(sig[i], sql) == "AS" {
+					i++
+					if i < len(sig) && isAliasTok(sig[i]) {
+						alias = sig[i].Text(sql)
+						i++
+					}
+				} else if isAliasTok(sig[i]) {
 					alias = sig[i].Text(sql)
 					i++
 				}
-			} else if isAliasTok(sig[i]) {
-				alias = sig[i].Text(sql)
+			}
+			results = append(results, tableAlias{tablePath: path, alias: alias})
+			matched = i+1 < len(sig) && sig[i].Kind == sqltok.Comma
+			if matched {
 				i++
 			}
 		}
-		results = append(results, tableAlias{tablePath: path, alias: alias})
 		i-- // loop will i++
 	}
 	return results
@@ -1089,13 +1137,29 @@ func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
 				}
 			}
 		}
-		if matched && i < len(sig) && isIdent(sig[i]) {
+		// Comma-joined sources (`FROM a x, b y`) — issue #916.
+		if !matched || i >= len(sig) || !isIdent(sig[i]) {
+			continue
+		}
+		for matched && i < len(sig) && isIdent(sig[i]) {
 			path, end := readIdentPath(sig, sql, i)
-			if path != "" {
-				paths = append(paths, path)
-				i = end - 1
+			if path == "" {
+				break
+			}
+			paths = append(paths, path)
+			i = end
+			if i < len(sig) && tokUpper(sig[i], sql) == "AS" {
+				i++
+			}
+			if i < len(sig) && isAliasTok(sig[i]) {
+				i++
+			}
+			matched = i+1 < len(sig) && sig[i].Kind == sqltok.Comma
+			if matched {
+				i++
 			}
 		}
+		i-- // loop will i++
 	}
 	return paths
 }
