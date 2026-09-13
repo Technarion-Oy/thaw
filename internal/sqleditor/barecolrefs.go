@@ -77,17 +77,19 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 	// ── Pre-scan: extract columns from CREATE TABLE statements ────────────
 	localColCache := make(map[string][]ColInfo)
+	var use scriptUse
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
 		tokens := sqltok.Tokenize(raw)
 		sig := sigToks(tokens)
+		use = use.apply(sig, raw)
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
 		if ctasPath, bodyOff, isCTAS := matchCreateTableAs(sig, raw); isCTAS {
 			// CTAS: register the projected columns (nil when underivable) so the
 			// in-script table shadows a same-named catalog table (issue #916).
 			if parts := extractIdentParts(ctasPath, ic); len(parts) > 0 {
-				storeLocalCols(localColCache, parts, ctasColumns(raw[bodyOff:], tableOnlyScope(localColCache)))
+				storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], tableOnlyScope(localColCache)))
 			}
 			continue
 		}
@@ -115,16 +117,18 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		}
 		columns := parseCreateTableColDefs(colsRaw, ic)
 
-		storeLocalCols(localColCache, parts, columns)
+		storeLocalCols(localColCache, parts, use, columns)
 	}
 
 	// ── Second pass: validate column refs ─────────────────────────────────
 	var markers []DiagMarker
 
+	use = scriptUse{}
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
 		baseCol := stmtStartCol(req.SQL, r) // doc column of the statement's first char
 		firstTok := getFirstSQLToken(raw)
+		use = use.apply(sigTokens(raw), raw)
 
 		if firstTok != "SELECT" && firstTok != "WITH" &&
 			firstTok != "INSERT" && firstTok != "CREATE" && firstTok != "UNDROP" {
@@ -140,19 +144,19 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		switch firstTok {
 		case "INSERT":
 			markers = append(markers,
-				validateInsertCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateInsertCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 
 		case "CREATE":
 			markers = append(markers,
-				validateReferencesCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateReferencesCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 			if isCreateView(raw) {
 				markers = append(markers,
-					validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+					validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 			}
 
 		case "SELECT", "WITH":
 			markers = append(markers,
-				validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 		}
 	}
 
@@ -161,11 +165,62 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
+// scriptUse is the database/schema selected by the in-script USE statements
+// seen so far ("" = the session default).
+type scriptUse struct{ db, schema string }
+
+// apply returns the context after the statement sig, if it is a USE.
+// ponytail: USE only — CREATE DATABASE/SCHEMA also switch context in Snowflake;
+// track them here if a script relying on that needs cross-schema shadowing.
+func (u scriptUse) apply(sig []sqltok.Token, sql string) scriptUse {
+	s, ok := matchUse(sig, sql)
+	if !ok {
+		return u
+	}
+	first := strings.ToUpper(normIdent(s.ident1, true))
+	switch {
+	case s.parts == 2:
+		return scriptUse{db: first, schema: strings.ToUpper(normIdent(s.ident2, true))}
+	case s.kind == "SCHEMA":
+		return scriptUse{db: u.db, schema: first}
+	default: // USE DATABASE d / bare USE d
+		return scriptUse{db: first}
+	}
+}
+
+// key is the cache key of an in-script table (or a reference to one) whose path
+// is qualified by this USE context. Only a reference whose qualified key matches
+// a table created in-script lets that table shadow the catalog (issue #916), so
+// a same-named table created in another schema doesn't. The \x01 prefix keeps
+// these keys apart from the 1/2/3-part keys.
+func (u scriptUse) key(db, schema, name string) string {
+	if schema == "" {
+		schema = u.schema
+	}
+	if db == "" {
+		db = u.db
+	}
+	return "\x01" + strings.ToUpper(db) + "\x00" + strings.ToUpper(schema) + "\x00" + strings.ToUpper(name)
+}
+
+// keyParts is key for a normalized 1/2/3-part path.
+func (u scriptUse) keyParts(parts []string) string {
+	var db, schema string
+	if len(parts) >= 2 {
+		schema = parts[len(parts)-2]
+	}
+	if len(parts) >= 3 {
+		db = parts[len(parts)-3]
+	}
+	return u.key(db, schema, parts[len(parts)-1])
+}
+
 // storeLocalCols records an in-script table's columns under its 1-part
 // (table), 2-part (schema.table) and 3-part (db.schema.table) keys, as far as
-// the normalized path parts allow.
-func storeLocalCols(localColCache map[string][]ColInfo, parts []string, columns []ColInfo) {
+// the normalized path parts allow, plus its USE-qualified shadowing key.
+func storeLocalCols(localColCache map[string][]ColInfo, parts []string, use scriptUse, columns []ColInfo) {
 	tableName := parts[len(parts)-1]
+	localColCache[use.keyParts(parts)] = columns
 	localColCache[bcrCacheKey("", "", tableName)] = columns
 	if len(parts) >= 2 {
 		localColCache[bcrCacheKey("", parts[len(parts)-2], tableName)] = columns
@@ -521,6 +576,8 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 // the scope shape extractSelectProjections (and ValidateSemantics' cache) uses —
 // so a CTAS over an earlier in-script table (`AS SELECT * FROM a`) derives its
 // columns here too.
+// ponytail: rebuilt per CTAS, O(tables) each; maintain it incrementally (and keep
+// it in sync with ALTER merges) if scripts with many CTAS statements get slow.
 func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 	scope := make(map[string][]ColInfo)
 	for k, cols := range localColCache {
@@ -529,6 +586,11 @@ func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 		}
 	}
 	return scope
+}
+
+func hasKey(m map[string][]ColInfo, k string) bool {
+	_, ok := m[k]
+	return ok
 }
 
 // mergeAddedCols appends columns from an in-script ALTER TABLE … ADD to an
@@ -559,10 +621,10 @@ func sameColSlice(a, b []ColInfo) bool {
 func lookupColsForRef(
 	name, db, schema string,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) ([]ColInfo, bool) {
-	cols, found, _ := lookupColsForRefTagged(name, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+	cols, found, _ := lookupColsForRefTagged(name, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	return cols, found
 }
 
@@ -572,7 +634,7 @@ func lookupColsForRef(
 func lookupColsForRefTagged(
 	name, db, schema string,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) (cols []ColInfo, found bool, fromLocal bool) {
 	nameU := strings.ToUpper(name)
@@ -584,6 +646,12 @@ func lookupColsForRefTagged(
 		return c, c != nil, c != nil
 	}
 
+	// A table created in-script under the same USE-qualified name shadows the
+	// catalog table the refs may have resolved to (issue #916).
+	if scriptKey := use.key(db, schema, name); hasKey(localColCache, scriptKey) {
+		return local(scriptKey)
+	}
+
 	// If db+schema are fully qualified, look up directly.
 	if db != "" && schema != "" {
 		key := bcrCacheKey(strings.ToUpper(db), strings.ToUpper(schema), nameU)
@@ -591,13 +659,6 @@ func lookupColsForRefTagged(
 			return c, true, false
 		}
 		return local(key)
-	}
-
-	// An in-script table shadows a same-named catalog table the refs may have
-	// resolved to (issue #916).
-	localKey := bcrCacheKey("", strings.ToUpper(schema), nameU)
-	if _, ok := localColCache[localKey]; ok {
-		return local(localKey)
 	}
 
 	// Try to resolve via resolvedRefs (Snowflake live objects).
@@ -613,7 +674,10 @@ func lookupColsForRefTagged(
 		}
 	}
 
-	// A schema-qualified ref falls back to the table-only key.
+	// Fall back to local cache with schema.table or table-only key.
+	if key := bcrCacheKey("", strings.ToUpper(schema), nameU); schema != "" && hasKey(localColCache, key) {
+		return local(key)
+	}
 	return local(bcrCacheKey("", "", nameU))
 }
 
@@ -622,7 +686,7 @@ func lookupColsForRefTagged(
 func validateInsertCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	tokens := sqltok.Tokenize(raw)
@@ -645,7 +709,7 @@ func validateInsertCols(
 		schema = parts[0]
 	}
 
-	cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+	cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	if !ok {
 		return nil // Table not in cache; skip to avoid false-positives.
 	}
@@ -670,7 +734,7 @@ func validateInsertCols(
 func validateReferencesCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	tokens := sqltok.Tokenize(raw)
@@ -697,7 +761,7 @@ func validateReferencesCols(
 			schema = parts[0]
 		}
 
-		cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !ok {
 			continue
 		}
@@ -977,7 +1041,7 @@ func scanAliasedColRefs(clause string, aliasMap map[string]*aliasColSets, ic boo
 func validateSelectCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	stripped := stripCommentsSQL(raw)
@@ -1013,13 +1077,14 @@ func validateSelectCols(
 	// (case-sensitive for quoted, uppercase for bare).
 	metaCols := make(map[string]struct{})
 	localCols := make(map[string]struct{})
-	foundAnyTable := false
 	for _, t := range tables {
-		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !found {
-			continue
+			// A source without known columns (an unresolved table, or an in-script
+			// CTAS whose columns can't be derived) could supply any bare column, so
+			// skip the statement — as ValidateSemantics does (issue #916).
+			return nil
 		}
-		foundAnyTable = true
 		if fromLocal {
 			for _, c := range cols {
 				key := c.Name
@@ -1035,9 +1100,6 @@ func validateSelectCols(
 		}
 	}
 	noFromClause := len(tables) == 0
-	if !foundAnyTable && !noFromClause {
-		return nil // FROM/JOIN tables present but none resolved; skip to avoid false positives.
-	}
 
 	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
 	selectClause := extractSelectClause(stripped[selEnd:])
@@ -1089,7 +1151,7 @@ func validateSelectCols(
 			default:
 				continue
 			}
-			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 			if !found {
 				continue // Table not cached; cannot validate — skip to avoid false positives.
 			}

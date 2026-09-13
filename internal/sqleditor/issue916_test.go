@@ -156,3 +156,78 @@ func TestIssue916_ChainedCTASColumns(t *testing.T) {
 		}
 	}
 }
+
+// diag916 runs both column validators over sql.
+func diag916(sql string, refs []ResolvedRef, cols []ColEntry) []DiagMarker {
+	markers := ValidateSemantics(sql, refs, cols)
+	return append(markers, ValidateBareColumnRefs(ValidateBareColsRequest{
+		SQL: sql, StmtRanges: GetStatementRanges(sql), ResolvedRefs: refs, ColEntries: cols,
+	})...)
+}
+
+// TestIssue916_ReviewFollowUps covers the PR #917 review findings: shadowing is
+// USE-qualified (no cross-schema collisions), unknown-column CTAS chains stay
+// unknown, a partially-unknown FROM skips bare validation, and a comma after a
+// JOIN condition starts another source. want lists the column names that must
+// be flagged (every marker must name one of them).
+func TestIssue916_ReviewFollowUps(t *testing.T) {
+	prod := func(name string, cols ...string) ([]ResolvedRef, []ColEntry) {
+		ci := make([]ColInfo, len(cols))
+		for i, c := range cols {
+			ci[i] = ColInfo{Name: c}
+		}
+		return []ResolvedRef{{Alias: name, DB: "DB1", Schema: "PROD", Name: name}},
+			[]ColEntry{{DB: "DB1", Schema: "PROD", Name: name, Cols: ci}}
+	}
+	custRefs, custCols := prod("CUSTOMERS", "ID", "NAME")
+	logRefs, logCols := prod("LOGS", "MSG")
+	tRefs, tCols := prod("T", "Y")
+	tRefs[0].Alias = "t"
+
+	cases := []struct {
+		name string
+		sql  string
+		refs []ResolvedRef
+		cols []ColEntry
+		want []string
+	}{
+		{"other-schema table doesn't shadow (false positive)",
+			"CREATE TABLE STAGING.CUSTOMERS (ID INT);\nUSE SCHEMA PROD;\nSELECT NAME FROM CUSTOMERS;",
+			custRefs, custCols, nil},
+		{"other-schema unknown CTAS doesn't shadow (false negative)",
+			"CREATE TABLE STAGING.LOGS AS SELECT * FROM SRC;\nUSE SCHEMA PROD;\nSELECT TYPO_COL FROM LOGS;",
+			logRefs, logCols, []string{"TYPO_COL"}},
+		{"other-schema table doesn't take over a resolved alias",
+			"CREATE TABLE DEV.T (X INT);\nSELECT t.Y FROM DB1.PROD.T t;",
+			tRefs, tCols, nil},
+		{"CTAS chained over an unknown-columns CTAS stays unknown",
+			"CREATE TABLE A AS SELECT * FROM SRC;\nCREATE TABLE B AS SELECT *, 1 AS X FROM A;\nSELECT INHERITED, b.INHERITED FROM B b;",
+			nil, nil, nil},
+		{"unknown CTAS among known sources skips bare validation",
+			"CREATE TABLE ORDERS AS SELECT * FROM SRC;\nCREATE TABLE CUSTOMERS (ID INT, NAME VARCHAR);\nSELECT TOTAL, NAME FROM ORDERS o, CUSTOMERS c;",
+			nil, nil, nil},
+		{"comma after JOIN condition starts another source",
+			"CREATE TABLE A (X INT);\nCREATE TABLE B (X INT);\nCREATE TABLE C (Y INT);\nSELECT c.Y, c.TYPO FROM A JOIN B ON A.X = B.X, C c;",
+			nil, nil, []string{"TYPO"}},
+	}
+	for _, tc := range cases {
+		markers := diag916(tc.sql, tc.refs, tc.cols)
+		flagged := map[string]bool{}
+		for _, m := range markers {
+			ok := false
+			for _, w := range tc.want {
+				if strings.Contains(m.Message, "'"+w+"'") {
+					ok, flagged[w] = true, true
+				}
+			}
+			if !ok {
+				t.Errorf("%s: unexpected marker line %d: %s", tc.name, m.StartLineNumber, m.Message)
+			}
+		}
+		for _, w := range tc.want {
+			if !flagged[w] {
+				t.Errorf("%s: %s not flagged", tc.name, w)
+			}
+		}
+	}
+}

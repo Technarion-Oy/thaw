@@ -1023,6 +1023,47 @@ func hasSubquerySource(sig []sqltok.Token, sql string) bool {
 	return false
 }
 
+// fromClauseTracker follows which paren depths have an open FROM clause, so a
+// comma that continues the source list after a JOIN condition
+// (`FROM a JOIN b ON a.x = b.x, c`) is recognized as starting another source.
+// Commas directly after a source are consumed by the extractors themselves.
+type fromClauseTracker struct {
+	depth int
+	open  map[int]bool
+}
+
+// fromClauseEnd lists the keywords that close a FROM clause at their depth.
+var fromClauseEnd = map[string]bool{
+	"WHERE": true, "GROUP": true, "HAVING": true, "QUALIFY": true, "ORDER": true,
+	"LIMIT": true, "OFFSET": true, "FETCH": true, "UNION": true, "INTERSECT": true,
+	"EXCEPT": true, "MINUS": true, "SELECT": true, "WINDOW": true, "START": true,
+	"CONNECT": true,
+}
+
+// sourceComma observes the next token and reports whether it is a comma inside
+// an open FROM clause at the current depth.
+func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
+	switch tok.Kind {
+	case sqltok.LParen:
+		t.depth++
+	case sqltok.RParen:
+		delete(t.open, t.depth)
+		t.depth = max(t.depth-1, 0)
+	case sqltok.Comma:
+		return t.open[t.depth]
+	default:
+		if u := tokUpper(tok, sql); u == "FROM" {
+			if t.open == nil {
+				t.open = map[int]bool{}
+			}
+			t.open[t.depth] = true
+		} else if fromClauseEnd[u] {
+			delete(t.open, t.depth)
+		}
+	}
+	return false
+}
+
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 	// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
 	// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
@@ -1039,10 +1080,13 @@ func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
 	}
 
 	var results []tableAlias
+	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
 		u := tokUpper(sig[i], sql)
-		matched := false
-		if singleKW[u] {
+		matched := from.sourceComma(sig[i], sql)
+		if matched {
+			i++
+		} else if singleKW[u] {
 			matched = true
 			i++
 		} else if second, ok := twoPartKW[u]; ok {
@@ -1114,13 +1158,15 @@ func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
 	}
 
 	var paths []string
+	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
 		u := tokUpper(sig[i], sql)
-		if u == "" {
+		matched := from.sourceComma(sig[i], sql)
+		if matched {
+			i++
+		} else if u == "" {
 			continue
-		}
-		matched := false
-		if singleKW[u] {
+		} else if singleKW[u] {
 			matched = true
 			i++
 		} else if second, ok := twoPartKW[u]; ok {
