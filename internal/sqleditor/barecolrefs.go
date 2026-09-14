@@ -85,12 +85,7 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		use = use.apply(sig, raw)
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
-		if ctasPath, bodyOff, isCTAS := matchCreateTableAs(sig, raw); isCTAS {
-			// CTAS: register the projected columns (nil when underivable) so the
-			// in-script table shadows a same-named catalog table (issue #916).
-			if parts := extractIdentParts(ctasPath, ic); len(parts) > 0 {
-				storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], ctasScope(raw[bodyOff:], localColCache, use)))
-			}
+		if registerCTAS(localColCache, sig, raw, use, ic) {
 			continue
 		}
 		if !ok {
@@ -193,7 +188,10 @@ func (u scriptUse) apply(sig []sqltok.Token, sql string) scriptUse {
 // is qualified by this USE context. Only a reference whose qualified key matches
 // a table created in-script lets that table shadow the catalog (issue #916), so
 // a same-named table created in another schema doesn't. The \x01 prefix keeps
-// these keys apart from the 1/2/3-part keys.
+// these keys apart from the 1/2/3-part keys; it deliberately keeps the same
+// three \x00-separated parts, so splitBcrCacheKey still yields the table name
+// (with the prefix folded into the db part, which never equals a real db) —
+// applyAlterAddToLocalCache's alias-key discovery depends on that.
 func (u scriptUse) key(db, schema, name string) string {
 	if schema == "" {
 		schema = u.schema
@@ -232,6 +230,9 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 	if cols, ok := localColCache[use.key(db, schema, name)]; ok {
 		return cols, exactScriptTable
 	}
+	if cols, ok := scriptTableAcrossUse(localColCache, use, db, schema, name); ok {
+		return cols, exactScriptTable
+	}
 	bare, ok := localColCache[bcrCacheKey("", "", name)]
 	switch {
 	case !ok:
@@ -242,6 +243,33 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 	default:
 		return nil, otherScriptTable
 	}
+}
+
+// scriptTableAcrossUse matches a reference against in-script tables created
+// under a different USE context: the key bakes in the context current when the
+// table was created, so a USE between CREATE and reference desyncs the exact
+// key. A table whose create-time db (or schema) was unknown ("" = session
+// default) may be the one a later USE selected: it matches when each stored
+// part is unknown or equal to the reference's. Two such candidates with
+// different columns are ambiguous: nil, unknown columns (PR #917 review).
+// ponytail: O(tables) scan per exact-key miss; index keys by name if slow.
+func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db, schema, name string) (cols []ColInfo, found bool) {
+	want := strings.SplitN(use.key(db, schema, name)[1:], "\x00", 3)
+	for k, c := range localColCache {
+		if !strings.HasPrefix(k, "\x01") {
+			continue
+		}
+		got := strings.SplitN(k[1:], "\x00", 3)
+		if len(got) != 3 || got[2] != name ||
+			got[0] != "" && got[0] != want[0] || got[1] != "" && got[1] != want[1] {
+			continue
+		}
+		if found && !sameColSlice(cols, c) {
+			return nil, true
+		}
+		cols, found = c, true
+	}
+	return cols, found
 }
 
 // keyParts is key for a normalized 1/2/3-part path.
@@ -614,11 +642,10 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 }
 
 // tableOnlyScope re-keys localColCache's table-only entries by bare table name —
-// the scope shape extractSelectProjections (and ValidateSemantics' cache) uses —
-// so a CTAS over an earlier in-script table (`AS SELECT * FROM a`) derives its
-// columns here too.
-// ponytail: rebuilt per CTAS, O(tables) each; maintain it incrementally (and keep
-// it in sync with ALTER merges) if scripts with many CTAS statements get slow.
+// the scope shape extractCTEProjections uses — so a CTE over an earlier in-script
+// table (`WITH c AS (SELECT * FROM a)`) derives its columns here too.
+// ponytail: rebuilt per statement containing WITH, O(tables) each; maintain it
+// incrementally (in sync with ALTER merges) if WITH-heavy scripts get slow.
 func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 	scope := make(map[string][]ColInfo)
 	for k, cols := range localColCache {
@@ -629,18 +656,37 @@ func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 	return scope
 }
 
-// ctasScope is the projection scope for a CTAS query: each FROM/JOIN source,
-// keyed by bare name as extractSelectProjections expects, maps to the in-script
-// table with the same USE-qualified name (scriptUse.keyParts) — not to whichever
+// registerCTAS records a CREATE TABLE … AS SELECT in localColCache with its
+// projected columns (nil when underivable), so the in-script table shadows a
+// same-named catalog table (issue #916). Shared by both validators so the
+// registration can't drift between them; reports whether sig is a CTAS. The
+// body is read through the statement's own tokens — no re-tokenizing.
+func registerCTAS(localColCache map[string][]ColInfo, sig []sqltok.Token, raw string, use scriptUse, ic bool) bool {
+	path, bodyOff, ok := matchCreateTableAs(sig, raw)
+	if !ok {
+		return false
+	}
+	parts := extractIdentParts(path, ic)
+	if len(parts) == 0 {
+		return true
+	}
+	body := sig[sigIndexAtOffset(sig, bodyOff):]
+	storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], body, raw, ctasScope(body, raw, localColCache, use, ic)))
+	return true
+}
+
+// ctasScope is the projection scope for a CTAS body (sig over sql): each FROM/JOIN
+// source, keyed by bare name as extractSelectProjections expects, maps to the
+// in-script table with the same USE-qualified name (scriptTable) — not to whichever
 // in-script table merely shares the bare name, so `SELECT * FROM PROD.S.ORDERS`
 // never expands to an unrelated STAGING.ORDERS (issue #916). A source not created
 // in-script, or two sources sharing a bare name under different qualifications,
 // map to nil: columns unknown.
-func ctasScope(query string, localColCache map[string][]ColInfo, use scriptUse) map[string][]ColInfo {
+func ctasScope(sig []sqltok.Token, sql string, localColCache map[string][]ColInfo, use scriptUse, ic bool) map[string][]ColInfo {
 	scope := make(map[string][]ColInfo)
 	keyOf := make(map[string]string) // bare name → qualified key ("" = ambiguous)
-	for _, path := range findFromJoinTables2(topLevelTokens(sigTokens(query)), query) {
-		parts := extractIdentParts(path, true)
+	for _, path := range findFromJoinTables2(topLevelTokens(sig), sql) {
+		parts := extractIdentParts(path, ic)
 		if len(parts) == 0 {
 			continue
 		}
@@ -649,7 +695,10 @@ func ctasScope(query string, localColCache map[string][]ColInfo, use scriptUse) 
 			key = ""
 		}
 		keyOf[name] = key
-		scope[name] = localColCache[key] // nil when absent or ambiguous
+		scope[name] = nil // absent or ambiguous: unknown
+		if cols, m := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), name); key != "" && m == exactScriptTable {
+			scope[name] = cols
+		}
 	}
 	return scope
 }
@@ -675,7 +724,7 @@ func mergeAddedCols(existing, added []ColInfo) []ColInfo {
 // its alias keys would stop sharing ALTER merges. nil stays the "columns
 // unknown" sentinel.
 func sameColSlice(a, b []ColInfo) bool {
-	return cap(a) > 0 && cap(b) > 0 && &a[:1][0] == &b[:1][0]
+	return len(a) == len(b) && cap(a) > 0 && cap(b) > 0 && &a[:1][0] == &b[:1][0]
 }
 
 // parsedCols is the cache entry for a CREATE TABLE's parsed column list: never
@@ -737,12 +786,8 @@ func lookupColsForRefTagged(
 	// referent, only a ref for this very source (same alias, or name when
 	// unaliased) lets the catalog win — the rule resolvedByRefs applies in
 	// ValidateSemantics (issue #916).
-	aliasOrName := alias
-	if aliasOrName == "" {
-		aliasOrName = name
-	}
 	for _, ref := range resolvedRefs {
-		if match == guessedScriptTable && !strings.EqualFold(ref.Alias, aliasOrName) {
+		if match == guessedScriptTable && !refForSource(ref, alias, name) {
 			continue
 		}
 		if checkEq(ref.Name, name) &&

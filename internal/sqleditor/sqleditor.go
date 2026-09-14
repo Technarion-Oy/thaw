@@ -2367,9 +2367,9 @@ func extractProjectedColName(expr string) string {
 // unknown-columns table (issue #916). complete is false when some output
 // column couldn't be named (an expression without an alias).
 func extractSelectProjections(sql string, localScope map[string][]ColInfo) (cols []ColInfo, complete bool) {
-	stripped := firstSetOpBranch(stripCommentsSQL(sql))
-	strippedToks := sqltok.Tokenize(stripped)
-	strippedSig := sigToks(strippedToks)
+	stripped := stripCommentsSQL(sql)
+	strippedSig := sigTokens(stripped)
+	stripped, strippedSig = firstSetOpBranch(strippedSig, stripped)
 	selOff := findSelectKWOffset(strippedSig, stripped)
 	if selOff < 0 {
 		return nil, false
@@ -2422,15 +2422,18 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) (cols
 	if sawStar && unresolvedSrc {
 		return nil, false
 	}
-	return cols, len(cols) > 0 && !unnamed
+	// A wildcard over resolved sources is complete even when they have no
+	// columns — an empty known set, not an unknown one (PR #917 review).
+	return cols, (len(cols) > 0 || sawStar) && !unnamed
 }
 
 // firstSetOpBranch returns sql cut before its first top-level UNION /
 // INTERSECT / EXCEPT / MINUS: a set operation's output columns are named by its
-// first branch, so later branches' sources must not feed a projection.
-func firstSetOpBranch(sql string) string {
+// first branch, so later branches' sources must not feed a projection. sig is
+// cut to match; token offsets stay valid since the cut keeps sql's prefix.
+func firstSetOpBranch(sig []sqltok.Token, sql string) (string, []sqltok.Token) {
 	depth := 0
-	for _, t := range sigTokens(sql) {
+	for i, t := range sig {
 		switch t.Kind {
 		case sqltok.LParen:
 			depth++
@@ -2440,12 +2443,12 @@ func firstSetOpBranch(sql string) string {
 			switch tokUpper(t, sql) {
 			case "UNION", "INTERSECT", "EXCEPT", "MINUS":
 				if depth == 0 {
-					return sql[:t.Start]
+					return sql[:t.Start], sig[:i]
 				}
 			}
 		}
 	}
-	return sql
+	return sql, sig
 }
 
 // ctasColumns returns the output columns of a CTAS query, or nil when they
@@ -2454,14 +2457,15 @@ func firstSetOpBranch(sql string) string {
 // source without known columns, or a quoted identifier. A nil entry in a local
 // column cache marks a table created in-script whose columns are unknown, so it
 // still shadows a same-named catalog table (issue #916).
-func ctasColumns(query string, localScope map[string][]ColInfo) []ColInfo {
+// sig is query's significant tokens, positioned over sql.
+func ctasColumns(query string, sig []sqltok.Token, sql string, localScope map[string][]ColInfo) []ColInfo {
 	// ponytail: a quoted identifier anywhere gives up — projected names are
 	// upper-cased, which would be wrong for case-sensitive "quoted" aliases.
-	if getFirstSQLToken(query) != "SELECT" || strings.Contains(query, `"`) {
+	if len(sig) == 0 || tokUpper(sig[0], sql) != "SELECT" || strings.Contains(query, `"`) {
 		return nil
 	}
 	if cols, complete := extractSelectProjections(query, localScope); complete {
-		return cols
+		return parsedCols(cols) // a wildcard over only column-less tables: known, empty
 	}
 	return nil
 }
@@ -2584,14 +2588,15 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// validated against the real schema instead of the (possibly typo-laden)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
+				// First set-op branch, top-level sources only — as in
+				// extractSelectProjections (PR #917 review).
 				innerStripped := stripCommentsSQL(innerSQL)
-				innerToks := sqltok.Tokenize(innerStripped)
-				innerSig := sigToks(innerToks)
+				innerStripped, innerSig := firstSetOpBranch(sigTokens(innerStripped), innerStripped)
 				// Only when every source's columns are known: a partial union
 				// would flag a column that lives on the missing source (#917).
 				var allSourceCols []ColInfo
 				allKnown := true
-				for _, tablePath := range findFromJoinTables2(innerSig, innerStripped) {
+				for _, tablePath := range findFromJoinTables2(topLevelTokens(innerSig), innerStripped) {
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
@@ -2689,17 +2694,28 @@ func resolvedByRefs(resolvedRefs []ResolvedRef, ta tableAlias) bool {
 	if len(parts) == 0 {
 		return false
 	}
-	name := parts[len(parts)-1]
-	alias := name
+	alias := ""
 	if ta.alias != "" {
-		alias = strings.ToUpper(normIdent(ta.alias, true))
+		alias = normIdent(ta.alias, true)
 	}
 	for _, ref := range resolvedRefs {
-		if strings.EqualFold(ref.Alias, alias) && strings.EqualFold(ref.Name, name) {
+		if refForSource(ref, alias, parts[len(parts)-1]) {
 			return true
 		}
 	}
 	return false
+}
+
+// refForSource reports whether ref was resolved for the source name [AS alias]:
+// same alias (the table name when unaliased — see ParseJoinTables) and same
+// table name. Shared by both validators' guessed-match fallback (issue #916).
+// ponytail: refs carry no statement position, so a same-alias source in another
+// statement counts too; add positions to ResolvedRef (an IPC change) if needed.
+func refForSource(ref ResolvedRef, alias, name string) bool {
+	if alias == "" {
+		alias = name
+	}
+	return strings.EqualFold(ref.Alias, alias) && strings.EqualFold(ref.Name, name)
 }
 
 // ValidateSemantics walks the SQL text and for every alias.column two-part
@@ -2949,11 +2965,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 
 		// Register a CTAS after this statement's own context is built, so its
 		// source query still sees the pre-existing tables.
-		if nameStr, bodyOff, ok := matchCreateTableAs(rawSig, raw); ok {
-			if parts := extractIdentParts(nameStr, true); len(parts) > 0 {
-				storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], ctasScope(raw[bodyOff:], localColCache, use)))
-			}
-		}
+		registerCTAS(localColCache, rawSig, raw, use, true)
 	}
 
 	runes := []rune(sql)

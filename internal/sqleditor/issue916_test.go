@@ -310,3 +310,39 @@ func TestIssue916_ParseJoinTablesStatementBoundary(t *testing.T) {
 		t.Errorf("want only ORDERS, got %+v", refs)
 	}
 }
+
+// A table created before a USE still shadows the catalog when a later reference
+// names it with the same explicit qualification: the create-time unknown db
+// (session default) may be the USE'd one (PR #917 review).
+func TestIssue916_UseAfterCTASKeepsShadowing(t *testing.T) {
+	sql := "CREATE TABLE MYSCHEMA.ORDERS AS SELECT C_ID AS CUSTOMER_ID FROM SRC;\n" +
+		"USE DATABASE OTHERDB;\n" +
+		"SELECT o.CUSTOMER_ID, CUSTOMER_ID FROM MYSCHEMA.ORDERS o;"
+	markers := ValidateSemantics(sql,
+		[]ResolvedRef{{Alias: "O", DB: "PRODDB", Schema: "MYSCHEMA", Name: "ORDERS"}},
+		[]ColEntry{{DB: "PRODDB", Schema: "MYSCHEMA", Name: "ORDERS", Cols: []ColInfo{{Name: "ID"}}}})
+	for _, m := range markers {
+		t.Errorf("unexpected marker line %d: %s", m.StartLineNumber, m.Message)
+	}
+}
+
+// SELECT * over an in-script table with no columns is a known (empty) column
+// set, not "unknown" — refs to the CTAS are still validated (PR #917 review).
+func TestIssue916_WildcardOverEmptyTable(t *testing.T) {
+	sql := "CREATE TABLE T ();\nCREATE TABLE U AS SELECT * FROM T;\nSELECT ANYTHING FROM U;"
+	markers := ValidateSemantics(sql, nil, nil)
+	if len(markers) != 1 || !strings.Contains(markers[0].Message, "ANYTHING") {
+		t.Errorf("want one marker for ANYTHING, got %+v", markers)
+	}
+}
+
+// A simple CTE's wildcard takes its columns from the first set-op branch only
+// (PR #917 review).
+func TestIssue916_CTEWildcardFirstSetOpBranch(t *testing.T) {
+	sql := "CREATE TABLE A (X INT);\nCREATE TABLE B (Y INT);\n" +
+		"WITH c AS (SELECT * FROM A UNION SELECT * FROM B) SELECT c.X, c.Y FROM c;"
+	markers := ValidateSemantics(sql, nil, nil)
+	if len(markers) != 1 || !strings.Contains(markers[0].Message, "'Y'") {
+		t.Errorf("want one marker for Y, got %+v", markers)
+	}
+}
