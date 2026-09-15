@@ -346,3 +346,24 @@ func TestIssue916_CTEWildcardFirstSetOpBranch(t *testing.T) {
 		t.Errorf("want one marker for Y, got %+v", markers)
 	}
 }
+
+// PR #917 inline review follow-ups, checked in both validators where they apply.
+func TestIssue916_InlineReviewRound(t *testing.T) {
+	for _, tc := range []struct{ name, sql, want string }{
+		// A CTE whose wildcard covers only known, column-less sources is a known
+		// empty CTE — it still takes priority over a same-named in-script table.
+		{"empty-cte", "CREATE TABLE EMPTY_T ();\nCREATE TABLE FOO (REALCOL INT);\n" +
+			"WITH FOO AS (SELECT * FROM EMPTY_T) SELECT FOO.REALCOL FROM FOO;", "'REALCOL'"},
+		// A `"` inside a string literal isn't a quoted identifier.
+		{"quote-in-literal", "CREATE TABLE T (X INT);\n" +
+			"CREATE TABLE U AS SELECT X, 'He said \"hi\"' AS NOTE FROM T;\nSELECT X, NOTE, TYPO FROM U;", "'TYPO'"},
+		// Only the first set-op branch's sources feed the CTAS scope.
+		{"ctas-set-op-scope", "CREATE TABLE S1.ORDERS (A INT);\nCREATE TABLE S2.ORDERS (B INT);\n" +
+			"CREATE TABLE COMBINED AS SELECT * FROM S1.ORDERS UNION SELECT * FROM S2.ORDERS;\nSELECT A, TYPO FROM COMBINED;", "'TYPO'"},
+	} {
+		markers := ValidateSemantics(tc.sql, nil, nil)
+		if len(markers) != 1 || !strings.Contains(markers[0].Message, tc.want) {
+			t.Errorf("%s: want one marker for %s, got %+v", tc.name, tc.want, markers)
+		}
+	}
+}

@@ -2459,10 +2459,16 @@ func firstSetOpBranch(sig []sqltok.Token, sql string) (string, []sqltok.Token) {
 // still shadows a same-named catalog table (issue #916).
 // sig is query's significant tokens, positioned over sql.
 func ctasColumns(query string, sig []sqltok.Token, sql string, localScope map[string][]ColInfo) []ColInfo {
-	// ponytail: a quoted identifier anywhere gives up — projected names are
-	// upper-cased, which would be wrong for case-sensitive "quoted" aliases.
-	if len(sig) == 0 || tokUpper(sig[0], sql) != "SELECT" || strings.Contains(query, `"`) {
+	if len(sig) == 0 || tokUpper(sig[0], sql) != "SELECT" {
 		return nil
+	}
+	// ponytail: a quoted identifier anywhere gives up — projected names are
+	// upper-cased, which would be wrong for case-sensitive "quoted" aliases. A
+	// `"` inside a string literal or comment isn't one (PR #917 review).
+	for _, t := range sig {
+		if t.Kind == sqltok.QuotedIdent {
+			return nil
+		}
 	}
 	if cols, complete := extractSelectProjections(query, localScope); complete {
 		return parsedCols(cols) // a wildcard over only column-less tables: known, empty
@@ -2645,9 +2651,14 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// Fall back to SELECT-list projections when the CTE is complex or the
 			// source table's columns are not available in the local scope. A nil
 			// result (a wildcard over a source with unknown columns) leaves the
-			// CTE unregistered, i.e. unknown, rather than trusting a partial list.
+			// CTE unregistered, i.e. unknown, rather than trusting a partial list;
+			// a complete empty one (a wildcard over column-less sources) is a
+			// known empty CTE, as for CTAS (PR #917 review).
 			if len(cteCols) == 0 {
-				cteCols, _ = extractSelectProjections(innerSQL, localScope)
+				var complete bool
+				if cteCols, complete = extractSelectProjections(innerSQL, localScope); complete {
+					cteCols = parsedCols(cteCols)
+				}
 			}
 		}
 
@@ -2664,7 +2675,7 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			cteCols = overridden
 		}
 
-		if len(cteCols) > 0 {
+		if cteCols != nil {
 			nameU := strings.ToUpper(normIdent(cteName, true))
 			result[nameU] = cteCols
 			localScope[nameU] = cteCols // Update local scope for next CTE in sequence

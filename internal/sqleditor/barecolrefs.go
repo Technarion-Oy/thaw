@@ -683,6 +683,9 @@ func registerCTAS(localColCache map[string][]ColInfo, sig []sqltok.Token, raw st
 // in-script, or two sources sharing a bare name under different qualifications,
 // map to nil: columns unknown.
 func ctasScope(sig []sqltok.Token, sql string, localColCache map[string][]ColInfo, use scriptUse, ic bool) map[string][]ColInfo {
+	// Only the first set-op branch projects — the one ctasColumns reads — so a
+	// later branch's same-named source can't make this one ambiguous.
+	_, sig = firstSetOpBranch(sig, sql)
 	scope := make(map[string][]ColInfo)
 	keyOf := make(map[string]string) // bare name → qualified key ("" = ambiguous)
 	for _, path := range findFromJoinTables2(topLevelTokens(sig), sql) {
