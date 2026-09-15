@@ -3,6 +3,7 @@
 package sqleditor
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -674,41 +675,26 @@ var fromJoinKeywords = map[string]bool{
 }
 
 // fromJoinTwoPartKeywords are two-keyword combinations that precede table refs.
-var fromJoinTwoPartKeywords = map[string]string{
-	"MERGE":  "INTO",
-	"INSERT": "INTO",
-	"COPY":   "INTO",
-	"THEN":   "INTO",
-	"ELSE":   "INTO",
+var fromJoinTwoPartKeywords = map[string][]string{
+	"MERGE":  {"INTO"},
+	"INSERT": {"INTO"},
+	"COPY":   {"INTO"},
+	"THEN":   {"INTO"},
+	"ELSE":   {"INTO"},
 }
 
 // findFromJoinTables scans significant tokens for FROM/JOIN/MERGE INTO/etc.
-// keywords followed by identifier paths. Returns the raw path text for each.
-// This replaces reFromJoinFallback.
+// keywords followed by identifier paths, including comma-joined source lists
+// (issue #916). Returns the raw path text for each.
 func findFromJoinTables(sig []sqltok.Token, sql string) []string {
-	var paths []string
-	for i := 0; i < len(sig); i++ {
-		u := tokUpper(sig[i], sql)
-		if u == "" {
-			continue
-		}
-		matched := false
-		if fromJoinKeywords[u] {
-			matched = true
-			i++
-		} else if second, ok := fromJoinTwoPartKeywords[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
-			}
-		}
-		if matched && i < len(sig) && isIdent(sig[i]) {
-			path, end := readIdentPath(sig, sql, i)
-			if path != "" {
-				paths = append(paths, path)
-				i = end - 1 // loop will i++
-			}
-		}
+	return sourcePaths(scanFromSources(sig, sql, fromJoinKeywords, fromJoinTwoPartKeywords))
+}
+
+// sourcePaths returns the table paths of srcs.
+func sourcePaths(srcs []tableAlias) []string {
+	paths := make([]string, 0, len(srcs))
+	for _, ta := range srcs {
+		paths = append(paths, ta.tablePath)
 	}
 	return paths
 }
@@ -829,6 +815,46 @@ func matchCreateTablePre(sig []sqltok.Token, sql string) (rawPath string, parenO
 		ok = true
 	}
 	return
+}
+
+// matchCreateTableAs matches a CREATE TABLE … AS <query> (CTAS) with no column
+// block — `CREATE [OR REPLACE] TABLE <path> [options] AS SELECT …` — and returns
+// the raw table path and the byte offset of the query after AS.
+func matchCreateTableAs(sig []sqltok.Token, sql string) (rawPath string, bodyOff int, ok bool) {
+	rawPath, _, hasCols := matchCreateTablePre(sig, sql)
+	if rawPath == "" || hasCols {
+		return "", 0, false
+	}
+	asIdx := createBodyAsIdx(sig, sql)
+	if asIdx < 0 || asIdx+1 >= len(sig) {
+		return "", 0, false
+	}
+	return rawPath, sig[asIdx+1].Start, true
+}
+
+// createBodyAsIdx returns the index in sig of the first depth-0 AS of a CREATE
+// statement — the keyword separating the object header (name, WAREHOUSE = …,
+// SCHEDULE = …, TARGET_LAG = …) from its body — or -1.
+func createBodyAsIdx(sig []sqltok.Token, sql string) int {
+	if !kwAt(sig, sql, 0, "CREATE") {
+		return -1
+	}
+	depth := 0
+	for i, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && tokUpper(t, sql) == "AS" {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // matchCreateTableGuard checks if the statement starts with CREATE TABLE
@@ -960,7 +986,13 @@ type tableAlias struct {
 // for the statement (issue #793 D3).
 func hasSubquerySource(sig []sqltok.Token, sql string) bool {
 	depth := 0
+	var from fromClauseTracker
 	for i := 0; i < len(sig); i++ {
+		// A comma continuing a FROM source list introduces a source too
+		// (`FROM a, (SELECT …) x`).
+		if from.sourceComma(sig[i], sql) && depth == 0 && i+1 < len(sig) && sig[i+1].Kind == sqltok.LParen {
+			return true
+		}
 		switch sig[i].Kind {
 		case sqltok.LParen:
 			depth++
@@ -983,121 +1015,179 @@ func hasSubquerySource(sig []sqltok.Token, sql string) bool {
 	return false
 }
 
-func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
-	// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
-	// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
-	// form is not mis-captured because the next token there is `(`, not an
-	// identifier (see the isIdent guard below).
-	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
-	}
-	twoPartKW := map[string]string{
-		"CROSS":  "JOIN",
-		"INSERT": "INTO",
-		"DELETE": "FROM",
-		"MERGE":  "INTO",
-	}
+// fromClauseTracker follows which paren depths have an open FROM clause, so a
+// comma that continues the source list after a JOIN condition
+// (`FROM a JOIN b ON a.x = b.x, c`) is recognized as starting another source.
+// Commas directly after a source are consumed by the extractors themselves.
+type fromClauseTracker struct {
+	depth int
+	open  map[int]bool
+}
 
-	var results []tableAlias
-	for i := 0; i < len(sig); i++ {
-		u := tokUpper(sig[i], sql)
-		matched := false
-		if singleKW[u] {
-			matched = true
-			i++
-		} else if second, ok := twoPartKW[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
+// fromClauseEnd lists the keywords that close a FROM clause at their depth.
+var fromClauseEnd = map[string]bool{
+	"WHERE": true, "GROUP": true, "HAVING": true, "QUALIFY": true, "ORDER": true,
+	"LIMIT": true, "OFFSET": true, "FETCH": true, "UNION": true, "INTERSECT": true,
+	"EXCEPT": true, "MINUS": true, "SELECT": true, "WINDOW": true, "START": true,
+	"CONNECT": true,
+}
+
+// sourceComma observes the next token and reports whether it is a comma inside
+// an open FROM clause at the current depth.
+func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
+	switch tok.Kind {
+	case sqltok.LParen:
+		t.depth++
+	case sqltok.RParen:
+		delete(t.open, t.depth)
+		t.depth = max(t.depth-1, 0)
+	case sqltok.Comma:
+		return t.open[t.depth]
+	case sqltok.Semicolon:
+		// A statement boundary closes every clause (callers may pass multi-
+		// statement text, e.g. the editor content up to the cursor).
+		t.depth, t.open = 0, nil
+	default:
+		if u := tokUpper(tok, sql); u == "FROM" {
+			if t.open == nil {
+				t.open = map[int]bool{}
+			}
+			t.open[t.depth] = true
+		} else if fromClauseEnd[u] {
+			delete(t.open, t.depth)
+		}
+	}
+	return false
+}
+
+func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
+	return scanFromSources(sig, sql, fromSingleKW, joinTwoPartKW)
+}
+
+// findFromJoinTables2 is like findFromJoinWithAlias but uses the barecolrefs
+// FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.) and
+// returns only the paths.
+func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
+	return sourcePaths(scanFromSources(sig, sql, fromSingleKW, bareColsTwoPartKW))
+}
+
+// Keywords that start a FROM/JOIN clause (single-word). USING introduces the
+// MERGE source table (`MERGE INTO t USING s …`); the `JOIN … USING (cols)`
+// form is not mis-captured because the next token there is `(`, not an
+// identifier (see the isIdent guard in scanFromSources).
+var fromSingleKW = map[string]bool{
+	"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
+}
+
+// Two-word source introducers: first word → accepted second words.
+var (
+	joinTwoPartKW = map[string][]string{
+		"CROSS":  {"JOIN"},
+		"INSERT": {"INTO"},
+		"DELETE": {"FROM"},
+		"MERGE":  {"INTO"},
+	}
+	bareColsTwoPartKW = map[string][]string{
+		"CROSS":    {"JOIN"},
+		"INSERT":   {"INTO"},
+		"TRUNCATE": {"TABLE"},
+		"DELETE":   {"FROM"},
+		"MERGE":    {"INTO"},
+		"DESCRIBE": {"TABLE", "VIEW"},
+		"DESC":     {"TABLE", "VIEW"},
+	}
+)
+
+// topLevelTokens returns the tokens of sig outside any parentheses, so a source
+// scan sees only a query's own FROM/JOIN sources — not those of a scalar
+// subquery in its select list or a nested subquery in its WHERE clause. Each
+// outermost group is kept as an empty `( )` pair: dropping it outright would
+// leave a derived table's alias (`FROM a, (SELECT …) x`) looking like a plain
+// source named `x`.
+func topLevelTokens(sig []sqltok.Token) []sqltok.Token {
+	var out []sqltok.Token
+	depth := 0
+	for _, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			if depth == 0 {
+				out = append(out, t)
+			}
+			depth++
+		case sqltok.RParen:
+			depth = max(depth-1, 0)
+			if depth == 0 {
+				out = append(out, t)
+			}
+		default:
+			if depth == 0 {
+				out = append(out, t)
 			}
 		}
-		if !matched || i >= len(sig) || !isIdent(sig[i]) {
-			continue
-		}
-		path, end := readIdentPath(sig, sql, i)
-		if path == "" {
-			continue
-		}
-		i = end
+	}
+	return out
+}
 
-		// Check for optional alias: [AS] <alias>. An implicit alias must be an
-		// Identifier or QuotedIdent — never a bare keyword — so a following clause
-		// keyword (FROM mytable WHERE …) is not captured as the alias.
-		var alias string
-		if i < len(sig) {
-			if tokUpper(sig[i], sql) == "AS" {
-				i++
-				if i < len(sig) && isAliasTok(sig[i]) {
+// scanFromSources reads every table source introduced by a singleKW / a
+// twoPartKW pair, including comma-joined source lists (`FROM a x, b y`, and a
+// comma after a JOIN condition via fromClauseTracker — issue #916), with its
+// optional `[AS] alias`.
+func scanFromSources(sig []sqltok.Token, sql string, singleKW map[string]bool, twoPartKW map[string][]string) []tableAlias {
+	var results []tableAlias
+	var from fromClauseTracker
+	for i := 0; i < len(sig); i++ {
+		u := tokUpper(sig[i], sql)
+		matched := from.sourceComma(sig[i], sql)
+		if matched {
+			i++
+		} else if singleKW[u] {
+			matched = true
+			i++
+		} else if i+1 < len(sig) && slices.Contains(twoPartKW[u], tokUpper(sig[i+1], sql)) {
+			matched = true
+			i += 2
+		}
+		if !matched {
+			continue
+		}
+		if i >= len(sig) || !isIdent(sig[i]) {
+			// Not a plain source (e.g. a derived table's `(`): hand the token
+			// back to the loop so the tracker still sees it.
+			i--
+			continue
+		}
+		for matched && i < len(sig) && isIdent(sig[i]) {
+			path, end := readIdentPath(sig, sql, i)
+			if path == "" {
+				break
+			}
+			i = end
+
+			// Check for optional alias: [AS] <alias>. An implicit alias must be an
+			// Identifier or QuotedIdent — never a bare keyword — so a following clause
+			// keyword (FROM mytable WHERE …) is not captured as the alias.
+			var alias string
+			if i < len(sig) {
+				if tokUpper(sig[i], sql) == "AS" {
+					i++
+					if i < len(sig) && isAliasTok(sig[i]) {
+						alias = sig[i].Text(sql)
+						i++
+					}
+				} else if isAliasTok(sig[i]) {
 					alias = sig[i].Text(sql)
 					i++
 				}
-			} else if isAliasTok(sig[i]) {
-				alias = sig[i].Text(sql)
+			}
+			results = append(results, tableAlias{tablePath: path, alias: alias})
+			matched = i+1 < len(sig) && sig[i].Kind == sqltok.Comma
+			if matched {
 				i++
 			}
 		}
-		results = append(results, tableAlias{tablePath: path, alias: alias})
 		i-- // loop will i++
 	}
 	return results
-}
-
-// findFromJoinTables2 is like findFromJoinTables but uses the barecolrefs
-// FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.)
-func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
-	// USING introduces the MERGE source table; `JOIN … USING (cols)` is not
-	// mis-captured (the next token is `(`, guarded by the isIdent check below).
-	singleKW := map[string]bool{
-		"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
-	}
-	twoPartKW := map[string]string{
-		"CROSS":    "JOIN",
-		"INSERT":   "INTO",
-		"TRUNCATE": "TABLE",
-		"DELETE":   "FROM",
-		"MERGE":    "INTO",
-		"DESCRIBE": "TABLE",
-		"DESC":     "TABLE",
-	}
-	// DESCRIBE/DESC VIEW is also checked
-	twoPartKW2 := map[string]string{
-		"DESCRIBE": "VIEW",
-		"DESC":     "VIEW",
-	}
-
-	var paths []string
-	for i := 0; i < len(sig); i++ {
-		u := tokUpper(sig[i], sql)
-		if u == "" {
-			continue
-		}
-		matched := false
-		if singleKW[u] {
-			matched = true
-			i++
-		} else if second, ok := twoPartKW[u]; ok {
-			if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-				matched = true
-				i += 2
-			}
-		}
-		if !matched {
-			if second, ok := twoPartKW2[u]; ok {
-				if i+1 < len(sig) && tokUpper(sig[i+1], sql) == second {
-					matched = true
-					i += 2
-				}
-			}
-		}
-		if matched && i < len(sig) && isIdent(sig[i]) {
-			path, end := readIdentPath(sig, sql, i)
-			if path != "" {
-				paths = append(paths, path)
-				i = end - 1
-			}
-		}
-	}
-	return paths
 }
 
 // findAsAliases finds all AS <alias> patterns and returns the byte offsets

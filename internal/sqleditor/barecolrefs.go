@@ -77,12 +77,17 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 	// ── Pre-scan: extract columns from CREATE TABLE statements ────────────
 	localColCache := make(map[string][]ColInfo)
+	var use scriptUse
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
 		tokens := sqltok.Tokenize(raw)
 		sig := sigToks(tokens)
+		use = use.apply(sig, raw)
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
+		if registerCTAS(localColCache, sig, raw, use, ic) {
+			continue
+		}
 		if !ok {
 			// Apply ALTER TABLE … ADD [COLUMN] to tables already created in-script
 			// so later INSERT/SELECT can find the added columns (issue #715).
@@ -107,29 +112,19 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		}
 		columns := parseCreateTableColDefs(colsRaw, ic)
 
-		tableName := parts[len(parts)-1]
-		// 1-part key (table name only)
-		localColCache[bcrCacheKey("", "", tableName)] = columns
-		if len(parts) >= 2 {
-			schema := parts[len(parts)-2]
-			// 2-part key (schema.table)
-			localColCache[bcrCacheKey("", schema, tableName)] = columns
-		}
-		if len(parts) >= 3 {
-			db := parts[len(parts)-3]
-			schema := parts[len(parts)-2]
-			// 3-part key (db.schema.table)
-			localColCache[bcrCacheKey(db, schema, tableName)] = columns
-		}
+		storeLocalCols(localColCache, parts, use, parsedCols(columns))
 	}
 
 	// ── Second pass: validate column refs ─────────────────────────────────
 	var markers []DiagMarker
 
+	use = scriptUse{}
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
 		baseCol := stmtStartCol(req.SQL, r) // doc column of the statement's first char
 		firstTok := getFirstSQLToken(raw)
+		sig := sigTokens(raw)
+		use = use.apply(sig, raw)
 
 		if firstTok != "SELECT" && firstTok != "WITH" &&
 			firstTok != "INSERT" && firstTok != "CREATE" && firstTok != "UNDROP" {
@@ -138,26 +133,26 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 
 		// False-positive guard: skip statements with Snowflake-specific syntax
 		// that would produce noise.
-		if matchesSnowflakeFP(sigTokens(raw), raw) {
+		if matchesSnowflakeFP(sig, raw) {
 			continue
 		}
 
 		switch firstTok {
 		case "INSERT":
 			markers = append(markers,
-				validateInsertCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateInsertCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 
 		case "CREATE":
 			markers = append(markers,
-				validateReferencesCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateReferencesCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 			if isCreateView(raw) {
 				markers = append(markers,
-					validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+					validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 			}
 
 		case "SELECT", "WITH":
 			markers = append(markers,
-				validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+				validateSelectCols(raw, r, baseCol, req.ResolvedRefs, colInfoCache, localColCache, use, checkEq, ic)...)
 		}
 	}
 
@@ -165,6 +160,144 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+// scriptUse is the database/schema selected by the in-script USE statements
+// seen so far ("" = the session default).
+type scriptUse struct{ db, schema string }
+
+// apply returns the context after the statement sig, if it is a USE.
+// ponytail: USE only — CREATE DATABASE/SCHEMA also switch context in Snowflake;
+// track them here if a script relying on that needs cross-schema shadowing.
+func (u scriptUse) apply(sig []sqltok.Token, sql string) scriptUse {
+	s, ok := matchUse(sig, sql)
+	if !ok {
+		return u
+	}
+	first := strings.ToUpper(normIdent(s.ident1, true))
+	switch {
+	case s.parts == 2:
+		return scriptUse{db: first, schema: strings.ToUpper(normIdent(s.ident2, true))}
+	case s.kind == "SCHEMA":
+		return scriptUse{db: u.db, schema: first}
+	default: // USE DATABASE d / bare USE d
+		return scriptUse{db: first}
+	}
+}
+
+// key is the cache key of an in-script table (or a reference to one) whose path
+// is qualified by this USE context. Only a reference whose qualified key matches
+// a table created in-script lets that table shadow the catalog (issue #916), so
+// a same-named table created in another schema doesn't. The \x01 prefix keeps
+// these keys apart from the 1/2/3-part keys; it deliberately keeps the same
+// three \x00-separated parts, so splitBcrCacheKey still yields the table name
+// (with the prefix folded into the db part, which never equals a real db) —
+// applyAlterAddToLocalCache's alias-key discovery depends on that.
+func (u scriptUse) key(db, schema, name string) string {
+	if schema == "" {
+		schema = u.schema
+	}
+	if db == "" {
+		db = u.db
+	}
+	// Parts are used as normalized by the caller (case kept for a quoted name
+	// when quoted identifiers are case-sensitive), matching the 1/2/3-part keys
+	// so applyAlterAddToLocalCache's alias-key discovery sees this key too.
+	return "\x01" + db + "\x00" + schema + "\x00" + name
+}
+
+// scriptMatch classifies how a reference relates to the tables created in-script.
+type scriptMatch int
+
+const (
+	noScriptTable scriptMatch = iota
+	// exactScriptTable: created under the same USE-qualified name — it shadows
+	// any catalog table (cols nil = columns unknown).
+	exactScriptTable
+	// guessedScriptTable: only a same-named in-script table under another
+	// qualification exists, and the reference's schema isn't known (no
+	// qualification, no in-script USE), so the session schema may be that
+	// table's: its columns are used, unless the catalog resolves the reference.
+	guessedScriptTable
+	// otherScriptTable: a same-named in-script table exists, but the reference's
+	// schema is known and differs — a different object, so the reference is an
+	// unknown source unless the catalog resolves it.
+	otherScriptTable
+)
+
+// scriptTable looks up the in-script table a reference names (issue #916).
+// Shared by both validators so the shadowing rule can't drift between them.
+func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, name string) ([]ColInfo, scriptMatch) {
+	if cols, ok := localColCache[use.key(db, schema, name)]; ok {
+		return cols, exactScriptTable
+	}
+	if cols, ok := scriptTableAcrossUse(localColCache, use, db, schema, name); ok {
+		return cols, exactScriptTable
+	}
+	bare, ok := localColCache[bcrCacheKey("", "", name)]
+	switch {
+	case !ok:
+		return nil, noScriptTable
+	case schema == "" && use.schema == "":
+		// ponytail: bare key = the last same-named table created in-script.
+		return bare, guessedScriptTable
+	default:
+		return nil, otherScriptTable
+	}
+}
+
+// scriptTableAcrossUse matches a reference against in-script tables created
+// under a different USE context: the key bakes in the context current when the
+// table was created, so a USE between CREATE and reference desyncs the exact
+// key. A table whose create-time db (or schema) was unknown ("" = session
+// default) may be the one a later USE selected: it matches when each stored
+// part is unknown or equal to the reference's. Two such candidates with
+// different columns are ambiguous: nil, unknown columns (PR #917 review).
+// ponytail: O(tables) scan per exact-key miss; index keys by name if slow.
+func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db, schema, name string) (cols []ColInfo, found bool) {
+	want := strings.SplitN(use.key(db, schema, name)[1:], "\x00", 3)
+	for k, c := range localColCache {
+		if !strings.HasPrefix(k, "\x01") {
+			continue
+		}
+		got := strings.SplitN(k[1:], "\x00", 3)
+		if len(got) != 3 || got[2] != name ||
+			got[0] != "" && got[0] != want[0] || got[1] != "" && got[1] != want[1] {
+			continue
+		}
+		if found && !sameColSlice(cols, c) {
+			return nil, true
+		}
+		cols, found = c, true
+	}
+	return cols, found
+}
+
+// keyParts is key for a normalized 1/2/3-part path.
+func (u scriptUse) keyParts(parts []string) string {
+	var db, schema string
+	if len(parts) >= 2 {
+		schema = parts[len(parts)-2]
+	}
+	if len(parts) >= 3 {
+		db = parts[len(parts)-3]
+	}
+	return u.key(db, schema, parts[len(parts)-1])
+}
+
+// storeLocalCols records an in-script table's columns under its 1-part
+// (table), 2-part (schema.table) and 3-part (db.schema.table) keys, as far as
+// the normalized path parts allow, plus its USE-qualified shadowing key.
+func storeLocalCols(localColCache map[string][]ColInfo, parts []string, use scriptUse, columns []ColInfo) {
+	tableName := parts[len(parts)-1]
+	localColCache[use.keyParts(parts)] = columns
+	localColCache[bcrCacheKey("", "", tableName)] = columns
+	if len(parts) >= 2 {
+		localColCache[bcrCacheKey("", parts[len(parts)-2], tableName)] = columns
+	}
+	if len(parts) >= 3 {
+		localColCache[bcrCacheKey(parts[len(parts)-3], parts[len(parts)-2], tableName)] = columns
+	}
+}
 
 // bcrCacheKey returns the null-separated cache key used by colInfoCache /
 // localColCache.  All parts should already be normalised (upper-cased when
@@ -502,19 +635,110 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 	// the shared-backing-array invariant CREATE established. Allocating a fresh
 	// slice per key instead would desync the siblings, so a second ALTER on the
 	// same table could no longer detect them via sameColSlice (issue #715).
-	merged := make([]ColInfo, 0, len(target)+len(cols))
-	merged = append(merged, target...)
-	merged = append(merged, cols...)
+	merged := mergeAddedCols(target, cols)
 	for _, k := range aliasKeys {
 		localColCache[k] = merged
 	}
 }
 
+// tableOnlyScope re-keys localColCache's table-only entries by bare table name —
+// the scope shape extractCTEProjections uses — so a CTE over an earlier in-script
+// table (`WITH c AS (SELECT * FROM a)`) derives its columns here too.
+// ponytail: rebuilt per statement containing WITH, O(tables) each; maintain it
+// incrementally (in sync with ALTER merges) if WITH-heavy scripts get slow.
+func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
+	scope := make(map[string][]ColInfo)
+	for k, cols := range localColCache {
+		if db, schema, table, ok := splitBcrCacheKey(k); ok && db == "" && schema == "" {
+			scope[strings.ToUpper(table)] = cols
+		}
+	}
+	return scope
+}
+
+// registerCTAS records a CREATE TABLE … AS SELECT in localColCache with its
+// projected columns (nil when underivable), so the in-script table shadows a
+// same-named catalog table (issue #916). Shared by both validators so the
+// registration can't drift between them; reports whether sig is a CTAS. The
+// body is read through the statement's own tokens — no re-tokenizing.
+func registerCTAS(localColCache map[string][]ColInfo, sig []sqltok.Token, raw string, use scriptUse, ic bool) bool {
+	path, bodyOff, ok := matchCreateTableAs(sig, raw)
+	if !ok {
+		return false
+	}
+	parts := extractIdentParts(path, ic)
+	if len(parts) == 0 {
+		return true
+	}
+	body := sig[sigIndexAtOffset(sig, bodyOff):]
+	storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], body, raw, ctasScope(body, raw, localColCache, use, ic)))
+	return true
+}
+
+// ctasScope is the projection scope for a CTAS body (sig over sql): each FROM/JOIN
+// source, keyed by bare name as extractSelectProjections expects, maps to the
+// in-script table with the same USE-qualified name (scriptTable) — not to whichever
+// in-script table merely shares the bare name, so `SELECT * FROM PROD.S.ORDERS`
+// never expands to an unrelated STAGING.ORDERS (issue #916). A source not created
+// in-script, or two sources sharing a bare name under different qualifications,
+// map to nil: columns unknown.
+func ctasScope(sig []sqltok.Token, sql string, localColCache map[string][]ColInfo, use scriptUse, ic bool) map[string][]ColInfo {
+	// Only the first set-op branch projects — the one ctasColumns reads — so a
+	// later branch's same-named source can't make this one ambiguous.
+	_, sig = firstSetOpBranch(sig, sql)
+	scope := make(map[string][]ColInfo)
+	keyOf := make(map[string]string) // bare name → qualified key ("" = ambiguous)
+	for _, path := range findFromJoinTables2(topLevelTokens(sig), sql) {
+		parts := extractIdentParts(path, ic)
+		if len(parts) == 0 {
+			continue
+		}
+		name, key := parts[len(parts)-1], use.keyParts(parts)
+		if prev, seen := keyOf[name]; seen && prev != key {
+			key = ""
+		}
+		keyOf[name] = key
+		scope[name] = nil // absent or ambiguous: unknown
+		if cols, m := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), name); key != "" && m == exactScriptTable {
+			scope[name] = cols
+		}
+	}
+	return scope
+}
+
+// mergeAddedCols appends columns from an in-script ALTER TABLE … ADD to an
+// in-script table's cached columns. A nil existing slice is the "columns
+// unknown" sentinel (a CTAS whose projection can't be derived — issue #916):
+// it stays nil, since the added columns alone aren't the table's full set.
+func mergeAddedCols(existing, added []ColInfo) []ColInfo {
+	if existing == nil {
+		return nil
+	}
+	merged := make([]ColInfo, 0, len(existing)+len(added))
+	merged = append(merged, existing...)
+	return append(merged, added...)
+}
+
 // sameColSlice reports whether a and b share the same backing array — i.e. they
-// are the *same* cache entry stored under multiple keys, not merely equal. Empty
-// slices have no identity, so they never match.
+// are the *same* cache entry stored under multiple keys, not merely equal.
+//
+// Identity needs a backing array: an entry with known-but-zero columns must be
+// stored with cap > 0 (parsedCols does this); a cap-0 slice never matches, so
+// its alias keys would stop sharing ALTER merges. nil stays the "columns
+// unknown" sentinel.
 func sameColSlice(a, b []ColInfo) bool {
-	return len(a) > 0 && len(a) == len(b) && &a[0] == &b[0]
+	return len(a) == len(b) && cap(a) > 0 && cap(b) > 0 && &a[:1][0] == &b[:1][0]
+}
+
+// parsedCols is the cache entry for a CREATE TABLE's parsed column list: never
+// nil, so a table whose column definitions all failed to parse (zero known
+// columns) stays distinct from the nil "columns unknown" CTAS sentinel, and has a
+// backing array sameColSlice can track across its alias keys.
+func parsedCols(cols []ColInfo) []ColInfo {
+	if cols == nil {
+		return make([]ColInfo, 0, 1)
+	}
+	return cols
 }
 
 // lookupColsForRef finds the ColInfo slice for a table identified by
@@ -523,25 +747,33 @@ func sameColSlice(a, b []ColInfo) bool {
 // Returns (nil, false) if the table is not found in either cache, which
 // triggers the caller to skip column validation for that statement.
 func lookupColsForRef(
-	name, db, schema string,
+	name, alias, db, schema string,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) ([]ColInfo, bool) {
-	cols, found, _ := lookupColsForRefTagged(name, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+	cols, found, _ := lookupColsForRefTagged(name, alias, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	return cols, found
 }
 
 // lookupColsForRefTagged is like lookupColsForRef but additionally reports
 // whether the returned columns came from the localColCache (fromLocal=true)
-// or from the colInfoCache/resolvedRefs metadata (fromLocal=false).
+// or from the colInfoCache/resolvedRefs metadata (fromLocal=false). alias is
+// the reference's alias as written ("" when unaliased).
 func lookupColsForRefTagged(
-	name, db, schema string,
+	name, alias, db, schema string,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) (cols []ColInfo, found bool, fromLocal bool) {
 	nameU := strings.ToUpper(name)
+
+	// A table created in-script under the same USE-qualified name shadows the
+	// catalog table the refs may have resolved to (issue #916).
+	local, match := scriptTable(localColCache, use, db, schema, name)
+	if match == exactScriptTable {
+		return local, local != nil, local != nil
+	}
 
 	// If db+schema are fully qualified, look up directly.
 	if db != "" && schema != "" {
@@ -549,14 +781,18 @@ func lookupColsForRefTagged(
 		if c, ok := colInfoCache[key]; ok {
 			return c, true, false
 		}
-		if c, ok := localColCache[key]; ok {
-			return c, true, true
-		}
 		return nil, false, false
 	}
 
-	// Try to resolve via resolvedRefs (Snowflake live objects).
+	// Try to resolve via resolvedRefs (Snowflake live objects). Refs are
+	// resolved script-wide, so when a same-named in-script table is the guessed
+	// referent, only a ref for this very source (same alias, or name when
+	// unaliased) lets the catalog win — the rule resolvedByRefs applies in
+	// ValidateSemantics (issue #916).
 	for _, ref := range resolvedRefs {
+		if match == guessedScriptTable && !refForSource(ref, alias, name) {
+			continue
+		}
 		if checkEq(ref.Name, name) &&
 			(db == "" || checkEq(ref.DB, db)) &&
 			(schema == "" || checkEq(ref.Schema, schema)) {
@@ -568,18 +804,11 @@ func lookupColsForRefTagged(
 		}
 	}
 
-	// Fall back to local cache with schema.table or table-only key.
-	if schema != "" {
-		key := bcrCacheKey("", strings.ToUpper(schema), nameU)
-		if c, ok := localColCache[key]; ok {
-			return c, true, true
-		}
+	// Not in the catalog: fall back to a same-named in-script table only when
+	// the reference's schema is unknown; otherwise it names a different object.
+	if match == guessedScriptTable {
+		return local, local != nil, local != nil
 	}
-	key := bcrCacheKey("", "", nameU)
-	if c, ok := localColCache[key]; ok {
-		return c, true, true
-	}
-
 	return nil, false, false
 }
 
@@ -588,7 +817,7 @@ func lookupColsForRefTagged(
 func validateInsertCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	tokens := sqltok.Tokenize(raw)
@@ -611,7 +840,7 @@ func validateInsertCols(
 		schema = parts[0]
 	}
 
-	cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+	cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	if !ok {
 		return nil // Table not in cache; skip to avoid false-positives.
 	}
@@ -636,7 +865,7 @@ func validateInsertCols(
 func validateReferencesCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	tokens := sqltok.Tokenize(raw)
@@ -663,7 +892,7 @@ func validateReferencesCols(
 			schema = parts[0]
 		}
 
-		cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !ok {
 			continue
 		}
@@ -943,7 +1172,7 @@ func scanAliasedColRefs(clause string, aliasMap map[string]*aliasColSets, ic boo
 func validateSelectCols(
 	raw string, r StatementRange, baseCol int,
 	resolvedRefs []ResolvedRef,
-	colInfoCache, localColCache map[string][]ColInfo,
+	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool, ic bool,
 ) []DiagMarker {
 	stripped := stripCommentsSQL(raw)
@@ -959,17 +1188,18 @@ func validateSelectCols(
 	selEnd := selOffset + len("SELECT")
 
 	// Extract FROM/JOIN table refs from the full stripped statement.
-	type tableRef struct{ db, schema, name string }
+	type tableRef struct{ db, schema, name, alias string }
 	var tables []tableRef
-	for _, path := range findFromJoinTables2(strippedSig, stripped) {
-		parts := extractIdentParts(path, ic)
+	for _, ta := range scanFromSources(strippedSig, stripped, fromSingleKW, bareColsTwoPartKW) {
+		parts := extractIdentParts(ta.tablePath, ic)
+		alias := normIdent(ta.alias, ic)
 		switch len(parts) {
 		case 3:
-			tables = append(tables, tableRef{parts[0], parts[1], parts[2]})
+			tables = append(tables, tableRef{parts[0], parts[1], parts[2], alias})
 		case 2:
-			tables = append(tables, tableRef{"", parts[0], parts[1]})
+			tables = append(tables, tableRef{"", parts[0], parts[1], alias})
 		case 1:
-			tables = append(tables, tableRef{"", "", parts[0]})
+			tables = append(tables, tableRef{"", "", parts[0], alias})
 		}
 	}
 
@@ -979,13 +1209,14 @@ func validateSelectCols(
 	// (case-sensitive for quoted, uppercase for bare).
 	metaCols := make(map[string]struct{})
 	localCols := make(map[string]struct{})
-	foundAnyTable := false
 	for _, t := range tables {
-		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.alias, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !found {
-			continue
+			// A source without known columns (an unresolved table, or an in-script
+			// CTAS whose columns can't be derived) could supply any bare column, so
+			// skip the statement — as ValidateSemantics does (issue #916).
+			return nil
 		}
-		foundAnyTable = true
 		if fromLocal {
 			for _, c := range cols {
 				key := c.Name
@@ -1001,9 +1232,6 @@ func validateSelectCols(
 		}
 	}
 	noFromClause := len(tables) == 0
-	if !foundAnyTable && !noFromClause {
-		return nil // FROM/JOIN tables present but none resolved; skip to avoid false positives.
-	}
 
 	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
 	selectClause := extractSelectClause(stripped[selEnd:])
@@ -1055,7 +1283,7 @@ func validateSelectCols(
 			default:
 				continue
 			}
-			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, aliasU, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 			if !found {
 				continue // Table not cached; cannot validate — skip to avoid false positives.
 			}
