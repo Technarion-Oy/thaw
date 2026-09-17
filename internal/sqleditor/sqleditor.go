@@ -2655,9 +2655,12 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// a complete empty one (a wildcard over column-less sources) is a
 			// known empty CTE, as for CTAS (PR #917 review).
 			if len(cteCols) == 0 {
-				var complete bool
-				if cteCols, complete = extractSelectProjections(innerSQL, localScope); complete {
-					cteCols = parsedCols(cteCols)
+				if cols, complete := extractSelectProjections(innerSQL, localScope); complete {
+					cteCols = parsedCols(cols)
+				} else {
+					// A partial list (some items nameable, some not) is not the
+					// CTE's column set — discard it, as ctasColumns does.
+					cteCols = nil
 				}
 			}
 		}
@@ -2700,21 +2703,30 @@ func partAt(parts []string, n int) string {
 // the alias (the table name when unaliased — see ParseJoinTables) and the table
 // name must match: an earlier statement's `other_tbl AS t` must not count as
 // resolving a later `FROM t`.
-func resolvedByRefs(resolvedRefs []ResolvedRef, ta tableAlias) bool {
-	parts := extractIdentParts(ta.tablePath, true)
-	if len(parts) == 0 {
-		return false
-	}
-	alias := ""
-	if ta.alias != "" {
-		alias = normIdent(ta.alias, true)
-	}
+func resolvedByRefs(resolvedRefs []ResolvedRef, alias, name string) bool {
 	for _, ref := range resolvedRefs {
-		if refForSource(ref, alias, parts[len(parts)-1]) {
+		if refForSource(ref, alias, name) {
 			return true
 		}
 	}
 	return false
+}
+
+// shadows reports whether the in-script table classified as m takes precedence
+// over the catalog table the script-wide refs may have resolved for this source
+// (issue #916): an exact match always does; a guessed or other match only when
+// the refs didn't resolve this very source. Both validators go through this one
+// method, so the rule can't drift between them. A shadowing match with nil
+// columns means the source's columns are unknown.
+func (m scriptMatch) shadows(resolvedRefs []ResolvedRef, alias, name string) bool {
+	switch m {
+	case noScriptTable:
+		return false
+	case exactScriptTable:
+		return true
+	default:
+		return !resolvedByRefs(resolvedRefs, alias, name)
+	}
 }
 
 // refForSource reports whether ref was resolved for the source name [AS alias]:
@@ -2879,11 +2891,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			// its name and alias map to no column set, so neither is misread as a
 			// column nor checked against a same-named catalog table the script-wide
 			// refs mapped it to (issue #916).
+			aliasU := ""
+			if ta.alias != "" {
+				aliasU = strings.ToUpper(normIdent(ta.alias, true))
+			}
 			markUnknown := func() {
 				hasUnknownTable = true
 				ctx.aliasMap[tableNameU] = "__unknown__"
-				if ta.alias != "" {
-					ctx.aliasMap[strings.ToUpper(normIdent(ta.alias, true))] = "__unknown__"
+				if aliasU != "" {
+					ctx.aliasMap[aliasU] = "__unknown__"
 				}
 			}
 
@@ -2891,12 +2907,11 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			// Priority: 1. CTE, 2. Local Table, 3. Global resolvedRef (already in aliasMap)
 			if key, isCTE := ctx.aliasMap[tableNameU]; isCTE && strings.HasPrefix(key, "__cte__") {
 				cacheKey = key
-			} else if cols, match := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), tableNameU); match == exactScriptTable ||
-				match == guessedScriptTable && !resolvedByRefs(resolvedRefs, ta) {
-				// A table created in-script under the same USE-qualified name
-				// shadows the catalog table the refs may have resolved to, so
-				// override that mapping (issue #916). A guessed match (reference
-				// schema unknown, refs didn't resolve it) is used the same way.
+			} else if cols, match := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), tableNameU); match.shadows(resolvedRefs, aliasU, tableNameU) {
+				// A table created in-script shadows the catalog table the refs
+				// may have resolved to, so override that mapping (issue #916).
+				// nil columns (an underivable CTAS, or an other match — this
+				// reference's schema is known and differs) means unknown.
 				if cols == nil {
 					markUnknown()
 					continue
@@ -2906,12 +2921,6 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				if v, already := ctx.aliasMap[tableNameU]; !already || !strings.HasPrefix(v, "__") {
 					ctx.aliasMap[tableNameU] = cacheKey
 				}
-			} else if match == otherScriptTable && !resolvedByRefs(resolvedRefs, ta) {
-				// A same-named in-script table exists, but this reference's schema
-				// is known and differs — a different object — and the refs didn't
-				// resolve this source: unknown, not validated against its columns.
-				markUnknown()
-				continue
 			} else {
 				// Search in global colInfoCacheGlobal if it wasn't a CTE or local table
 				// and if the path matches a known table.

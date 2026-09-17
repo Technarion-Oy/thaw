@@ -238,6 +238,14 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 	case !ok:
 		return nil, noScriptTable
 	case schema == "" && use.schema == "":
+		if ambiguousScriptName(localColCache, name) {
+			// Several in-script tables share this name under different
+			// qualifications, and the reference doesn't say which: the bare key
+			// holds only the last-created one's columns, so treat the source as
+			// having unknown columns rather than validating against the wrong
+			// table (PR #917 review).
+			return nil, exactScriptTable
+		}
 		// ponytail: bare key = the last same-named table created in-script.
 		return bare, guessedScriptTable
 	default:
@@ -251,7 +259,10 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 // key. A table whose create-time db (or schema) was unknown ("" = session
 // default) may be the one a later USE selected: it matches when each stored
 // part is unknown or equal to the reference's. Two such candidates with
-// different columns are ambiguous: nil, unknown columns (PR #917 review).
+// different columns are ambiguous: nil, unknown columns (PR #917 review). The
+// mirror case — the *reference* side unknown against candidates with differing
+// known schemas — matches nothing here; scriptTable's ambiguousScriptName guard
+// catches it before the bare-key fallback.
 // ponytail: O(tables) scan per exact-key miss; index keys by name if slow.
 func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db, schema, name string) (cols []ColInfo, found bool) {
 	want := strings.SplitN(use.key(db, schema, name)[1:], "\x00", 3)
@@ -270,6 +281,28 @@ func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db,
 		cols, found = c, true
 	}
 	return cols, found
+}
+
+// ambiguousScriptName reports whether the script created more than one table
+// named name with different column sets (under different USE qualifications).
+// The bare 1-part cache key keeps only the last of them, so a reference that
+// doesn't say which one it means can't be validated against either.
+func ambiguousScriptName(localColCache map[string][]ColInfo, name string) bool {
+	var first []ColInfo
+	seen := false
+	for k, c := range localColCache {
+		if !strings.HasPrefix(k, "\x01") {
+			continue
+		}
+		if got := strings.SplitN(k[1:], "\x00", 3); len(got) != 3 || got[2] != name {
+			continue
+		}
+		if seen && !sameColSlice(first, c) {
+			return true
+		}
+		first, seen = c, true
+	}
+	return false
 }
 
 // keyParts is key for a normalized 1/2/3-part path.
@@ -768,10 +801,11 @@ func lookupColsForRefTagged(
 ) (cols []ColInfo, found bool, fromLocal bool) {
 	nameU := strings.ToUpper(name)
 
-	// A table created in-script under the same USE-qualified name shadows the
-	// catalog table the refs may have resolved to (issue #916).
+	// A table created in-script shadows the catalog table the refs may have
+	// resolved to (issue #916) — same rule as ValidateSemantics, via the shared
+	// scriptMatch.shadows. nil columns = unknown, so the caller skips the source.
 	local, match := scriptTable(localColCache, use, db, schema, name)
-	if match == exactScriptTable {
+	if match.shadows(resolvedRefs, alias, name) {
 		return local, local != nil, local != nil
 	}
 
@@ -1190,7 +1224,7 @@ func validateSelectCols(
 	// Extract FROM/JOIN table refs from the full stripped statement.
 	type tableRef struct{ db, schema, name, alias string }
 	var tables []tableRef
-	for _, ta := range scanFromSources(strippedSig, stripped, fromSingleKW, bareColsTwoPartKW) {
+	for _, ta := range scanFromSources(strippedSig, stripped, fromSingleKW, sourceTwoPartKW) {
 		parts := extractIdentParts(ta.tablePath, ic)
 		alias := normIdent(ta.alias, ic)
 		switch len(parts) {

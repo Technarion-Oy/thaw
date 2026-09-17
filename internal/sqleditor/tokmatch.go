@@ -3,6 +3,7 @@
 package sqleditor
 
 import (
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -663,24 +664,35 @@ func matchUse(sig []sqltok.Token, sql string) (u useStmt, ok bool) {
 	return
 }
 
-// fromJoinKeywords are the keywords that precede a table reference in DML
-// statements (for fallback table extraction).
+// fromJoinKeywords is fromSingleKW plus CLONE, for the existence check: a
+// `CREATE TABLE a CLONE b` source names a table that must exist, but it is not
+// a query source, so the scope scanners use fromSingleKW alone.
 // LIKE is deliberately absent: the CREATE TABLE … LIKE source table is matched
 // separately by matchCreateTableLike. A generic LIKE entry mis-reads predicate
 // LIKE (`WHERE c LIKE '%x%' AND …`) — string literals are stripped before
 // scanning, so the following AND/OR/ANY looks like a table name (#707).
-var fromJoinKeywords = map[string]bool{
-	"FROM": true, "JOIN": true, "USING": true, "UPDATE": true,
-	"CLONE": true,
-}
+var fromJoinKeywords = withKeys(fromSingleKW, "CLONE")
 
-// fromJoinTwoPartKeywords are two-keyword combinations that precede table refs.
+// fromJoinTwoPartKeywords are two-keyword combinations that precede table refs
+// in the existence check. It is deliberately not sourceTwoPartKW: DESCRIBE /
+// DROP / ALTER <kind> refs are validated by validateObjectKindRefs, so scanning
+// them here too would flag the same name twice.
 var fromJoinTwoPartKeywords = map[string][]string{
 	"MERGE":  {"INTO"},
 	"INSERT": {"INTO"},
 	"COPY":   {"INTO"},
 	"THEN":   {"INTO"},
 	"ELSE":   {"INTO"},
+}
+
+// withKeys returns a copy of base with extra keys set, so a keyword added to
+// base reaches every derived set.
+func withKeys(base map[string]bool, extra ...string) map[string]bool {
+	m := maps.Clone(base)
+	for _, k := range extra {
+		m[k] = true
+	}
+	return m
 }
 
 // findFromJoinTables scans significant tokens for FROM/JOIN/MERGE INTO/etc.
@@ -1061,14 +1073,14 @@ func (t *fromClauseTracker) sourceComma(tok sqltok.Token, sql string) bool {
 }
 
 func findFromJoinWithAlias(sig []sqltok.Token, sql string) []tableAlias {
-	return scanFromSources(sig, sql, fromSingleKW, joinTwoPartKW)
+	return scanFromSources(sig, sql, fromSingleKW, sourceTwoPartKW)
 }
 
 // findFromJoinTables2 is like findFromJoinWithAlias but uses the barecolrefs
 // FROM/JOIN keyword set (includes TRUNCATE TABLE, DESCRIBE TABLE, etc.) and
 // returns only the paths.
 func findFromJoinTables2(sig []sqltok.Token, sql string) []string {
-	return sourcePaths(scanFromSources(sig, sql, fromSingleKW, bareColsTwoPartKW))
+	return sourcePaths(scanFromSources(sig, sql, fromSingleKW, sourceTwoPartKW))
 }
 
 // Keywords that start a FROM/JOIN clause (single-word). USING introduces the
@@ -1079,24 +1091,17 @@ var fromSingleKW = map[string]bool{
 	"FROM": true, "JOIN": true, "UPDATE": true, "USING": true,
 }
 
-// Two-word source introducers: first word → accepted second words.
-var (
-	joinTwoPartKW = map[string][]string{
-		"CROSS":  {"JOIN"},
-		"INSERT": {"INTO"},
-		"DELETE": {"FROM"},
-		"MERGE":  {"INTO"},
-	}
-	bareColsTwoPartKW = map[string][]string{
-		"CROSS":    {"JOIN"},
-		"INSERT":   {"INTO"},
-		"TRUNCATE": {"TABLE"},
-		"DELETE":   {"FROM"},
-		"MERGE":    {"INTO"},
-		"DESCRIBE": {"TABLE", "VIEW"},
-		"DESC":     {"TABLE", "VIEW"},
-	}
-)
+// Two-word source introducers: first word → accepted second words. One set for
+// both scope scanners, so a form added here can't reach only one of them.
+var sourceTwoPartKW = map[string][]string{
+	"CROSS":    {"JOIN"},
+	"INSERT":   {"INTO"},
+	"TRUNCATE": {"TABLE"},
+	"DELETE":   {"FROM"},
+	"MERGE":    {"INTO"},
+	"DESCRIBE": {"TABLE", "VIEW"},
+	"DESC":     {"TABLE", "VIEW"},
+}
 
 // topLevelTokens returns the tokens of sig outside any parentheses, so a source
 // scan sees only a query's own FROM/JOIN sources — not those of a scalar

@@ -13,6 +13,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		`SELECT "ID", "FIRST_NAME", "LAST_NAME" FROM "DB"."SCH"."EMPLOYEES"`,
 		"SELECT ID, FIRST_NAME FROM DB.SCH.EMPLOYEES e",
 		`SELECT * FROM "DB"."SCH"."EMPLOYEES"`,
+		// PR #917 review: two in-script tables share the bare name under different
+		// schemas, so a bare reference names neither of them for sure — its
+		// columns are unknown and nothing is flagged (a.loc_t really does have z).
+		"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM loc_t;",
+		"USE SCHEMA s1;\nCREATE TABLE amb_t (a INT);\nUSE SCHEMA s2;\nCREATE TABLE amb_t (b INT);\nUSE DATABASE otherdb;\nSELECT a FROM amb_t;",
 		// Issue #714: SELECT * EXCLUDE takes a bare column name (no parens) in
 		// Snowflake; EXCLUDE must not be flagged as an unknown column.
 		"SELECT * EXCLUDE DEPT_ID FROM DB.SCH.EMPLOYEES",
@@ -198,12 +203,6 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		// other schema's table is still flagged.
 		{"ALTER add column does not pollute same-named table in other schema",
 			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM b.loc_t;",
-			[]string{"z"}},
-		// …and the added column must not leak into the *bare* key either: bare
-		// loc_t resolves to the last-created same-named table (b.loc_t), which
-		// never got z, so a bare reference is still flagged.
-		{"ALTER add column does not pollute bare key of same-named table",
-			"CREATE TABLE a.loc_t (x INT);\nCREATE TABLE b.loc_t (y INT);\nALTER TABLE a.loc_t ADD COLUMN z INT;\nSELECT z FROM loc_t;",
 			[]string{"z"}},
 	}
 
@@ -1727,6 +1726,15 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			// reference resolves — no "flag does not exist in C" marker.
 			name: "CTE with implicit alias on CASE…END",
 			sql:  `WITH c AS (SELECT ID, CASE WHEN ID>0 THEN 1 ELSE 0 END flag FROM t) SELECT c.flag FROM c`,
+		},
+		{
+			// PR #917 review: a CTE select list mixing nameable items with an
+			// unaliased expression yields a *partial* projection — it must leave
+			// the CTE unknown, not register the partial list (which would flag
+			// EMAIL, a real source column, as missing).
+			name: "CTE with a partly underivable projection is unknown",
+			sql: "CREATE TABLE KNOWN_TBL (ID INT, EMAIL VARCHAR);\n" +
+				"WITH C AS (SELECT ID, UPPER(EMAIL) FROM KNOWN_TBL) SELECT C.ID, C.EMAIL FROM C;",
 		},
 	}
 	for _, tt := range validCases {
