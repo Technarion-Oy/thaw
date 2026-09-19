@@ -83,17 +83,41 @@ content-change listener on every character. Diagnostics, git-gutter, and functio
 decoration passes are driven by Monaco `onDidChangeModelContent` (debounced 400/400/200 ms) and
 read `model.getValue()` directly, so they never depend on a React re-render.
 
-**Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts)`
-(module-level) resolves a dotted identifier under the cursor to a store object of **any** kind
-(not just TABLE/VIEW), fetching the schema's objects on demand. On a name collision across
-namespaces (e.g. a stream named after its source table) it prefers the TABLE/VIEW — a heuristic
-tie-break, since hover has no parse context. `editor.onMouseMove` uses it via the shared
+**Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts,
+session, useCtx)` (module-level) resolves a dotted identifier under the cursor to a store object
+of **any** kind (not just TABLE/VIEW).
+
+The matching rules live in the backend — `sqleditor.ResolveStoreObject` qualifies the name from
+`useCtx` then `session` and matches strictly, so it resolves only where Snowflake would: 1-part →
+context db + schema, 2-part → context db + written schema, 3-part → all three written parts
+(#918). Without that scoping any bare name colliding with something the sidebar happened to have
+loaded — or a temp table the script creates but has never run — got an underline whose DDL fetch
+then failed or showed a *different* object.
+
+This wrapper adds only the frontend's half. It pre-filters `objectStore` to objects whose name
+equals the last part (the whole store would otherwise cross the Wails bridge on every mouse-move
+while the modifier is held), and when the backend reports a miss with a `fetchDb`/`fetchSchema`
+hint it runs `ensureSchemaObjectsLoaded` for that namespace and asks once more. `session` is the
+caller's own `editorSession()`, so a split pane resolves against its own tab context (#717).
+`useCtx` comes from `useContextAt(pos)` — `GetUseContextAt` memoized per (model version, line) —
+so a worksheet that opens with `USE SCHEMA X` links its bare names before it has ever been run,
+matching the precedence diagnostics already apply. The TABLE/VIEW preference on a
+within-namespace collision, the excluded callable kinds, and the untracked `SEARCH_PATH` ceiling
+are documented on the Go function.
+
+`editor.onMouseMove` uses it via the shared
 `showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
 (`withDdl=false` → header-only `KIND — DB.SCHEMA.NAME`, no DDL fetch); with the platform modifier
 (`metaKey`/`ctrlKey`) held, `withDdl=true` fetches `GetObjectDDL(db, schema, kind, name, "")` and
 renders the full DDL — no click. Kinds `GET_DDL` can't render (`kindSupportsDdl` from
 `utils/objectDdl.ts`) get no underline and fall back to the identity tooltip; a failed/empty fetch
-also falls back to identity (not cached, so a re-hover retries). `cmdModHeld` tracks the modifier
+also falls back to identity (not cached, so a re-hover retries). A fetch that fails with Snowflake's
+`does not exist or not authorized` means the store entry is stale — that object is evicted via
+`objectStore.removeObject(db, schema, name, kind)` (kind included, so a same-named STREAM and
+TABLE in one schema are evicted independently) and the underline cleared, so the doomed
+`GET_DDL` is never re-fired. Snowflake does not distinguish the two halves of that error, so a
+listed object the current role has merely lost access to is evicted the same way as a dropped
+one; re-expanding the schema in the sidebar re-adds whatever is still visible. `cmdModHeld` tracks the modifier
 from mouse-move events and from **document-level** `keydown`/`keyup` listeners (`onModChange`) —
 Monaco's `editor.onKeyDown` only fires while the hidden textarea is focused, which hover never is, so
 document listeners (gated on `lastSqlMousePos`) are what make "press the modifier while stationary

@@ -138,6 +138,21 @@ func (s *Service) ResolveTableRefs(refs []JoinTableRef, storeObjects []StoreObje
 	return ResolveTableRefs(refs, storeObjects, useCtx, session)
 }
 
+// ResolveStoreObject resolves the dotted identifier under the editor cursor to a
+// known store object of any kind, scoped to the namespace the name would really
+// resolve against. Backs the hover identity tooltip and its cmd/ctrl DDL link; a
+// miss names the schema the caller should load on demand before retrying.
+func (s *Service) ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
+	return ResolveStoreObject(parts, storeObjects, useCtx, session)
+}
+
+// GetUseContextAt returns the in-script USE DATABASE/SCHEMA context in effect at
+// cursorOffset. The hover path resolves names against it so a not-yet-run
+// worksheet that opens with USE SCHEMA X still links its bare names.
+func (s *Service) GetUseContextAt(sql string, cursorOffset int) *UseContext {
+	return UseContextAt(sql, cursorOffset)
+}
+
 // GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
 func (s *Service) GetSnowflakeKeywords() []string {
 	return snowflake.ReservedKeywords()

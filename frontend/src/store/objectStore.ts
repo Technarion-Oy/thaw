@@ -27,6 +27,9 @@ interface ObjectState {
   removeDatabase: (db: string) => void;
   // Removes a schema and all its objects (used after DROP SCHEMA).
   removeSchema: (db: string, schema: string) => void;
+  // Removes one object (used to evict a stale entry when GET_DDL reports it gone, #918).
+  // Matches on kind too: a TABLE and a STREAM can share a name in one schema.
+  removeObject: (db: string, schema: string, name: string, kind: string) => void;
 }
 
 export const useObjectStore = create<ObjectState>((set) => ({
@@ -70,5 +73,11 @@ export const useObjectStore = create<ObjectState>((set) => ({
     set((s) => ({
       schemas: s.schemas.filter((x) => !(x.db === db && x.name === schema)),
       objects: s.objects.filter((x) => !(x.db === db && x.schema === schema)),
+    })),
+
+  removeObject: (db, schema, name, kind) =>
+    set((s) => ({
+      objects: s.objects.filter(
+        (x) => !(x.db === db && x.schema === schema && x.name === name && x.kind === kind)),
     })),
 }));

@@ -24,9 +24,13 @@ export function GetSnowflakeKeywords():Promise<Array<string>>;
 
 export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
 
+export function GetUseContextAt(arg1:string,arg2:number):Promise<sqleditor.UseContext>;
+
 export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTableRef>>;
 
 export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
+
+export function ResolveStoreObject(arg1:Array<string>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<sqleditor.HoverObject>;
 
 export function ResolveTableRefs(arg1:Array<sqleditor.JoinTableRef>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<Array<sqleditor.ResolvedRef>>;
 

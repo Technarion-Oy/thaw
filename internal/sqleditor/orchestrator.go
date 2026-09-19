@@ -359,34 +359,15 @@ func schemaKnown(schemas []SchemaEntry, db, schema string) bool {
 // objectKnown reports whether db.schema.name appears in the fetched object list
 // (any kind — matching the editor's table-typo guard, which ignores kind).
 func objectKnown(objects []StoreObject, db, schema, name string) bool {
-	for _, o := range objects {
-		if strings.EqualFold(o.DB, db) && strings.EqualFold(o.Schema, schema) && strings.EqualFold(o.Name, name) {
-			return true
-		}
-	}
-	return false
+	_, ok := findStoreObject(objects, JoinTableRef{DB: db, Schema: schema, Name: name}, nil)
+	return ok
 }
 
 // findTableView resolves an unqualified/partial ref against the fetched objects,
 // matching only TABLE/VIEW kinds by name (and by db/schema when the ref supplies
 // them). Mirrors the editor's storeObjs.find in runDiagnostics.
 func findTableView(objects []StoreObject, ref JoinTableRef) (StoreObject, bool) {
-	for _, o := range objects {
-		if !strings.EqualFold(o.Kind, "TABLE") && !strings.EqualFold(o.Kind, "VIEW") {
-			continue
-		}
-		if !strings.EqualFold(o.Name, ref.Name) {
-			continue
-		}
-		if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
-			continue
-		}
-		if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
-			continue
-		}
-		return o, true
-	}
-	return StoreObject{}, false
+	return findStoreObject(objects, ref, isTableOrView)
 }
 
 // tableViewRefs converts fetched TABLE/VIEW objects to ResolvedRefs for
@@ -394,7 +375,7 @@ func findTableView(objects []StoreObject, ref JoinTableRef) (StoreObject, bool) 
 func tableViewRefs(objects []StoreObject) []ResolvedRef {
 	var out []ResolvedRef
 	for _, o := range objects {
-		if !strings.EqualFold(o.Kind, "TABLE") && !strings.EqualFold(o.Kind, "VIEW") {
+		if !isTableOrView(o.Kind) {
 			continue
 		}
 		out = append(out, ResolvedRef{DB: o.DB, Schema: o.Schema, Name: o.Name})
