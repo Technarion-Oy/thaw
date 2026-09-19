@@ -3,6 +3,7 @@
 package sqleditor
 
 import (
+	"slices"
 	"strings"
 
 	sf "thaw/internal/snowflake"
@@ -85,7 +86,9 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		use = use.apply(sig, raw)
 
 		rawPath, parenOff, ok := matchCreateTablePre(sig, raw)
-		if registerCTAS(localColCache, sig, raw, use, ic) {
+		if rawPath != "" && !ok {
+			// CREATE TABLE with no column block: a CTAS, or nothing we cache.
+			registerCTAS(localColCache, rawPath, sig, raw, use, ic)
 			continue
 		}
 		if !ok {
@@ -193,16 +196,31 @@ func (u scriptUse) apply(sig []sqltok.Token, sql string) scriptUse {
 // (with the prefix folded into the db part, which never equals a real db) —
 // applyAlterAddToLocalCache's alias-key discovery depends on that.
 func (u scriptUse) key(db, schema, name string) string {
+	db, schema = u.qualify(db, schema)
+	// Parts are used as normalized by the caller (case kept for a quoted name
+	// when quoted identifiers are case-sensitive), matching the 1/2/3-part keys
+	// so applyAlterAddToLocalCache's alias-key discovery sees this key too.
+	return "\x01" + bcrCacheKey(db, schema, name)
+}
+
+// qualify fills a reference's unknown db/schema parts from the USE context.
+func (u scriptUse) qualify(db, schema string) (string, string) {
 	if schema == "" {
 		schema = u.schema
 	}
 	if db == "" {
 		db = u.db
 	}
-	// Parts are used as normalized by the caller (case kept for a quoted name
-	// when quoted identifiers are case-sensitive), matching the 1/2/3-part keys
-	// so applyAlterAddToLocalCache's alias-key discovery sees this key too.
-	return "\x01" + db + "\x00" + schema + "\x00" + name
+	return db, schema
+}
+
+// splitScriptKey reverses scriptUse.key; ok is false for any other key shape.
+func splitScriptKey(k string) (db, schema, name string, ok bool) {
+	db, schema, name, ok = splitBcrCacheKey(k)
+	if !ok || !strings.HasPrefix(db, "\x01") {
+		return "", "", "", false
+	}
+	return db[1:], schema, name, true
 }
 
 // scriptMatch classifies how a reference relates to the tables created in-script.
@@ -265,17 +283,14 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 // catches it before the bare-key fallback.
 // ponytail: O(tables) scan per exact-key miss; index keys by name if slow.
 func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db, schema, name string) (cols []ColInfo, found bool) {
-	want := strings.SplitN(use.key(db, schema, name)[1:], "\x00", 3)
+	wantDB, wantSchema := use.qualify(db, schema)
 	for k, c := range localColCache {
-		if !strings.HasPrefix(k, "\x01") {
+		gotDB, gotSchema, gotName, ok := splitScriptKey(k)
+		if !ok || gotName != name ||
+			gotDB != "" && gotDB != wantDB || gotSchema != "" && gotSchema != wantSchema {
 			continue
 		}
-		got := strings.SplitN(k[1:], "\x00", 3)
-		if len(got) != 3 || got[2] != name ||
-			got[0] != "" && got[0] != want[0] || got[1] != "" && got[1] != want[1] {
-			continue
-		}
-		if found && !sameColSlice(cols, c) {
+		if found && !sameCols(cols, c) {
 			return nil, true
 		}
 		cols, found = c, true
@@ -291,13 +306,10 @@ func ambiguousScriptName(localColCache map[string][]ColInfo, name string) bool {
 	var first []ColInfo
 	seen := false
 	for k, c := range localColCache {
-		if !strings.HasPrefix(k, "\x01") {
+		if _, _, gotName, ok := splitScriptKey(k); !ok || gotName != name {
 			continue
 		}
-		if got := strings.SplitN(k[1:], "\x00", 3); len(got) != 3 || got[2] != name {
-			continue
-		}
-		if seen && !sameColSlice(first, c) {
+		if seen && !sameCols(first, c) {
 			return true
 		}
 		first, seen = c, true
@@ -307,14 +319,7 @@ func ambiguousScriptName(localColCache map[string][]ColInfo, name string) bool {
 
 // keyParts is key for a normalized 1/2/3-part path.
 func (u scriptUse) keyParts(parts []string) string {
-	var db, schema string
-	if len(parts) >= 2 {
-		schema = parts[len(parts)-2]
-	}
-	if len(parts) >= 3 {
-		db = parts[len(parts)-3]
-	}
-	return u.key(db, schema, parts[len(parts)-1])
+	return u.key(partAt(parts, 3), partAt(parts, 2), partAt(parts, 1))
 }
 
 // storeLocalCols records an in-script table's columns under its 1-part
@@ -676,15 +681,21 @@ func applyAlterAddToLocalCache(tablePath string, cols []ColInfo, localColCache m
 
 // tableOnlyScope re-keys localColCache's table-only entries by bare table name —
 // the scope shape extractCTEProjections uses — so a CTE over an earlier in-script
-// table (`WITH c AS (SELECT * FROM a)`) derives its columns here too.
+// table (`WITH c AS (SELECT * FROM a)`) derives its columns here too. Columns come
+// from scriptTable, not from the bare key directly: a CTE's `SELECT *` over an
+// ambiguously-named in-script table must be unknown (nil) rather than the
+// last-created table's columns (PR #917 review).
 // ponytail: rebuilt per statement containing WITH, O(tables) each; maintain it
 // incrementally (in sync with ALTER merges) if WITH-heavy scripts get slow.
-func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
+func tableOnlyScope(localColCache map[string][]ColInfo, use scriptUse) map[string][]ColInfo {
 	scope := make(map[string][]ColInfo)
-	for k, cols := range localColCache {
-		if db, schema, table, ok := splitBcrCacheKey(k); ok && db == "" && schema == "" {
-			scope[strings.ToUpper(table)] = cols
+	for k := range localColCache {
+		db, schema, table, ok := splitBcrCacheKey(k)
+		if !ok || db != "" || schema != "" {
+			continue
 		}
+		cols, _ := scriptTable(localColCache, use, "", "", table)
+		scope[strings.ToUpper(table)] = cols
 	}
 	return scope
 }
@@ -692,20 +703,21 @@ func tableOnlyScope(localColCache map[string][]ColInfo) map[string][]ColInfo {
 // registerCTAS records a CREATE TABLE … AS SELECT in localColCache with its
 // projected columns (nil when underivable), so the in-script table shadows a
 // same-named catalog table (issue #916). Shared by both validators so the
-// registration can't drift between them; reports whether sig is a CTAS. The
-// body is read through the statement's own tokens — no re-tokenizing.
-func registerCTAS(localColCache map[string][]ColInfo, sig []sqltok.Token, raw string, use scriptUse, ic bool) bool {
-	path, bodyOff, ok := matchCreateTableAs(sig, raw)
-	if !ok {
-		return false
+// registration can't drift between them. path is the table path the caller's
+// matchCreateTablePre already found (with no column block, so an AS body makes
+// it a CTAS); the body is read through the statement's own tokens — no
+// re-matching, no re-tokenizing.
+func registerCTAS(localColCache map[string][]ColInfo, path string, sig []sqltok.Token, raw string, use scriptUse, ic bool) {
+	asIdx := createBodyAsIdx(sig, raw)
+	if asIdx < 0 || asIdx+1 >= len(sig) {
+		return
 	}
 	parts := extractIdentParts(path, ic)
 	if len(parts) == 0 {
-		return true
+		return
 	}
-	body := sig[sigIndexAtOffset(sig, bodyOff):]
+	body, bodyOff := sig[asIdx+1:], sig[asIdx+1].Start
 	storeLocalCols(localColCache, parts, use, ctasColumns(raw[bodyOff:], body, raw, ctasScope(body, raw, localColCache, use, ic)))
-	return true
 }
 
 // ctasScope is the projection scope for a CTAS body (sig over sql): each FROM/JOIN
@@ -761,6 +773,14 @@ func mergeAddedCols(existing, added []ColInfo) []ColInfo {
 // unknown" sentinel.
 func sameColSlice(a, b []ColInfo) bool {
 	return len(a) == len(b) && cap(a) > 0 && cap(b) > 0 && &a[:1][0] == &b[:1][0]
+}
+
+// sameCols reports whether two cache entries describe the same columns by
+// value — two independently created same-named tables with identical columns
+// aren't ambiguous. nil ("columns unknown") stays distinct from a known empty
+// set (PR #917 review).
+func sameCols(a, b []ColInfo) bool {
+	return (a == nil) == (b == nil) && slices.Equal(a, b)
 }
 
 // parsedCols is the cache entry for a CREATE TABLE's parsed column list: never

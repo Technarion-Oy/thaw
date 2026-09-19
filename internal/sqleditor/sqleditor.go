@@ -2788,8 +2788,9 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		use = use.apply(rawSig, raw)
 
 		// 1. Update localColCache if this is a CREATE TABLE
-		if nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw); ok {
-			parts := extractIdentParts(nameStr, true)
+		ctPath, parenStart, ctHasCols := matchCreateTablePre(rawSig, raw)
+		if ctHasCols {
+			parts := extractIdentParts(ctPath, true)
 			if len(parts) > 0 {
 				colsRaw := extractBalancedBlock(raw, parenStart)
 				if len(colsRaw) >= 2 {
@@ -2806,7 +2807,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		// 2. CTE projections in this statement
 		var cteProjMap map[string][]ColInfo
 		if strings.Contains(strings.ToUpper(stripped), "WITH") {
-			cteProjMap = extractCTEProjections(stripped, tableOnlyScope(localColCache))
+			cteProjMap = extractCTEProjections(stripped, tableOnlyScope(localColCache, use))
 		}
 
 		// 3. Build stmtContext
@@ -2985,7 +2986,9 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 
 		// Register a CTAS after this statement's own context is built, so its
 		// source query still sees the pre-existing tables.
-		registerCTAS(localColCache, rawSig, raw, use, true)
+		if ctPath != "" && !ctHasCols {
+			registerCTAS(localColCache, ctPath, rawSig, raw, use, true)
+		}
 	}
 
 	runes := []rune(sql)

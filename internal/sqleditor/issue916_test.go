@@ -367,3 +367,26 @@ func TestIssue916_InlineReviewRound(t *testing.T) {
 		}
 	}
 }
+
+// PR #917 review round: the CTE projection scope must apply the same shadowing
+// rule as the direct path, and ambiguity must be decided by column *values*.
+func TestIssue916_ReviewRound2(t *testing.T) {
+	for _, tc := range []struct{ name, sql, want string }{
+		// A CTE's `SELECT *` over an ambiguously-named in-script table takes the
+		// last-created table's columns no more than a direct reference does.
+		{"cte-ambiguous-source", "CREATE TABLE a.loc_t(x INT);\nCREATE TABLE b.loc_t(y INT);\n" +
+			"WITH c AS (SELECT * FROM loc_t) SELECT c.x FROM c;", ""},
+		// Two same-named in-script tables with identical columns aren't ambiguous:
+		// either one answers the reference, so validation still runs.
+		{"same-cols-not-ambiguous", "CREATE TABLE a.loc_t(x INT);\nCREATE TABLE b.loc_t(x INT);\n" +
+			"SELECT t.x, t.typo FROM loc_t t;", "'typo'"},
+	} {
+		markers := ValidateSemantics(tc.sql, nil, nil)
+		switch {
+		case tc.want == "" && len(markers) > 0:
+			t.Errorf("%s: want no markers, got %+v", tc.name, markers)
+		case tc.want != "" && (len(markers) != 1 || !strings.Contains(markers[0].Message, tc.want)):
+			t.Errorf("%s: want one marker for %s, got %+v", tc.name, tc.want, markers)
+		}
+	}
+}

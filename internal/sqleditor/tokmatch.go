@@ -829,21 +829,6 @@ func matchCreateTablePre(sig []sqltok.Token, sql string) (rawPath string, parenO
 	return
 }
 
-// matchCreateTableAs matches a CREATE TABLE … AS <query> (CTAS) with no column
-// block — `CREATE [OR REPLACE] TABLE <path> [options] AS SELECT …` — and returns
-// the raw table path and the byte offset of the query after AS.
-func matchCreateTableAs(sig []sqltok.Token, sql string) (rawPath string, bodyOff int, ok bool) {
-	rawPath, _, hasCols := matchCreateTablePre(sig, sql)
-	if rawPath == "" || hasCols {
-		return "", 0, false
-	}
-	asIdx := createBodyAsIdx(sig, sql)
-	if asIdx < 0 || asIdx+1 >= len(sig) {
-		return "", 0, false
-	}
-	return rawPath, sig[asIdx+1].Start, true
-}
-
 // createBodyAsIdx returns the index in sig of the first depth-0 AS of a CREATE
 // statement — the keyword separating the object header (name, WAREHOUSE = …,
 // SCHEDULE = …, TARGET_LAG = …) from its body — or -1.
