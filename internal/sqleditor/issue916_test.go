@@ -390,3 +390,41 @@ func TestIssue916_ReviewRound2(t *testing.T) {
 		}
 	}
 }
+
+// PR #917 review: a bare in-script table must not shadow an unrelated
+// fully-qualified reference of the same name, in either direction — neither by
+// wildcard-matching it across a USE context (scriptTableAcrossUse), nor by
+// making the qualified catalog lookup bail out (scriptTable/shadows).
+func TestIssue916_FullyQualifiedRefNotShadowedByBareLocal(t *testing.T) {
+	cols := []ColEntry{
+		{DB: "DB", Schema: "SCH", Name: "EMPLOYEES", Cols: []ColInfo{{Name: "FIRST_NAME"}}},
+		{DB: "CAT", Schema: "SCH", Name: "ORDERS", Cols: []ColInfo{{Name: "COL1"}}},
+	}
+
+	// A real catalog column of a fully-qualified table stays valid even though a
+	// bare in-script table shares its name (the create-time unknown db/schema
+	// must not wildcard-match an explicit qualification).
+	sql := "CREATE TABLE EMPLOYEES (X INT);\nSELECT FIRST_NAME FROM DB.SCH.EMPLOYEES;"
+	for _, m := range ValidateSemantics(sql, nil, cols) {
+		t.Errorf("unexpected marker line %d: %s", m.StartLineNumber, m.Message)
+	}
+
+	// And the reverse failure: a same-bare-name in-script table under another
+	// schema must not disable validation of the fully-qualified reference.
+	req := ValidateBareColsRequest{ColEntries: cols}
+	req.SQL = "CREATE TABLE OTHER.ORDERS (Y INT);\nINSERT INTO CAT.SCH.ORDERS (COL1, MISSING_COL) VALUES (1, 2);"
+	req.StmtRanges = GetStatementRanges(req.SQL)
+	w := getWarnings(ValidateBareColumnRefs(req))
+	if len(w) != 1 || !strings.Contains(w[0].Message, "MISSING_COL") {
+		t.Errorf("want one warning for MISSING_COL, got %+v", w)
+	}
+
+	// ValidateSemantics' stronger blast radius: the collision must not disable
+	// bare-column validation for the whole statement.
+	sql = "CREATE TABLE STAGING.EMPLOYEES (Y INT);\n" +
+		"SELECT FIRST_NAME, TYPO_COL FROM DB.SCH.EMPLOYEES;"
+	markers := ValidateSemantics(sql, nil, cols)
+	if len(markers) != 1 || !strings.Contains(markers[0].Message, "TYPO_COL") {
+		t.Errorf("want one marker for TYPO_COL, got %+v", markers)
+	}
+}

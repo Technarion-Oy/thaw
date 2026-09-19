@@ -255,6 +255,12 @@ func scriptTable(localColCache map[string][]ColInfo, use scriptUse, db, schema, 
 	switch {
 	case !ok:
 		return nil, noScriptTable
+	case db != "" && schema != "":
+		// Fully qualified: the exact and across-USE keys tried above are the only
+		// ways an in-script table can be this one. Another in-script table merely
+		// sharing the bare name is a different object, and must not stop the
+		// caller's exact catalog lookup for this path (PR #917 review).
+		return nil, noScriptTable
 	case schema == "" && use.schema == "":
 		if ambiguousScriptName(localColCache, name) {
 			// Several in-script tables share this name under different
@@ -287,7 +293,7 @@ func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db,
 	for k, c := range localColCache {
 		gotDB, gotSchema, gotName, ok := splitScriptKey(k)
 		if !ok || gotName != name ||
-			gotDB != "" && gotDB != wantDB || gotSchema != "" && gotSchema != wantSchema {
+			!acrossUsePart(gotDB, db, wantDB) || !acrossUsePart(gotSchema, schema, wantSchema) {
 			continue
 		}
 		if found && !sameCols(cols, c) {
@@ -296,6 +302,19 @@ func scriptTableAcrossUse(localColCache map[string][]ColInfo, use scriptUse, db,
 		cols, found = c, true
 	}
 	return cols, found
+}
+
+// acrossUsePart matches one path part of an in-script table (got, as stored at
+// create time) against a reference's. An unknown stored part ("" = whatever the
+// session default was when the table was created) may be the context a later
+// USE selected, so it matches only a part the reference leaves unwritten (want
+// then comes from the USE context) — never one the reference spells out, which
+// names a specific object the in-script table has no claim on (PR #917 review).
+func acrossUsePart(got, ref, want string) bool {
+	if got == "" {
+		return ref == ""
+	}
+	return got == want
 }
 
 // ambiguousScriptName reports whether the script created more than one table
@@ -705,8 +724,10 @@ func tableOnlyScope(localColCache map[string][]ColInfo, use scriptUse) map[strin
 // same-named catalog table (issue #916). Shared by both validators so the
 // registration can't drift between them. path is the table path the caller's
 // matchCreateTablePre already found (with no column block, so an AS body makes
-// it a CTAS); the body is read through the statement's own tokens — no
-// re-matching, no re-tokenizing.
+// it a CTAS); the body is located through the statement's own tokens — no
+// re-matching. ctasColumns then hands the body text to extractSelectProjections,
+// which strips comments and retokenizes it (offsets shift, so this statement's
+// tokens can't be reused there) — O(1) per CTAS statement (PR #917 review).
 func registerCTAS(localColCache map[string][]ColInfo, path string, sig []sqltok.Token, raw string, use scriptUse, ic bool) {
 	asIdx := createBodyAsIdx(sig, raw)
 	if asIdx < 0 || asIdx+1 >= len(sig) {
@@ -800,12 +821,14 @@ func parsedCols(cols []ColInfo) []ColInfo {
 // Returns (nil, false) if the table is not found in either cache, which
 // triggers the caller to skip column validation for that statement.
 func lookupColsForRef(
-	name, alias, db, schema string,
+	name, db, schema string,
 	resolvedRefs []ResolvedRef,
 	colInfoCache, localColCache map[string][]ColInfo, use scriptUse,
 	checkEq func(string, string) bool,
 ) ([]ColInfo, bool) {
-	cols, found, _ := lookupColsForRefTagged(name, alias, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+	// Its call sites are unaliased single-table statements (INSERT INTO t …,
+	// CREATE … REFERENCES t), so the alias is always "".
+	cols, found, _ := lookupColsForRefTagged(name, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	return cols, found
 }
 
@@ -894,7 +917,7 @@ func validateInsertCols(
 		schema = parts[0]
 	}
 
-	cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+	cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 	if !ok {
 		return nil // Table not in cache; skip to avoid false-positives.
 	}
@@ -946,7 +969,7 @@ func validateReferencesCols(
 			schema = parts[0]
 		}
 
-		cols, ok := lookupColsForRef(tableName, "", db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
+		cols, ok := lookupColsForRef(tableName, db, schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !ok {
 			continue
 		}
@@ -1261,8 +1284,11 @@ func validateSelectCols(
 	// metaCols: columns from Snowflake metadata — uppercased (case-insensitive matching).
 	// localCols: columns from in-script CREATE TABLE — as-is from normIdent
 	// (case-sensitive for quoted, uppercase for bare).
+	// aliasMap is filled in the same pass, so qualified alias.column refs cost
+	// no second FROM/JOIN scan and no second lookup per source (PR #917 review).
 	metaCols := make(map[string]struct{})
 	localCols := make(map[string]struct{})
+	aliasMap := make(map[string]*aliasColSets)
 	for _, t := range tables {
 		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.alias, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
 		if !found {
@@ -1271,17 +1297,29 @@ func validateSelectCols(
 			// skip the statement — as ValidateSemantics does (issue #916).
 			return nil
 		}
-		if fromLocal {
-			for _, c := range cols {
-				key := c.Name
-				if ic {
-					key = strings.ToUpper(key)
+		// Filter out SQL keywords the matcher may capture as aliases.
+		var sets *aliasColSets
+		if aliasU := strings.ToUpper(t.alias); aliasU != "" && !joinStopKW[aliasU] {
+			sets = &aliasColSets{meta: make(map[string]struct{}), local: make(map[string]struct{})}
+			aliasMap[aliasU] = sets
+		}
+		for _, c := range cols {
+			if !fromLocal {
+				key := strings.ToUpper(c.Name)
+				metaCols[key] = struct{}{}
+				if sets != nil {
+					sets.meta[key] = struct{}{}
 				}
-				localCols[key] = struct{}{}
+				continue
 			}
-		} else {
-			for _, c := range cols {
-				metaCols[strings.ToUpper(c.Name)] = struct{}{}
+			// Local columns keep normIdent's case (case-sensitive when quoted).
+			key := c.Name
+			if ic {
+				key = strings.ToUpper(key)
+			}
+			localCols[key] = struct{}{}
+			if sets != nil {
+				sets.local[key] = struct{}{}
 			}
 		}
 	}
@@ -1313,53 +1351,8 @@ func validateSelectCols(
 	// Also validate qualified column refs (alias.column) for aliases whose
 	// tables are in the column cache.  Build alias → per-table column sets.
 	// Skip when there is no FROM clause — no aliases to check.
-	if !noFromClause {
-		aliasMap := make(map[string]*aliasColSets)
-		for _, ta := range findFromJoinWithAlias(strippedSig, stripped) {
-			rawAlias := ta.alias
-			if rawAlias == "" {
-				continue
-			}
-			aliasU := strings.ToUpper(normIdent(rawAlias, ic))
-			// Filter out SQL keywords that the matcher may capture as aliases.
-			if joinStopKW[aliasU] {
-				continue
-			}
-			parts := extractIdentParts(ta.tablePath, ic)
-			var tRef struct{ db, schema, name string }
-			switch len(parts) {
-			case 3:
-				tRef = struct{ db, schema, name string }{parts[0], parts[1], parts[2]}
-			case 2:
-				tRef = struct{ db, schema, name string }{"", parts[0], parts[1]}
-			case 1:
-				tRef = struct{ db, schema, name string }{"", "", parts[0]}
-			default:
-				continue
-			}
-			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, aliasU, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, use, checkEq)
-			if !found {
-				continue // Table not cached; cannot validate — skip to avoid false positives.
-			}
-			sets := &aliasColSets{meta: make(map[string]struct{}), local: make(map[string]struct{})}
-			if fromLocal {
-				for _, c := range cols {
-					key := c.Name
-					if ic {
-						key = strings.ToUpper(key)
-					}
-					sets.local[key] = struct{}{}
-				}
-			} else {
-				for _, c := range cols {
-					sets.meta[strings.ToUpper(c.Name)] = struct{}{}
-				}
-			}
-			aliasMap[aliasU] = sets
-		}
-		if len(aliasMap) > 0 {
-			missing = append(missing, scanAliasedColRefs(selectClause, aliasMap, ic)...)
-		}
+	if !noFromClause && len(aliasMap) > 0 {
+		missing = append(missing, scanAliasedColRefs(selectClause, aliasMap, ic)...)
 	}
 
 	if len(missing) == 0 {
