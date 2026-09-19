@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines, objectNamespaceMatch } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -163,5 +163,40 @@ describe("gitDiffLines", () => {
   it("keeps interior and trailing blank lines beyond the terminator", () => {
     expect(gitDiffLines("a\n\nb\n")).toEqual(["a", "", "b"]);
     expect(gitDiffLines("a\n\n")).toEqual(["a", ""]);
+  });
+});
+
+describe("objectNamespaceMatch", () => {
+  const sess = { database: "ANALYTICS", schema: "PUBLIC" };
+  const obj = (db: string, schema: string, name: string) => ({ db, schema, name });
+  const hit = (parts: string[], o: { db: string; schema: string; name: string }, s = sess) => {
+    const m = objectNamespaceMatch(parts, s);
+    return m ? m(o) : null;
+  };
+
+  it("1-part matches only inside the session db+schema", () => {
+    expect(hit(["ORDERS"], obj("ANALYTICS", "PUBLIC", "ORDERS"))).toBe(true);
+    expect(hit(["orders"], obj("ANALYTICS", "PUBLIC", "ORDERS"))).toBe(true);   // case-folded
+    expect(hit(["ORDERS"], obj("ANALYTICS", "RAW", "ORDERS"))).toBe(false);     // other schema
+    expect(hit(["ORDERS"], obj("OTHER", "PUBLIC", "ORDERS"))).toBe(false);      // other db
+  });
+
+  it("2-part matches the written schema inside the session db", () => {
+    expect(hit(["RAW", "ORDERS"], obj("ANALYTICS", "RAW", "ORDERS"))).toBe(true);
+    expect(hit(["RAW", "ORDERS"], obj("OTHER", "RAW", "ORDERS"))).toBe(false);  // other db
+    expect(hit(["RAW", "ORDERS"], obj("ANALYTICS", "PUBLIC", "ORDERS"))).toBe(false);
+  });
+
+  it("3-part matches all three written parts, session-independent", () => {
+    const parts = ["OTHER", "RAW", "ORDERS"];
+    expect(hit(parts, obj("OTHER", "RAW", "ORDERS"))).toBe(true);
+    expect(hit(parts, obj("ANALYTICS", "RAW", "ORDERS"))).toBe(false);
+    expect(hit(parts, obj("OTHER", "RAW", "ORDERS"), { database: "", schema: "" })).toBe(true);
+  });
+
+  it("returns null when the session context needed to resolve is missing", () => {
+    expect(objectNamespaceMatch(["ORDERS"], { database: "ANALYTICS", schema: "" })).toBeNull();
+    expect(objectNamespaceMatch(["RAW", "ORDERS"], { database: "", schema: "PUBLIC" })).toBeNull();
+    expect(objectNamespaceMatch([], sess)).toBeNull();
   });
 });

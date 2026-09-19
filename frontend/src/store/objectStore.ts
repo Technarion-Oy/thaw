@@ -27,6 +27,8 @@ interface ObjectState {
   removeDatabase: (db: string) => void;
   // Removes a schema and all its objects (used after DROP SCHEMA).
   removeSchema: (db: string, schema: string) => void;
+  // Removes one object (used to evict a stale entry when GET_DDL reports it gone, #918).
+  removeObject: (db: string, schema: string, name: string) => void;
 }
 
 export const useObjectStore = create<ObjectState>((set) => ({
@@ -70,5 +72,10 @@ export const useObjectStore = create<ObjectState>((set) => ({
     set((s) => ({
       schemas: s.schemas.filter((x) => !(x.db === db && x.name === schema)),
       objects: s.objects.filter((x) => !(x.db === db && x.schema === schema)),
+    })),
+
+  removeObject: (db, schema, name) =>
+    set((s) => ({
+      objects: s.objects.filter((x) => !(x.db === db && x.schema === schema && x.name === name)),
     })),
 }));

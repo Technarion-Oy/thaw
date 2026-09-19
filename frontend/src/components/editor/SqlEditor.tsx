@@ -31,7 +31,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines, objectNamespaceMatch,} from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -151,16 +151,27 @@ const RESOLVE_EXCLUDED_KINDS = new Set([
 ]);
 
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
-// object in the store — ANY kind, not just TABLE/VIEW. Fetches the schema's
+// object in the store — ANY kind, not just TABLE/VIEW. The match is scoped to the
+// namespace the name would actually resolve against (objectNamespaceMatch, #918),
+// so a name is linkable only when it is really listed there. Fetches that schema's
 // objects on demand if not yet cached. Returns null if no object matches.
+// `session` is the caller's OWN tab session (split panes differ, #717).
 // The store `kind` is passed straight through so callers never guess it (a wrong
 // kind makes the gosnowflake driver log every error as noise).
 async function resolveStoreObject(
   parts: string[],
+  session: { database: string; schema: string },
 ): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
-  const pick = (o: { db: string; schema: string; kind: string; name: string }) =>
-    ({ db: o.db, schema: o.schema, kind: o.kind, name: o.name });
-  // A bare name can collide across namespaces (a CDC stream named after its
+  const match = objectNamespaceMatch(parts, session);
+  if (!match) return null;
+  // Schema to load on demand when the store has nothing yet — same namespace the
+  // predicate matches, so a miss after the fetch means the object does not exist.
+  const fetch = parts.length >= 3
+    ? { db: UC(parts[parts.length - 3]), schema: UC(parts[parts.length - 2]) }
+    : parts.length === 2
+      ? { db: session.database, schema: parts[0] }
+      : { db: session.database, schema: session.schema };
+  // Two objects can share a name in one schema (a CDC stream named after its
   // source table, etc.). With no parse context to disambiguate, prefer the
   // table/view — the far more common hover target. ponytail: heuristic tie-break;
   // wrong only when a non-table object shadows a same-named table in one schema.
@@ -174,47 +185,12 @@ async function resolveStoreObject(
     const c = list.filter((o) => !RESOLVE_EXCLUDED_KINDS.has(UC(o.kind)));
     return c.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? c[0] ?? null;
   };
-  // Shared "match in store → fetch schema if missing → re-match" sequence.
-  // `looseMatch` runs first (may match without a db qualifier); if it misses and
-  // a concrete (db, schema) is known, load that schema and match it strictly.
-  const resolveIn = async (
-    looseMatch: (o: { db: string; schema: string; kind: string; name: string }) => boolean,
-    fetch: { db: string; schema: string; name: string } | null,
-  ) => {
-    let inStore = best(useObjectStore.getState().objects.filter(looseMatch));
-    if (!inStore && fetch) {
-      await ensureSchemaObjectsLoaded(fetch.db, fetch.schema);
-      inStore = best(useObjectStore.getState().objects.filter(
-        (o) => UC(o.db) === UC(fetch.db) && UC(o.schema) === UC(fetch.schema) && UC(o.name) === UC(fetch.name)));
-    }
-    return inStore ? pick(inStore) : null;
-  };
-
-  if (parts.length >= 3) {
-    // Fully-qualified in the SQL text → uppercase (Snowflake folds unquoted idents).
-    const [pDb, pSchema, pName] = [parts[parts.length - 3], parts[parts.length - 2], parts[parts.length - 1]];
-    return resolveIn(
-      (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName),
-      { db: UC(pDb), schema: UC(pSchema), name: pName },
-    );
+  let inStore = best(useObjectStore.getState().objects.filter(match));
+  if (!inStore) {
+    await ensureSchemaObjectsLoaded(fetch.db, fetch.schema);
+    inStore = best(useObjectStore.getState().objects.filter(match));
   }
-
-  if (parts.length === 2) {
-    // schema.name — fetch under the case-preserved session database.
-    const [qualifier, pName] = [parts[0], parts[1]];
-    const sessDb = useSessionStore.getState().database;
-    return resolveIn(
-      (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName),
-      sessDb ? { db: sessDb, schema: qualifier, name: pName } : null,
-    );
-  }
-
-  // 1-part, unqualified → case-preserved session database + schema.
-  const sess = useSessionStore.getState();
-  return resolveIn(
-    (o) => UC(o.name) === UC(parts[0]),
-    sess.database && sess.schema ? { db: sess.database, schema: sess.schema, name: parts[0] } : null,
-  );
+  return inStore ? { db: inStore.db, schema: inStore.schema, kind: inStore.kind, name: inStore.name } : null;
 }
 
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────
@@ -2065,7 +2041,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           try {
             ddl = await GetObjectDDL(obj.db, obj.schema, obj.kind, obj.name, "");
             hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
-          } catch { ddl = ""; }   // fall through to identity; don't cache the failure
+          } catch (e) {
+            ddl = "";   // fall through to identity; don't cache the failure
+            // Stale store entry (dropped elsewhere since the sidebar listed it):
+            // evict it so the underline stops coming back and we never re-fire the
+            // doomed GET_DDL. Other errors keep the "re-hover retries" behaviour. (#918)
+            if (/does not exist or not authorized/i.test(String(e))) {
+              useObjectStore.getState().removeObject(obj.db, obj.schema, obj.name);
+              clearCmdLink();
+            }
+          }
         }
       }
       const coords = positionTooltip(pos, ddl ? 320 : 40);
@@ -2098,7 +2083,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         // alias.column is not a linkable object — don't underline it (match the hover flow).
         if (await matchTableAlias(parts)) { if (cmdLinkKey === key) { cmdLinkDecos.clear(); cmdLinkKey = null; } return; }
-        const obj = parts ? await resolveStoreObject(parts) : null;
+        const obj = parts ? await resolveStoreObject(parts, editorSession()) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
         if (!obj || !cmdModHeld || !kindSupportsDdl(obj.kind)) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
         cmdLinkDecos.set([{
@@ -2125,7 +2110,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         // alias.column short-circuits to the column path — never object DDL (match hover flow).
         if (await matchTableAlias(parts)) return;
-        const obj = parts ? await resolveStoreObject(parts) : null;
+        const obj = parts ? await resolveStoreObject(parts, editorSession()) : null;
         // Bail if the modifier was released or the mouse moved off this position
         // mid-await. Compare line/column, not object identity — Monaco hands out a
         // fresh Position on every move even for stationary sub-pixel jitter.
@@ -2338,7 +2323,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // Any object in the store (any kind). Plain hover → identity tooltip
         // (kind + name); with the modifier held → full DDL. No click needed.
-        const obj = await resolveStoreObject(parts);
+        const obj = await resolveStoreObject(parts, editorSession());
         if (obj) {
           const shown = await showObjectTooltip(pos, obj, cmdModHeld);
           // Modifier held over a DDL-capable kind but the fetch failed → unpin the
