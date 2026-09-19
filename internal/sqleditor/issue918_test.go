@@ -2,7 +2,10 @@
 
 package sqleditor
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Issue #918: the editor's cmd/ctrl-hover DDL link must only appear for objects
 // that actually exist in the namespace the hovered name resolves against.
@@ -49,7 +52,7 @@ func TestResolveStoreObjectNamespaceScoping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveStoreObject(tt.parts, objects, tt.session)
+			got := ResolveStoreObject(tt.parts, objects, nil, tt.session)
 			if got.Found != tt.wantFound {
 				t.Fatalf("Found = %v, want %v (%+v)", got.Found, tt.wantFound, got)
 			}
@@ -78,15 +81,61 @@ func TestResolveStoreObjectKindPreference(t *testing.T) {
 		{DB: "D", Schema: "S", Name: "MY_UDF", Kind: "FUNCTION"},
 		{DB: "D", Schema: "S", Name: "MY_PROC", Kind: "PROCEDURE"},
 	}
-	if got := ResolveStoreObject([]string{"ORDERS"}, objects, sess); !got.Found || got.Kind != "TABLE" {
+	if got := ResolveStoreObject([]string{"ORDERS"}, objects, nil, sess); !got.Found || got.Kind != "TABLE" {
 		t.Errorf("ORDERS = %+v, want the TABLE", got)
 	}
-	if got := ResolveStoreObject([]string{"EVENTS"}, objects, sess); !got.Found || got.Kind != "STREAM" {
+	if got := ResolveStoreObject([]string{"EVENTS"}, objects, nil, sess); !got.Found || got.Kind != "STREAM" {
 		t.Errorf("EVENTS = %+v, want the STREAM (only kind present)", got)
 	}
 	for _, n := range []string{"MY_UDF", "MY_PROC"} {
-		if got := ResolveStoreObject([]string{n}, objects, sess); got.Found {
+		if got := ResolveStoreObject([]string{n}, objects, nil, sess); got.Found {
 			t.Errorf("%s resolved to %+v, want no hit (callable kinds are excluded)", n, got)
 		}
+	}
+}
+
+// An in-script USE DATABASE/SCHEMA outranks the tab's session for the qualifier a
+// name omits — the precedence ResolveTableRefs already applies for diagnostics.
+// Before this, a worksheet opening with USE SCHEMA X lost its links for bare
+// names until it was run and the session caught up.
+func TestResolveStoreObjectUseContext(t *testing.T) {
+	objects := []StoreObject{
+		{DB: "ANALYTICS", Schema: "PUBLIC", Name: "ORDERS", Kind: "TABLE"},
+		{DB: "ANALYTICS", Schema: "STAGING", Name: "ORDERS", Kind: "TABLE"},
+		{DB: "OTHER", Schema: "STAGING", Name: "ORDERS", Kind: "TABLE"},
+	}
+	sess := &SessionContext{Database: "ANALYTICS", Schema: "PUBLIC"}
+
+	if got := ResolveStoreObject([]string{"ORDERS"}, objects, &UseContext{Schema: "STAGING"}, sess); !got.Found || got.Schema != "STAGING" {
+		t.Errorf("USE SCHEMA STAGING: got %+v, want ANALYTICS.STAGING", got)
+	}
+	if got := ResolveStoreObject([]string{"ORDERS"}, objects, &UseContext{Database: "OTHER", Schema: "STAGING"}, sess); !got.Found || got.DB != "OTHER" {
+		t.Errorf("USE DATABASE OTHER: got %+v, want OTHER.STAGING", got)
+	}
+	// A partial USE leaves the other half to the session.
+	if got := ResolveStoreObject([]string{"STAGING", "ORDERS"}, objects, &UseContext{Schema: "IGNORED"}, sess); !got.Found || got.DB != "ANALYTICS" {
+		t.Errorf("2-part with USE SCHEMA: got %+v, want the session database", got)
+	}
+	// A fully-qualified name ignores both contexts.
+	if got := ResolveStoreObject([]string{"OTHER", "STAGING", "ORDERS"}, objects, &UseContext{Database: "ANALYTICS"}, sess); !got.Found || got.DB != "OTHER" {
+		t.Errorf("3-part: got %+v, want the written database", got)
+	}
+}
+
+// UseContextAt reports the USE context in effect at a cursor offset: statements
+// before the cursor count, later ones do not.
+func TestUseContextAt(t *testing.T) {
+	sql := "USE SCHEMA STAGING;\nSELECT * FROM ORDERS;\nUSE SCHEMA LATER;\nSELECT 1;"
+	at := func(needle string) *UseContext {
+		return UseContextAt(sql, len([]rune(sql[:strings.Index(sql, needle)])))
+	}
+	if got := at("ORDERS"); got == nil || got.Schema != "STAGING" {
+		t.Errorf("at ORDERS: got %+v, want STAGING", got)
+	}
+	if got := at("SELECT 1"); got == nil || got.Schema != "LATER" {
+		t.Errorf("at SELECT 1: got %+v, want LATER", got)
+	}
+	if got := UseContextAt("SELECT * FROM ORDERS;", 5); got != nil {
+		t.Errorf("no USE statement: got %+v, want nil", got)
 	}
 }

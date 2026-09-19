@@ -3471,26 +3471,15 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 	// Identify which statement contains the cursor. stmtStart is the chosen
 	// statement's start offset, so the cursor's statement-local offset (for the
 	// grammar) is cursorOffset - stmtStart.
-	currentIdx := -1
+	currentIdx := currentStatementIdx(ranges, cursorOffset)
 	currentStmt := sql
 	stmtStart := 0
-	for i, r := range ranges {
-		if cursorOffset >= r.StartOffset && cursorOffset <= r.EndOffset {
-			currentIdx = i
-			stmtStart = r.StartOffset
-			runes := []rune(sql)
-			currentStmt = string(runes[r.StartOffset:r.EndOffset])
-			break
-		}
-	}
-	// If cursor is past all ranges, use the last statement.
-	if currentIdx == -1 && len(ranges) > 0 {
-		last := ranges[len(ranges)-1]
-		currentIdx = len(ranges) - 1
-		stmtStart = last.StartOffset
+	if currentIdx >= 0 {
+		r := ranges[currentIdx]
+		stmtStart = r.StartOffset
 		runes := []rune(sql)
-		if last.EndOffset <= len(runes) {
-			currentStmt = string(runes[last.StartOffset:last.EndOffset])
+		if r.EndOffset <= len(runes) {
+			currentStmt = string(runes[r.StartOffset:r.EndOffset])
 		}
 	}
 
@@ -3510,34 +3499,7 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 	cteColumns := getCTEColumnsAtCursor(currentStmt)
 
 	// Scan statements 0..currentIdx (inclusive) for USE DATABASE/SCHEMA context.
-	var useCtx *UseContext
-	runes := []rune(sql)
-	scanEnd := currentIdx + 1
-	if currentIdx < 0 {
-		scanEnd = 0
-	}
-	for i := 0; i < scanEnd && i < len(ranges); i++ {
-		r := ranges[i]
-		end := r.EndOffset
-		if end > len(runes) {
-			end = len(runes)
-		}
-		stmtText := string(runes[r.StartOffset:end])
-		refs := ParseJoinTables(stmtText)
-		for _, ref := range refs {
-			if ref.Name == "" { // USE statement ref (Name is always empty)
-				if useCtx == nil {
-					useCtx = &UseContext{}
-				}
-				if ref.DB != "" {
-					useCtx.Database = ref.DB
-				}
-				if ref.Schema != "" {
-					useCtx.Schema = ref.Schema
-				}
-			}
-		}
-	}
+	useCtx := useContextUpTo(sql, ranges, currentIdx)
 
 	return AutocompleteContext{
 		StatementRanges: ranges,
@@ -3580,6 +3542,61 @@ func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
 }
 
 // ── Ref resolution & in-editor table defs ─────────────────────────────────
+
+// currentStatementIdx returns the index of the statement containing cursorOffset,
+// falling back to the last statement when the cursor sits past every range (a
+// trailing newline after the final semicolon). Returns -1 when sql holds no
+// statement at all.
+func currentStatementIdx(ranges []StatementRange, cursorOffset int) int {
+	for i, r := range ranges {
+		if cursorOffset >= r.StartOffset && cursorOffset <= r.EndOffset {
+			return i
+		}
+	}
+	return len(ranges) - 1
+}
+
+// useContextUpTo accumulates the DATABASE/SCHEMA context set by USE statements in
+// statements 0..currentIdx (inclusive) of sql. Later USE statements win. Returns
+// nil when the script sets no context, which every consumer reads as "fall back
+// to the session".
+func useContextUpTo(sql string, ranges []StatementRange, currentIdx int) *UseContext {
+	var useCtx *UseContext
+	runes := []rune(sql)
+	scanEnd := currentIdx + 1
+	if currentIdx < 0 {
+		scanEnd = 0
+	}
+	for i := 0; i < scanEnd && i < len(ranges); i++ {
+		r := ranges[i]
+		end := min(r.EndOffset, len(runes))
+		refs := ParseJoinTables(string(runes[r.StartOffset:end]))
+		for _, ref := range refs {
+			if ref.Name == "" { // USE statement ref (Name is always empty)
+				if useCtx == nil {
+					useCtx = &UseContext{}
+				}
+				if ref.DB != "" {
+					useCtx.Database = ref.DB
+				}
+				if ref.Schema != "" {
+					useCtx.Schema = ref.Schema
+				}
+			}
+		}
+	}
+	return useCtx
+}
+
+// UseContextAt returns the in-script USE DATABASE/SCHEMA context in effect at
+// cursorOffset — the same value GetAutocompleteContext reports, without the rest
+// of the autocomplete analysis. It exists so the hover path can resolve names
+// against the script's own context (a worksheet that opens with USE SCHEMA X)
+// rather than only the tab's session, matching what diagnostics already do.
+func UseContextAt(sql string, cursorOffset int) *UseContext {
+	ranges := GetStatementRanges(sql)
+	return useContextUpTo(sql, ranges, currentStatementIdx(ranges, cursorOffset))
+}
 
 // isTableOrView reports whether a store object's kind is one the table-ref
 // resolvers consider. Shared so the kind test is not respelled per call site.
@@ -3665,7 +3682,7 @@ type HoverObject struct {
 // so a name is linkable only when it really is listed where it would resolve. A
 // bare name that merely collides with an object in some other schema — or a temp
 // table the script creates but has never run — resolves to nothing, and the
-// editor stops offering a DDL link it cannot honour.
+// editor stops offering a DDL link it cannot honor.
 //
 // A miss carries FetchDB/FetchSchema: the namespace the caller should load on
 // demand (the frontend object store is lazily filled from the sidebar) before
@@ -3679,22 +3696,37 @@ type HoverObject struct {
 // tie-break; wrong only when a non-table object shadows a same-named table in
 // one schema.
 //
-// ponytail: mid-script USE SCHEMA / USE DATABASE and a non-default SEARCH_PATH
-// are not tracked — resolution always uses the tab's session db/schema, the same
-// limitation the diagnostics path has. Thread a UseContext through if that bites.
-func ResolveStoreObject(parts []string, storeObjects []StoreObject, session *SessionContext) HoverObject {
-	var sess SessionContext
+// An omitted qualifier is filled from useCtx (the script's own USE DATABASE /
+// USE SCHEMA, via UseContextAt) before the session, so a worksheet that opens
+// with USE SCHEMA X resolves its bare names in X — the precedence
+// ResolveTableRefs already applies for diagnostics. useCtx may be nil.
+//
+// ponytail: a non-default SEARCH_PATH is still not tracked, so a name that only
+// resolves through it reads as non-existent here and gets no link. Read the
+// parameter and try each entry in turn if that bites.
+func ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
+	// The namespace an omitted qualifier resolves in: an in-script USE wins over
+	// the tab's session, the same precedence ResolveTableRefs applies (steps 3→4).
+	ctxDB, ctxSchema := "", ""
 	if session != nil {
-		sess = *session
+		ctxDB, ctxSchema = session.Database, session.Schema
+	}
+	if useCtx != nil {
+		if useCtx.Database != "" {
+			ctxDB = useCtx.Database
+		}
+		if useCtx.Schema != "" {
+			ctxSchema = useCtx.Schema
+		}
 	}
 	var ref JoinTableRef
 	switch {
 	case len(parts) >= 3:
 		ref = JoinTableRef{DB: parts[len(parts)-3], Schema: parts[len(parts)-2], Name: parts[len(parts)-1]}
 	case len(parts) == 2:
-		ref = JoinTableRef{DB: sess.Database, Schema: parts[0], Name: parts[1]}
+		ref = JoinTableRef{DB: ctxDB, Schema: parts[0], Name: parts[1]}
 	case len(parts) == 1:
-		ref = JoinTableRef{DB: sess.Database, Schema: sess.Schema, Name: parts[0]}
+		ref = JoinTableRef{DB: ctxDB, Schema: ctxSchema, Name: parts[0]}
 	default:
 		return HoverObject{}
 	}

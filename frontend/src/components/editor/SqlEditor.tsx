@@ -27,7 +27,7 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, GetUseContextAt, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
@@ -146,20 +146,30 @@ async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<vo
 
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
 // object in the store — ANY kind, not just TABLE/VIEW. The matching rules live in
-// the backend (sqleditor.ResolveStoreObject): the name is qualified from `session`
-// and then matched strictly, so it resolves only where Snowflake would resolve it
-// (#918). This wrapper adds only the frontend's half — reading the object store
-// and, on a miss, loading the namespace the backend names before asking once more.
+// the backend (sqleditor.ResolveStoreObject): the name is qualified from `useCtx`
+// (the script's own USE DATABASE/SCHEMA) then `session`, and matched strictly, so
+// it resolves only where Snowflake would (#918). This wrapper adds only the
+// frontend's half — reading the object store and, on a miss, loading the
+// namespace the backend names before asking once more.
 // `session` is the caller's OWN tab session (split panes differ, #717).
 // The store `kind` is passed straight through so callers never guess it (a wrong
 // kind makes the gosnowflake driver log every error as noise).
 async function resolveStoreObject(
   parts: string[],
   session: { database: string; schema: string },
+  useCtx: { database: string; schema: string } | null,
 ): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
+  // Only objects whose name equals the last part can ever match, so pre-filter
+  // instead of serializing the whole store across the bridge on every hover —
+  // this runs per mouse-move while the modifier is held. The backend still owns
+  // every namespace rule; this narrows the payload, not the result.
+  const leaf = UC(parts[parts.length - 1] ?? "");
   const ask = () => ResolveStoreObjectIPC(
     parts,
-    useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    useObjectStore.getState().objects
+      .filter((o) => UC(o.name) === leaf)
+      .map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    useCtx as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     session as any, // eslint-disable-line @typescript-eslint/no-explicit-any
   );
   let r = await ask();
@@ -1934,6 +1944,26 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       return identCachePromise;
     };
 
+    // The script's own USE DATABASE/SCHEMA in effect at a hover position, memoized
+    // per (model version, line): the context only changes at statement boundaries,
+    // so re-asking per column would cost an IPC per pixel of mouse travel. The
+    // offset asked about is the line's first column, which is what the key means.
+    // ponytail: a line holding two statements (`USE SCHEMA X; SELECT …`) is read at
+    // its start for the whole line — key on the exact offset if that ever matters.
+    let useCtxKey = "";
+    let useCtxPromise: Promise<{ database: string; schema: string } | null> | null = null;
+    const useContextAt = (pos: any): Promise<{ database: string; schema: string } | null> => {
+      const m = editor.getModel();
+      if (!m || !pos) return Promise.resolve(null);
+      const key = `${m.getVersionId()}\0${pos.lineNumber}`;
+      if (key !== useCtxKey || !useCtxPromise) {
+        useCtxKey = key;
+        useCtxPromise = GetUseContextAt(m.getValue(), m.getOffsetAt({ lineNumber: pos.lineNumber, column: 1 } as any))
+          .then((c: any) => c ?? null).catch(() => null);
+      }
+      return useCtxPromise;
+    };
+
     // Screen coords for a tooltip of height `h` anchored at editor position `pos`,
     // or null if the position isn't currently laid out. Shared by every hover tooltip.
     const positionTooltip = (pos: any, h: number): { x: number; y: number } | null => {
@@ -2024,7 +2054,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             // evict it so the underline stops coming back and we never re-fire the
             // doomed GET_DDL. Other errors keep the "re-hover retries" behaviour. (#918)
             if (/does not exist or not authorized/i.test(String(e))) {
-              useObjectStore.getState().removeObject(obj.db, obj.schema, obj.name);
+              useObjectStore.getState().removeObject(obj.db, obj.schema, obj.name, obj.kind);
               clearCmdLink();
             }
           }
@@ -2060,7 +2090,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         // alias.column is not a linkable object — don't underline it (match the hover flow).
         if (await matchTableAlias(parts)) { if (cmdLinkKey === key) { cmdLinkDecos.clear(); cmdLinkKey = null; } return; }
-        const obj = parts ? await resolveStoreObject(parts, editorSession()) : null;
+        const obj = parts ? await resolveStoreObject(parts, editorSession(), await useContextAt(pos)) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
         if (!obj || !cmdModHeld || !kindSupportsDdl(obj.kind)) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
         cmdLinkDecos.set([{
@@ -2087,7 +2117,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
         // alias.column short-circuits to the column path — never object DDL (match hover flow).
         if (await matchTableAlias(parts)) return;
-        const obj = parts ? await resolveStoreObject(parts, editorSession()) : null;
+        const obj = parts ? await resolveStoreObject(parts, editorSession(), await useContextAt(pos)) : null;
         // Bail if the modifier was released or the mouse moved off this position
         // mid-await. Compare line/column, not object identity — Monaco hands out a
         // fresh Position on every move even for stationary sub-pixel jitter.
@@ -2300,7 +2330,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // Any object in the store (any kind). Plain hover → identity tooltip
         // (kind + name); with the modifier held → full DDL. No click needed.
-        const obj = await resolveStoreObject(parts, editorSession());
+        const obj = await resolveStoreObject(parts, editorSession(), await useContextAt(pos));
         if (obj) {
           const shown = await showObjectTooltip(pos, obj, cmdModHeld);
           // Modifier held over a DDL-capable kind but the fetch failed → unpin the

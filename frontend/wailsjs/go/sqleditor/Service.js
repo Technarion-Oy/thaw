@@ -46,6 +46,10 @@ export function GetSqlStatementRanges(arg1) {
   return window['go']['sqleditor']['Service']['GetSqlStatementRanges'](arg1);
 }
 
+export function GetUseContextAt(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['GetUseContextAt'](arg1, arg2);
+}
+
 export function ParseJoinTableRefs(arg1) {
   return window['go']['sqleditor']['Service']['ParseJoinTableRefs'](arg1);
 }
@@ -54,8 +58,8 @@ export function ParseSignatureParams(arg1) {
   return window['go']['sqleditor']['Service']['ParseSignatureParams'](arg1);
 }
 
-export function ResolveStoreObject(arg1, arg2, arg3) {
-  return window['go']['sqleditor']['Service']['ResolveStoreObject'](arg1, arg2, arg3);
+export function ResolveStoreObject(arg1, arg2, arg3, arg4) {
+  return window['go']['sqleditor']['Service']['ResolveStoreObject'](arg1, arg2, arg3, arg4);
 }
 
 export function ResolveTableRefs(arg1, arg2, arg3, arg4) {

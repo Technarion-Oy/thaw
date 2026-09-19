@@ -165,4 +165,3 @@ describe("gitDiffLines", () => {
     expect(gitDiffLines("a\n\n")).toEqual(["a", ""]);
   });
 });
-
