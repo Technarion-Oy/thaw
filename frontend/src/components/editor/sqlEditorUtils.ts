@@ -23,41 +23,6 @@ export const normId = (s: string): string =>
 export const colCacheKey = (db: string, schema: string, table: string) =>
   `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
 
-// ── objectNamespaceMatch ──────────────────────────────────────────────────────
-// Predicate matching a store object against a dotted identifier, scoped to the
-// namespace Snowflake itself would resolve that name against (#918):
-//   1-part  → session database + session schema
-//   2-part  → session database + the written schema
-//   3-part+ → all three written parts
-// Without the scoping any bare name that collides with something the sidebar
-// happens to have loaded (RAW.ORDERS matching a hover on STAGING.ORDERS, or a
-// temp table the script creates but has never run) gets a cmd-hover DDL link we
-// then can't honour. Returns null when the session context needed to resolve the
-// name is missing — Snowflake couldn't resolve it either, so nothing matches.
-// ponytail: mid-script USE SCHEMA / USE DATABASE and a non-default SEARCH_PATH
-// are not tracked; resolution always uses the tab's session db/schema, same as
-// the diagnostics path. Thread the parser's USE context through if that bites.
-export function objectNamespaceMatch(
-  parts: string[],
-  session: { database: string; schema: string },
-): ((o: { db: string; schema: string; name: string }) => boolean) | null {
-  if (parts.length >= 3) {
-    const [pDb, pSchema, pName] = parts.slice(-3);
-    return (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName);
-  }
-  if (parts.length === 2) {
-    if (!session.database) return null;
-    const [pSchema, pName] = parts;
-    return (o) => UC(o.db) === UC(session.database) && UC(o.schema) === UC(pSchema) && UC(o.name) === UC(pName);
-  }
-  if (parts.length === 1) {
-    if (!session.database || !session.schema) return null;
-    return (o) => UC(o.db) === UC(session.database) && UC(o.schema) === UC(session.schema) &&
-                  UC(o.name) === UC(parts[0]);
-  }
-  return null;
-}
-
 // ── byteColToUtf16Col ──────────────────────────────────────────────────────────
 // Backend diagnostics validators emit 1-based UTF-8 *byte* columns (sqltok.Token.Col),
 // but Monaco columns are 1-based UTF-16 code units. Any non-ASCII char earlier on a

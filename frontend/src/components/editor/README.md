@@ -85,17 +85,17 @@ read `model.getValue()` directly, so they never depend on a React re-render.
 
 **Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts, session)`
 (module-level) resolves a dotted identifier under the cursor to a store object of **any** kind
-(not just TABLE/VIEW), fetching the schema's objects on demand. The match is scoped to the
-namespace Snowflake itself would resolve the name against — `objectNamespaceMatch(parts, session)`
-in `sqlEditorUtils.ts`: 1-part → session db + schema, 2-part → session db + written schema,
-3-part → all three written parts (#918). `session` is the caller's own `editorSession()`, so a
-split pane resolves against its own tab context (#717). Without the scoping any bare name that
-collided with something the sidebar happened to have loaded — or a temp table the script creates
-but has never run — got an underline whose DDL fetch then failed or showed a *different* object.
-Within one namespace a collision is still possible (a stream named after its source table), and
-there it prefers the TABLE/VIEW — a heuristic tie-break, since hover has no parse context.
-Mid-script `USE SCHEMA` / `USE DATABASE` and a non-default `SEARCH_PATH` are not tracked
-(`ponytail:` comment), same limitation as the diagnostics path. `editor.onMouseMove` uses it via the shared
+(not just TABLE/VIEW). The matching rules live in the backend — `sqleditor.ResolveStoreObject`
+qualifies the name from `session` and then matches strictly, so it resolves only where Snowflake
+would (1-part → session db + schema, 2-part → session db + written schema, 3-part → all three
+written parts, #918). This wrapper adds only the frontend's half: it reads `objectStore` and, when
+the backend reports a miss with a `fetchDb`/`fetchSchema` hint, runs `ensureSchemaObjectsLoaded`
+for that namespace and asks once more. `session` is the caller's own `editorSession()`, so a split
+pane resolves against its own tab context (#717). Without the scoping any bare name that collided
+with something the sidebar happened to have loaded — or a temp table the script creates but has
+never run — got an underline whose DDL fetch then failed or showed a *different* object. The
+TABLE/VIEW preference on a within-namespace collision, the excluded callable kinds, and the
+untracked mid-script `USE` / `SEARCH_PATH` ceiling are all documented on the Go function. `editor.onMouseMove` uses it via the shared
 `showObjectTooltip(pos, obj, withDdl)`: plain hover shows a lightweight identity tooltip
 (`withDdl=false` → header-only `KIND — DB.SCHEMA.NAME`, no DDL fetch); with the platform modifier
 (`metaKey`/`ctrlKey`) held, `withDdl=true` fetches `GetObjectDDL(db, schema, kind, name, "")` and

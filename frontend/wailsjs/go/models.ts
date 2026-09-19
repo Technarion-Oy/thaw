@@ -6167,6 +6167,30 @@ export namespace sqleditor {
 	    }
 	}
 	
+	export class HoverObject {
+	    found: boolean;
+	    db: string;
+	    schema: string;
+	    name: string;
+	    kind: string;
+	    fetchDb: string;
+	    fetchSchema: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HoverObject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	        this.fetchDb = source["fetchDb"];
+	        this.fetchSchema = source["fetchSchema"];
+	    }
+	}
 	
 	export class JoinCondition {
 	    condition: string;

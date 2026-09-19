@@ -3581,6 +3581,136 @@ func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
 
 // ── Ref resolution & in-editor table defs ─────────────────────────────────
 
+// isTableOrView reports whether a store object's kind is one the table-ref
+// resolvers consider. Shared so the kind test is not respelled per call site.
+func isTableOrView(kind string) bool {
+	return strings.EqualFold(kind, "TABLE") || strings.EqualFold(kind, "VIEW")
+}
+
+// findStoreObject returns the first store object matching ref, considering only
+// kinds kindOK accepts (a nil kindOK accepts every kind).
+//
+// An empty ref.DB or ref.Schema is a WILDCARD — a bare name matches in any
+// namespace. That is what the diagnostics resolvers want: they search the whole
+// store first and fall back to USE/session context only when nothing matches at
+// all. A caller that needs Snowflake's real resolution rules must fill
+// ref.DB/ref.Schema from its session context BEFORE calling, which turns the
+// wildcards into an exact three-part match; see ResolveStoreObject.
+//
+// Shared by ResolveTableRefs, findTableView and objectKnown so the match rule
+// (case-insensitive name, optional db/schema narrowing, kind filter) lives in
+// exactly one place.
+func findStoreObject(objects []StoreObject, ref JoinTableRef, kindOK func(string) bool) (StoreObject, bool) {
+	for _, o := range objects {
+		if kindOK != nil && !kindOK(o.Kind) {
+			continue
+		}
+		if !strings.EqualFold(o.Name, ref.Name) {
+			continue
+		}
+		if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
+			continue
+		}
+		if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
+			continue
+		}
+		return o, true
+	}
+	return StoreObject{}, false
+}
+
+// hoverExcludedKinds are the callable kinds ResolveStoreObject skips. They all
+// route through GET_DDL('FUNCTION'/'PROCEDURE', …), which needs the overload
+// argument list a bare hover cannot supply, so the editor's overload-aware
+// function-tooltip fallback owns them instead.
+var hoverExcludedKinds = map[string]bool{
+	"FUNCTION":             true,
+	"PROCEDURE":            true,
+	"EXTERNAL FUNCTION":    true,
+	"DATA METRIC FUNCTION": true,
+}
+
+// hoverLinkableKind reports whether a store object's kind can back the hover
+// tooltip / DDL link. See hoverExcludedKinds.
+func hoverLinkableKind(kind string) bool {
+	return !hoverExcludedKinds[strings.ToUpper(strings.TrimSpace(kind))]
+}
+
+// HoverObject is the result of ResolveStoreObject: the store object a hovered
+// identifier resolves to, or — when Found is false — the namespace whose objects
+// the caller should load before asking again (empty when nothing could resolve).
+type HoverObject struct {
+	Found       bool   `json:"found"`
+	DB          string `json:"db"`
+	Schema      string `json:"schema"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	FetchDB     string `json:"fetchDb"`
+	FetchSchema string `json:"fetchSchema"`
+}
+
+// ResolveStoreObject resolves the dot-separated identifier under the editor
+// cursor — as GetIdentifierAtColumn returns it: already unquoted, bare parts
+// upper-cased — to a known store object of ANY kind. It backs the editor's hover
+// identity tooltip and the cmd/ctrl-hold DDL link.
+//
+// Unlike ResolveTableRefs, which searches every namespace first and only then
+// falls back to context, the name is qualified from session FIRST and then
+// matched strictly, exactly as Snowflake would resolve it (#918):
+//
+//	NAME            → session database + session schema
+//	SCHEMA.NAME     → session database + the written schema
+//	DB.SCHEMA.NAME  → the three written parts (session-independent)
+//
+// so a name is linkable only when it really is listed where it would resolve. A
+// bare name that merely collides with an object in some other schema — or a temp
+// table the script creates but has never run — resolves to nothing, and the
+// editor stops offering a DDL link it cannot honour.
+//
+// A miss carries FetchDB/FetchSchema: the namespace the caller should load on
+// demand (the frontend object store is lazily filled from the sidebar) before
+// calling again. Both are empty when the session lacks the database or schema
+// the name omits — Snowflake could not resolve it either, so there is nothing
+// worth loading.
+//
+// Two objects can still share a name inside one namespace (a CDC stream named
+// after its source table), and with no parse context to disambiguate the
+// TABLE/VIEW wins — the far more common hover target. ponytail: heuristic
+// tie-break; wrong only when a non-table object shadows a same-named table in
+// one schema.
+//
+// ponytail: mid-script USE SCHEMA / USE DATABASE and a non-default SEARCH_PATH
+// are not tracked — resolution always uses the tab's session db/schema, the same
+// limitation the diagnostics path has. Thread a UseContext through if that bites.
+func ResolveStoreObject(parts []string, storeObjects []StoreObject, session *SessionContext) HoverObject {
+	var sess SessionContext
+	if session != nil {
+		sess = *session
+	}
+	var ref JoinTableRef
+	switch {
+	case len(parts) >= 3:
+		ref = JoinTableRef{DB: parts[len(parts)-3], Schema: parts[len(parts)-2], Name: parts[len(parts)-1]}
+	case len(parts) == 2:
+		ref = JoinTableRef{DB: sess.Database, Schema: parts[0], Name: parts[1]}
+	case len(parts) == 1:
+		ref = JoinTableRef{DB: sess.Database, Schema: sess.Schema, Name: parts[0]}
+	default:
+		return HoverObject{}
+	}
+	if ref.DB == "" || ref.Schema == "" || ref.Name == "" {
+		return HoverObject{}
+	}
+	// Fully qualified above, so both passes are exact matches; the first pass is
+	// only there to give a TABLE/VIEW priority over a same-named other kind.
+	for _, kindOK := range []func(string) bool{isTableOrView, hoverLinkableKind} {
+		if o, ok := findStoreObject(storeObjects, ref, kindOK); ok {
+			return HoverObject{Found: true, DB: o.DB, Schema: o.Schema, Name: o.Name, Kind: o.Kind}
+		}
+	}
+	return HoverObject{FetchDB: ref.DB, FetchSchema: ref.Schema}
+}
+
 // ResolveTableRefs resolves unqualified/partially-qualified table references
 // against the provided store objects, UseContext, and session context.
 // Resolution order for each ref:
@@ -3617,28 +3747,9 @@ func ResolveTableRefs(
 			continue
 		}
 
-		// 2. Search store objects
-		found := false
-		for _, o := range storeObjects {
-			if !strings.EqualFold(o.Kind, "TABLE") && !strings.EqualFold(o.Kind, "VIEW") {
-				continue
-			}
-			if !strings.EqualFold(o.Name, ref.Name) {
-				continue
-			}
-			if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
-				continue
-			}
-			if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
-				continue
-			}
-			r.DB = o.DB
-			r.Schema = o.Schema
-			r.Name = o.Name
-			found = true
-			break
-		}
-		if found {
+		// 2. Search store objects (any namespace — the wildcard match; see findStoreObject)
+		if o, ok := findStoreObject(storeObjects, ref, isTableOrView); ok {
+			r.DB, r.Schema, r.Name = o.DB, o.Schema, o.Name
 			resolved = append(resolved, r)
 			continue
 		}

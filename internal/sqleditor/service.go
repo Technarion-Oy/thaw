@@ -138,6 +138,14 @@ func (s *Service) ResolveTableRefs(refs []JoinTableRef, storeObjects []StoreObje
 	return ResolveTableRefs(refs, storeObjects, useCtx, session)
 }
 
+// ResolveStoreObject resolves the dotted identifier under the editor cursor to a
+// known store object of any kind, scoped to the namespace the name would really
+// resolve against. Backs the hover identity tooltip and its cmd/ctrl DDL link; a
+// miss names the schema the caller should load on demand before retrying.
+func (s *Service) ResolveStoreObject(parts []string, storeObjects []StoreObject, session *SessionContext) HoverObject {
+	return ResolveStoreObject(parts, storeObjects, session)
+}
+
 // GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
 func (s *Service) GetSnowflakeKeywords() []string {
 	return snowflake.ReservedKeywords()

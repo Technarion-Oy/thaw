@@ -27,11 +27,11 @@ import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines, objectNamespaceMatch,} from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -144,17 +144,12 @@ async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<vo
   await inflight;
 }
 
-// Callable kinds resolveStoreObject skips (they need an overload arg list GET_DDL
-// can't get from a bare hover) — handled by the GetFunctionTooltip fallback instead.
-const RESOLVE_EXCLUDED_KINDS = new Set([
-  "FUNCTION", "PROCEDURE", "EXTERNAL FUNCTION", "DATA METRIC FUNCTION",
-]);
-
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
-// object in the store — ANY kind, not just TABLE/VIEW. The match is scoped to the
-// namespace the name would actually resolve against (objectNamespaceMatch, #918),
-// so a name is linkable only when it is really listed there. Fetches that schema's
-// objects on demand if not yet cached. Returns null if no object matches.
+// object in the store — ANY kind, not just TABLE/VIEW. The matching rules live in
+// the backend (sqleditor.ResolveStoreObject): the name is qualified from `session`
+// and then matched strictly, so it resolves only where Snowflake would resolve it
+// (#918). This wrapper adds only the frontend's half — reading the object store
+// and, on a miss, loading the namespace the backend names before asking once more.
 // `session` is the caller's OWN tab session (split panes differ, #717).
 // The store `kind` is passed straight through so callers never guess it (a wrong
 // kind makes the gosnowflake driver log every error as noise).
@@ -162,35 +157,17 @@ async function resolveStoreObject(
   parts: string[],
   session: { database: string; schema: string },
 ): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
-  const match = objectNamespaceMatch(parts, session);
-  if (!match) return null;
-  // Schema to load on demand when the store has nothing yet — same namespace the
-  // predicate matches, so a miss after the fetch means the object does not exist.
-  const fetch = parts.length >= 3
-    ? { db: UC(parts[parts.length - 3]), schema: UC(parts[parts.length - 2]) }
-    : parts.length === 2
-      ? { db: session.database, schema: parts[0] }
-      : { db: session.database, schema: session.schema };
-  // Two objects can share a name in one schema (a CDC stream named after its
-  // source table, etc.). With no parse context to disambiguate, prefer the
-  // table/view — the far more common hover target. ponytail: heuristic tie-break;
-  // wrong only when a non-table object shadows a same-named table in one schema.
-  // Callable kinds are intentionally excluded: the overload-aware GetFunctionTooltip
-  // fallback owns them (per-overload signatures + the "followed by (" keyword guard),
-  // and GetObjectDDL with an empty arguments string fails for any non-zero-arg
-  // overload. All four route through GET_DDL('FUNCTION'/'PROCEDURE', …) needing the
-  // arg list, so excluding them here keeps the identity/DDL path from firing a doomed
-  // GET_DDL. Falling through keeps both.
-  const best = (list: Array<{ db: string; schema: string; kind: string; name: string }>) => {
-    const c = list.filter((o) => !RESOLVE_EXCLUDED_KINDS.has(UC(o.kind)));
-    return c.find((o) => o.kind === "TABLE" || o.kind === "VIEW") ?? c[0] ?? null;
-  };
-  let inStore = best(useObjectStore.getState().objects.filter(match));
-  if (!inStore) {
-    await ensureSchemaObjectsLoaded(fetch.db, fetch.schema);
-    inStore = best(useObjectStore.getState().objects.filter(match));
+  const ask = () => ResolveStoreObjectIPC(
+    parts,
+    useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    session as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  );
+  let r = await ask();
+  if (!r.found && r.fetchDb) {
+    await ensureSchemaObjectsLoaded(r.fetchDb, r.fetchSchema);
+    r = await ask();
   }
-  return inStore ? { db: inStore.db, schema: inStore.schema, kind: inStore.kind, name: inStore.name } : null;
+  return r.found ? { db: r.db, schema: r.schema, kind: r.kind, name: r.name } : null;
 }
 
 // ── Git gutter: HEAD content cache ────────────────────────────────────────────

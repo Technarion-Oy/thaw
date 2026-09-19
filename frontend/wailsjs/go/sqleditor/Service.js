@@ -54,6 +54,10 @@ export function ParseSignatureParams(arg1) {
   return window['go']['sqleditor']['Service']['ParseSignatureParams'](arg1);
 }
 
+export function ResolveStoreObject(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['ResolveStoreObject'](arg1, arg2, arg3);
+}
+
 export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
