@@ -61,6 +61,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	sf "thaw/internal/snowflake"
 	"thaw/internal/sqlgrammar"
@@ -1531,7 +1532,8 @@ func normID(s string) string {
 //
 // It is a keyword-anchored scan over the significant-token stream (mirroring
 // internal/snowflake/lineage.go extractObjectRefs): FROM/JOIN/USING/MERGE INTO
-// introduce a table path, USE introduces a database/schema. Scanning tokens
+// introduce a table path (as does a comma continuing a FROM source list), USE
+// introduces a database/schema. Scanning tokens
 // rather than the raw string means comments and string literals never produce
 // phantom refs, comments between a keyword and its identifier are tolerated,
 // and dotted paths + quoted identifiers are read by the tokenizer's own
@@ -1540,16 +1542,21 @@ func ParseJoinTables(sql string) []JoinTableRef {
 	toks := sqltok.SignificantTokens(sql)
 	var result []JoinTableRef
 
+	// from recognizes a comma continuing a FROM source list (`FROM a, b` or
+	// `FROM a JOIN b ON …, c`) as introducing another table (issue #916).
+	var from fromClauseTracker
 	for i := 0; i < len(toks); {
-		if toks[i].Kind != sqltok.Keyword {
+		// tableAt is the index where the table path begins, or -1 if this
+		// token does not introduce one.
+		tableAt := -1
+		if from.sourceComma(toks[i], sql) {
+			tableAt = i + 1
+		} else if toks[i].Kind != sqltok.Keyword {
 			i++
 			continue
 		}
 		kw := strings.ToUpper(toks[i].Text(sql))
 
-		// tableAt is the index where the table path begins, or -1 if this
-		// keyword does not introduce one.
-		tableAt := -1
 		switch kw {
 		case "FROM", "JOIN", "USING":
 			tableAt = i + 1
@@ -2353,24 +2360,36 @@ func extractProjectedColName(expr string) string {
 //
 // If the statement is SELECT *, it attempts to expand columns based on the
 // table(s) found in the immediate FROM/JOIN of this SELECT block.
-func extractSelectProjections(sql string, localScope map[string][]ColInfo) []ColInfo {
+//
+// Returns nil when a wildcard covers a source whose columns aren't known (a
+// table missing from localScope, an in-script table with unknown columns, or a
+// derived table) — the output is unknowable, so callers treat the result as an
+// unknown-columns table (issue #916). complete is false when some output
+// column couldn't be named (an expression without an alias).
+func extractSelectProjections(sql string, localScope map[string][]ColInfo) (cols []ColInfo, complete bool) {
 	stripped := stripCommentsSQL(sql)
-	strippedToks := sqltok.Tokenize(stripped)
-	strippedSig := sigToks(strippedToks)
+	strippedSig := sigTokens(stripped)
+	stripped, strippedSig = firstSetOpBranch(strippedSig, stripped)
 	selOff := findSelectKWOffset(strippedSig, stripped)
 	if selOff < 0 {
-		return nil
+		return nil, false
 	}
 
 	// 1. Determine the context for this SELECT (Step A: Source Resolution)
 	// We extract table references only from THIS select block.
 	activeContext := make(map[string][]ColInfo)
-	for _, tablePath := range findFromJoinTables2(strippedSig, stripped) {
+	unresolvedSrc := hasSubquerySource(strippedSig, stripped)
+	// Top-level sources only: a subquery's own tables (in the select list or
+	// WHERE clause) neither feed the wildcard nor make it unknown.
+	for _, tablePath := range findFromJoinTables2(topLevelTokens(strippedSig), stripped) {
 		parts := extractIdentParts(tablePath, true)
 		if len(parts) > 0 {
 			tableNameU := parts[len(parts)-1]
-			if cols, ok := localScope[tableNameU]; ok {
+			// A nil entry is an in-script table with unknown columns (issue #916).
+			if cols := localScope[tableNameU]; cols != nil {
 				activeContext[tableNameU] = cols
+			} else {
+				unresolvedSrc = true
 			}
 		}
 	}
@@ -2383,10 +2402,11 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 	}
 	selectClause := extractSelectClause(afterSelect)
 
-	var cols []ColInfo
+	sawStar, unnamed := false, false
 	for _, expr := range splitTopLevelCommas(selectClause) {
 		trimmed := strings.TrimSpace(expr)
 		if trimmed == "*" {
+			sawStar = true
 			// Resolve wildcard expansions
 			for _, tableCols := range activeContext {
 				cols = append(cols, tableCols...)
@@ -2395,9 +2415,65 @@ func extractSelectProjections(sql string, localScope map[string][]ColInfo) []Col
 		}
 		if name := extractProjectedColName(trimmed); name != "" {
 			cols = append(cols, ColInfo{Name: name, DataType: "UNKNOWN"})
+		} else {
+			unnamed = true
 		}
 	}
-	return cols
+	if sawStar && unresolvedSrc {
+		return nil, false
+	}
+	// A wildcard over resolved sources is complete even when they have no
+	// columns — an empty known set, not an unknown one (PR #917 review).
+	return cols, (len(cols) > 0 || sawStar) && !unnamed
+}
+
+// firstSetOpBranch returns sql cut before its first top-level UNION /
+// INTERSECT / EXCEPT / MINUS: a set operation's output columns are named by its
+// first branch, so later branches' sources must not feed a projection. sig is
+// cut to match; token offsets stay valid since the cut keeps sql's prefix.
+func firstSetOpBranch(sig []sqltok.Token, sql string) (string, []sqltok.Token) {
+	depth := 0
+	for i, t := range sig {
+		switch t.Kind {
+		case sqltok.LParen:
+			depth++
+		case sqltok.RParen:
+			depth = max(depth-1, 0)
+		default:
+			switch tokUpper(t, sql) {
+			case "UNION", "INTERSECT", "EXCEPT", "MINUS":
+				if depth == 0 {
+					return sql[:t.Start], sig[:i]
+				}
+			}
+		}
+	}
+	return sql, sig
+}
+
+// ctasColumns returns the output columns of a CTAS query, or nil when they
+// can't all be derived: a body not opening with SELECT (including a
+// CTE-prefixed `AS WITH … SELECT`), an unaliased expression, a wildcard over a
+// source without known columns, or a quoted identifier. A nil entry in a local
+// column cache marks a table created in-script whose columns are unknown, so it
+// still shadows a same-named catalog table (issue #916).
+// sig is query's significant tokens, positioned over sql.
+func ctasColumns(query string, sig []sqltok.Token, sql string, localScope map[string][]ColInfo) []ColInfo {
+	if len(sig) == 0 || tokUpper(sig[0], sql) != "SELECT" {
+		return nil
+	}
+	// ponytail: a quoted identifier anywhere gives up — projected names are
+	// upper-cased, which would be wrong for case-sensitive "quoted" aliases. A
+	// `"` inside a string literal or comment isn't one (PR #917 review).
+	for _, t := range sig {
+		if t.Kind == sqltok.QuotedIdent {
+			return nil
+		}
+	}
+	if cols, complete := extractSelectProjections(query, localScope); complete {
+		return parsedCols(cols) // a wildcard over only column-less tables: known, empty
+	}
+	return nil
 }
 
 // isSimpleCTESelect returns true when every item in the CTE's SELECT list is a
@@ -2518,20 +2594,26 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// validated against the real schema instead of the (possibly typo-laden)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
+				// First set-op branch, top-level sources only — as in
+				// extractSelectProjections (PR #917 review).
 				innerStripped := stripCommentsSQL(innerSQL)
-				innerToks := sqltok.Tokenize(innerStripped)
-				innerSig := sigToks(innerToks)
+				innerStripped, innerSig := firstSetOpBranch(sigTokens(innerStripped), innerStripped)
+				// Only when every source's columns are known: a partial union
+				// would flag a column that lives on the missing source (#917).
 				var allSourceCols []ColInfo
-				for _, tablePath := range findFromJoinTables2(innerSig, innerStripped) {
+				allKnown := true
+				for _, tablePath := range findFromJoinTables2(topLevelTokens(innerSig), innerStripped) {
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
-						if cols, ok := localScope[tableNameU]; ok {
+						if cols := localScope[tableNameU]; cols != nil {
 							allSourceCols = append(allSourceCols, cols...)
+						} else {
+							allKnown = false
 						}
 					}
 				}
-				if len(allSourceCols) > 0 {
+				if len(allSourceCols) > 0 && allKnown {
 					// Extract projected column names from the SELECT list.
 					// Only filter when every projected name exists in the
 					// source — this handles chained CTEs (e.g. SELECT id
@@ -2567,9 +2649,19 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 				}
 			}
 			// Fall back to SELECT-list projections when the CTE is complex or the
-			// source table's columns are not available in the local scope.
+			// source table's columns are not available in the local scope. A nil
+			// result (a wildcard over a source with unknown columns) leaves the
+			// CTE unregistered, i.e. unknown, rather than trusting a partial list;
+			// a complete empty one (a wildcard over column-less sources) is a
+			// known empty CTE, as for CTAS (PR #917 review).
 			if len(cteCols) == 0 {
-				cteCols = extractSelectProjections(innerSQL, localScope)
+				if cols, complete := extractSelectProjections(innerSQL, localScope); complete {
+					cteCols = parsedCols(cols)
+				} else {
+					// A partial list (some items nameable, some not) is not the
+					// CTE's column set — discard it, as ctasColumns does.
+					cteCols = nil
+				}
 			}
 		}
 
@@ -2586,7 +2678,7 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			cteCols = overridden
 		}
 
-		if len(cteCols) > 0 {
+		if cteCols != nil {
 			nameU := strings.ToUpper(normIdent(cteName, true))
 			result[nameU] = cteCols
 			localScope[nameU] = cteCols // Update local scope for next CTE in sequence
@@ -2596,6 +2688,58 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 }
 
 // ── ValidateSemantics ─────────────────────────────────────────────────────────
+
+// partAt returns the n-th part from the end of a 1/2/3-part path (1 = the
+// name, 2 = the schema, 3 = the database), or "" when the path is shorter.
+func partAt(parts []string, n int) string {
+	if len(parts) < n {
+		return ""
+	}
+	return parts[len(parts)-n]
+}
+
+// resolvedByRefs reports whether the caller's resolved refs map this FROM/JOIN
+// source to a catalog table. Refs are resolved for the whole script, so both
+// the alias (the table name when unaliased — see ParseJoinTables) and the table
+// name must match: an earlier statement's `other_tbl AS t` must not count as
+// resolving a later `FROM t`.
+func resolvedByRefs(resolvedRefs []ResolvedRef, alias, name string) bool {
+	for _, ref := range resolvedRefs {
+		if refForSource(ref, alias, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// shadows reports whether the in-script table classified as m takes precedence
+// over the catalog table the script-wide refs may have resolved for this source
+// (issue #916): an exact match always does; a guessed or other match only when
+// the refs didn't resolve this very source. Both validators go through this one
+// method, so the rule can't drift between them. A shadowing match with nil
+// columns means the source's columns are unknown.
+func (m scriptMatch) shadows(resolvedRefs []ResolvedRef, alias, name string) bool {
+	switch m {
+	case noScriptTable:
+		return false
+	case exactScriptTable:
+		return true
+	default:
+		return !resolvedByRefs(resolvedRefs, alias, name)
+	}
+}
+
+// refForSource reports whether ref was resolved for the source name [AS alias]:
+// same alias (the table name when unaliased — see ParseJoinTables) and same
+// table name. Shared by both validators' guessed-match fallback (issue #916).
+// ponytail: refs carry no statement position, so a same-alias source in another
+// statement counts too; add positions to ResolvedRef (an IPC change) if needed.
+func refForSource(ref ResolvedRef, alias, name string) bool {
+	if alias == "" {
+		alias = name
+	}
+	return strings.EqualFold(ref.Alias, alias) && strings.EqualFold(ref.Name, name)
+}
 
 // ValidateSemantics walks the SQL text and for every alias.column two-part
 // reference where the alias is in resolvedRefs, checks whether column exists
@@ -2624,9 +2768,15 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		colInfoCache      map[string][]ColInfo
 		activeKeys        []string // ordered list of tables in scope for bare col lookup
 		bareColValidation bool     // true only when every FROM/JOIN source table has known columns
+		headerEnd         int      // rune offset in sql where a CREATE header ends (0 = none)
 	}
 	stmtContexts := make([]stmtContext, len(stmtRanges))
+	// localColCache holds the tables created in-script, keyed exactly as in
+	// ValidateBareColumnRefs (storeLocalCols): 1-/2-/3-part keys plus the
+	// USE-qualified key (scriptUse.key) — only an exact match on the latter
+	// shadows a catalog table (issue #916). A nil entry = columns unknown.
 	localColCache := make(map[string][]ColInfo)
+	var use scriptUse
 
 	for idx, r := range stmtRanges {
 		raw := sqlStmt(sql, r)
@@ -2635,37 +2785,29 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 		rawSig := sigToks(rawToks)
 		strippedToks := sqltok.Tokenize(stripped)
 		strippedSig := sigToks(strippedToks)
+		use = use.apply(rawSig, raw)
 
 		// 1. Update localColCache if this is a CREATE TABLE
-		if nameStr, parenStart, ok := matchCreateTablePre(rawSig, raw); ok {
-			parts := extractIdentParts(nameStr, true)
+		ctPath, parenStart, ctHasCols := matchCreateTablePre(rawSig, raw)
+		if ctHasCols {
+			parts := extractIdentParts(ctPath, true)
 			if len(parts) > 0 {
 				colsRaw := extractBalancedBlock(raw, parenStart)
 				if len(colsRaw) >= 2 {
 					colsRaw = colsRaw[1 : len(colsRaw)-1]
-					columns := parseCreateTableColDefs(colsRaw, true)
-					tableNameU := strings.ToUpper(parts[len(parts)-1])
-					localColCache[tableNameU] = columns
+					storeLocalCols(localColCache, parts, use, parsedCols(parseCreateTableColDefs(colsRaw, true)))
 				}
 			}
 		} else if aPath, aCols, aok := parseAlterAddColumns(rawSig, raw, true); aok {
 			// ALTER TABLE … ADD [COLUMN] on a table created in-script: merge the
 			// added columns so later references resolve (issue #715).
-			if parts := extractIdentParts(aPath, true); len(parts) > 0 {
-				tableNameU := strings.ToUpper(parts[len(parts)-1])
-				if existing, ok := localColCache[tableNameU]; ok {
-					merged := make([]ColInfo, 0, len(existing)+len(aCols))
-					merged = append(merged, existing...)
-					merged = append(merged, aCols...)
-					localColCache[tableNameU] = merged
-				}
-			}
+			applyAlterAddToLocalCache(aPath, aCols, localColCache, true)
 		}
 
 		// 2. CTE projections in this statement
 		var cteProjMap map[string][]ColInfo
 		if strings.Contains(strings.ToUpper(stripped), "WITH") {
-			cteProjMap = extractCTEProjections(stripped, localColCache)
+			cteProjMap = extractCTEProjections(stripped, tableOnlyScope(localColCache, use))
 		}
 
 		// 3. Build stmtContext
@@ -2686,6 +2828,14 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				objNameU := strings.ToUpper(parts[len(parts)-1])
 				ctx.aliasMap[objNameU] = "__object__"
 			}
+		}
+
+		// A CREATE header before the body's AS — the object name, option values
+		// like `TASK t WAREHOUSE = wh`, a `VIEW v (c1, c2)` output-name list — holds
+		// no column refs (issue #916). Skipped by position, not by name, so a
+		// same-named ref in the body is still validated.
+		if asIdx := createBodyAsIdx(rawSig, raw); asIdx > 0 {
+			ctx.headerEnd = utf8.RuneCountInString(sql[:r.StartOffset+rawSig[asIdx].Start])
 		}
 
 		// Pre-scan for column aliases (AS alias) and add them to the aliasMap.
@@ -2738,14 +2888,38 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 				continue
 			}
 
+			// markUnknown registers an in-script source whose columns are unknown:
+			// its name and alias map to no column set, so neither is misread as a
+			// column nor checked against a same-named catalog table the script-wide
+			// refs mapped it to (issue #916).
+			aliasU := ""
+			if ta.alias != "" {
+				aliasU = strings.ToUpper(normIdent(ta.alias, true))
+			}
+			markUnknown := func() {
+				hasUnknownTable = true
+				ctx.aliasMap[tableNameU] = "__unknown__"
+				if aliasU != "" {
+					ctx.aliasMap[aliasU] = "__unknown__"
+				}
+			}
+
 			cacheKey := ""
 			// Priority: 1. CTE, 2. Local Table, 3. Global resolvedRef (already in aliasMap)
 			if key, isCTE := ctx.aliasMap[tableNameU]; isCTE && strings.HasPrefix(key, "__cte__") {
 				cacheKey = key
-			} else if cols, isLocal := localColCache[tableNameU]; isLocal {
+			} else if cols, match := scriptTable(localColCache, use, partAt(parts, 3), partAt(parts, 2), tableNameU); match.shadows(resolvedRefs, aliasU, tableNameU) {
+				// A table created in-script shadows the catalog table the refs
+				// may have resolved to, so override that mapping (issue #916).
+				// nil columns (an underivable CTAS, or an other match — this
+				// reference's schema is known and differs) means unknown.
+				if cols == nil {
+					markUnknown()
+					continue
+				}
 				cacheKey = "__local__\x00\x00" + tableNameU
 				ctx.colInfoCache[cacheKey] = cols
-				if _, already := ctx.aliasMap[tableNameU]; !already {
+				if v, already := ctx.aliasMap[tableNameU]; !already || !strings.HasPrefix(v, "__") {
 					ctx.aliasMap[tableNameU] = cacheKey
 				}
 			} else {
@@ -2809,6 +2983,12 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			len(ctx.activeKeys) > 0 && !matchesSnowflakeFP(rawSig, raw)
 
 		stmtContexts[idx] = ctx
+
+		// Register a CTAS after this statement's own context is built, so its
+		// source query still sees the pre-existing tables.
+		if ctPath != "" && !ctHasCols {
+			registerCTAS(localColCache, ctPath, rawSig, raw, use, true)
+		}
 	}
 
 	runes := []rune(sql)
@@ -3064,7 +3244,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 							}
 						}
 
-						if !isFunction && !isDatePartUsage && ctx.bareColValidation {
+						if !isFunction && !isDatePartUsage && ctx.bareColValidation && word1Start >= ctx.headerEnd {
 							// Check if this column exists in ANY of the active tables.
 							foundInAny := false
 							for _, cacheKey := range ctx.activeKeys {
