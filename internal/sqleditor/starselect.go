@@ -35,7 +35,7 @@ type StarSelect struct {
 //   - Dot                        → `alias.*` (ident-like token before the dot is the alias)
 //   - a select-item introducer   → bare wildcard (SELECT / DISTINCT / ALL / `,`, or nothing)
 //   - anything else              → not a wildcard: multiplication (`a * b`, `2 * n`,
-//     `… END * 100`) or a function argument (COUNT(*)) — skip
+//                                  `… END * 100`) or a function argument (COUNT(*)) — skip
 //
 // The introducer test is a whitelist, not a blacklist: a blacklist of "operand"
 // token kinds can't tell SELECT/DISTINCT/ALL (which are keywords that legitimately

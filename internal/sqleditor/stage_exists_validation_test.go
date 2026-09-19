@@ -31,8 +31,8 @@ func TestValidateStageRefs_ExistingStageSilent(t *testing.T) {
 		"COPY INTO t FROM @mystage;",
 		"SELECT $1 FROM @mystage/f.csv;",
 		"COPY INTO t FROM @mydb.public.mystage;",
-		"SELECT $1 FROM @~/f.csv;", // user stage always exists
-		"COPY INTO t FROM @%t;",    // table stage — deferred, no flag
+		"SELECT $1 FROM @~/f.csv;",  // user stage always exists
+		"COPY INTO t FROM @%t;",     // table stage — deferred, no flag
 	}
 	for _, sql := range ok {
 		if m := stageMarkers(sql); len(m) != 0 {

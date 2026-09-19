@@ -134,7 +134,7 @@ func validateKindImpliedRefs(
 
 // unquoteSingle strips the surrounding single quotes from a SQL string literal
 // and decodes its escapes, returning the raw content. It is the inverse of the
-// sqltok single-quote scanner, honoring both the doubled-quote escape (”→') and
+// sqltok single-quote scanner, honoring both the doubled-quote escape (''→') and
 // backslash escapes (\'→', \\→\, and \x→x for any other x) — otherwise a literal
 // the tokenizer now correctly keeps whole (e.g. 'my\'format') would mis-decode.
 func unquoteSingle(s string) string {
