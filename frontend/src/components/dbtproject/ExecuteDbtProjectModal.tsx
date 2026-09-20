@@ -30,7 +30,7 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
   const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [preview, setPreview] = useState("");
-  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {

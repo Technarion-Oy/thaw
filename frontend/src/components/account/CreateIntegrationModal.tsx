@@ -632,7 +632,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
 
   // Live SQL preview for git_https_api — debounced call to Go backend
   const [sqlPreview, setSqlPreview] = useState("");
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (!isGitHttps) { setSqlPreview(""); return; }

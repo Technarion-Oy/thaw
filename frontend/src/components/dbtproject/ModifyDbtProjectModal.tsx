@@ -43,7 +43,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statements, setStatements] = useState<string[]>([]);
-  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     const init = async () => {

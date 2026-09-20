@@ -21,7 +21,7 @@ const SQL_KEYWORDS = new Set([
 ]);
 
 /** SQL keyword highlighting — basic tokenizer for the preview. */
-function highlightSQL(sql: string): JSX.Element[] {
+function highlightSQL(sql: string): React.JSX.Element[] {
 
   return sql.split("\n").map((line, li) => {
     const tokens = line.split(/(\b\w+\b|[.,*()=])/g).filter(Boolean);

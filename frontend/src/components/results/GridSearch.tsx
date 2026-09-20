@@ -25,7 +25,7 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
   const nextMatch = useGridStore((s) => s.nextMatch);
   const prevMatch = useGridStore((s) => s.prevMatch);
   const inputRef = useRef<InputRef>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [searchCapped, setSearchCapped] = useState(false);
 
   // Focus input on mount
