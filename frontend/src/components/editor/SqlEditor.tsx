@@ -144,26 +144,34 @@ async function ensureSchemaObjectsLoaded(db: string, schema: string): Promise<vo
   await inflight;
 }
 
+// One dotted segment of an identifier as the backend reports it: the logical
+// name plus whether the source double-quoted it. `quoted` is what lets the
+// backend tell `"orders"` from ORDERS — Snowflake folds only the bare one (#920).
+export type IdentPart = { text: string; quoted: boolean };
+
 // Resolve a dotted identifier (as returned by GetIdentifierAtColumn) to a schema
 // object in the store — ANY kind, not just TABLE/VIEW. The matching rules live in
 // the backend (sqleditor.ResolveStoreObject): the name is qualified from `useCtx`
 // (the script's own USE DATABASE/SCHEMA) then `session`, and matched strictly, so
-// it resolves only where Snowflake would (#918). This wrapper adds only the
-// frontend's half — reading the object store and, on a miss, loading the
-// namespace the backend names before asking once more.
+// it resolves only where Snowflake would (#918), with the quoted parts compared
+// case-sensitively (#920). This wrapper adds only the frontend's half — reading
+// the object store and, on a miss, loading the namespace the backend names before
+// asking once more.
 // `session` is the caller's OWN tab session (split panes differ, #717).
 // The store `kind` is passed straight through so callers never guess it (a wrong
 // kind makes the gosnowflake driver log every error as noise).
 async function resolveStoreObject(
-  parts: string[],
+  parts: IdentPart[],
   session: { database: string; schema: string },
   useCtx: { database: string; schema: string } | null,
 ): Promise<{ db: string; schema: string; kind: string; name: string } | null> {
   // Only objects whose name equals the last part can ever match, so pre-filter
   // instead of serializing the whole store across the bridge on every hover —
-  // this runs per mouse-move while the modifier is held. The backend still owns
-  // every namespace rule; this narrows the payload, not the result.
-  const leaf = UC(parts[parts.length - 1] ?? "");
+  // this runs per mouse-move while the modifier is held. The filter stays
+  // case-insensitive; the backend applies the case-sensitive rule for a quoted
+  // part. It still owns every namespace rule — this narrows the payload, not
+  // the result.
+  const leaf = UC(parts[parts.length - 1]?.text ?? "");
   const ask = () => ResolveStoreObjectIPC(
     parts,
     useObjectStore.getState().objects
@@ -1335,7 +1343,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         if (charBefore === "." && schemaAutocompleteEnabled) {
-          const idParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          // The whole document, not just this line: a dot typed inside a block
+          // comment or a string literal is on no identifier, and asking with one
+          // raw line could not tell (#920) — it fired a SHOW/DESCRIBE per keystroke.
+          const idParts = (await GetIdentifierAtColumn(model.getValue(), position.lineNumber, word.startColumn))
+            ?.map((p) => p.text) ?? [];
           // GetIdentifierAtColumn returns the whole dotted chain, which includes the
           // segment currently being typed (word.word) as its last element. Drop it so
           // we complete the children of the *qualifier* and never DESCRIBE/SHOW the
@@ -1932,17 +1944,29 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     // A single mouse-move drives both the unthrottled cmd-link path and the
     // debounced hover pipeline, each of which needs the identifier under the
-    // cursor. Memoize the last (line, column) lookup so the IPC call runs once.
+    // cursor. Memoize the last lookup so the IPC call runs once. The input is
+    // the WHOLE document (that is how the backend sees block comments and
+    // dollar-quoted bodies opened on an earlier line, #920), so the key carries
+    // the model version — an edit invalidates it.
     let identCacheKey = "";
-    let identCachePromise: Promise<string[]> | null = null;
-    const identifierAt = (line: string, col: number): Promise<string[]> => {
-      const key = `${col}\0${line}`;
+    let identCachePromise: Promise<IdentPart[] | null> | null = null;
+    const identifierAt = (pos: any): Promise<IdentPart[] | null> => {
+      const m = editor.getModel();
+      if (!m || !pos) return Promise.resolve(null);
+      const key = `${m.getVersionId()}\0${pos.lineNumber}\0${pos.column}`;
       if (key !== identCacheKey || !identCachePromise) {
         identCacheKey = key;
-        identCachePromise = GetIdentifierAtColumn(line, col);
+        identCachePromise = GetIdentifierAtColumn(m.getValue(), pos.lineNumber, pos.column);
       }
       return identCachePromise;
     };
+    // ponytail: the whole document crosses the bridge once per hovered cell.
+    // Hand the backend a document id + cached text if that ever shows up in a
+    // profile on a very large script.
+
+    // The part texts alone — what the alias/column/function paths compare on.
+    const partTexts = (parts: IdentPart[] | null): string[] | null =>
+      parts && parts.length > 0 ? parts.map((p) => p.text) : null;
 
     // The script's own USE DATABASE/SCHEMA in effect at a hover position, memoized
     // per (model version, line): the context only changes at statement boundaries,
@@ -2086,11 +2110,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (key === cmdLinkKey) return;
       cmdLinkKey = key;   // claim synchronously; the async result fills or reverts it
       void (async () => {
-        const partsRaw = await identifierAt(line, pos.column - 1);
-        const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        const idParts = await identifierAt(pos);
+        const parts = partTexts(idParts);
         // alias.column is not a linkable object — don't underline it (match the hover flow).
         if (await matchTableAlias(parts)) { if (cmdLinkKey === key) { cmdLinkDecos.clear(); cmdLinkKey = null; } return; }
-        const obj = parts ? await resolveStoreObject(parts, editorSession(), await useContextAt(pos)) : null;
+        const obj = idParts && parts ? await resolveStoreObject(idParts, editorSession(), await useContextAt(pos)) : null;
         if (cmdLinkKey !== key) return;   // superseded by a newer identifier
         if (!obj || !cmdModHeld || !kindSupportsDdl(obj.kind)) { cmdLinkDecos.clear(); cmdLinkKey = null; return; }
         cmdLinkDecos.set([{
@@ -2109,15 +2133,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           !useFeatureFlagsStore.getState().flags.ddlHoverTooltips) return;
       if (posIsStale()) return;    // pos belongs to a since-swapped document (tab switch)
       if (markerAt(pos)) return;   // diagnostic marker wins at this position (match mouse-move flow)
-      const line = lineContentAt(m, pos);
-      if (line === null) return;   // stale pos past a shorter (tab-switched) document
+      // Stale pos past a shorter (tab-switched) document.
+      if (lineContentAt(m, pos) === null) return;
       const posLine = pos.lineNumber, posCol = pos.column;
       void (async () => {
-        const partsRaw = await identifierAt(line, pos.column - 1);
-        const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+        const idParts = await identifierAt(pos);
+        const parts = partTexts(idParts);
         // alias.column short-circuits to the column path — never object DDL (match hover flow).
         if (await matchTableAlias(parts)) return;
-        const obj = parts ? await resolveStoreObject(parts, editorSession(), await useContextAt(pos)) : null;
+        const obj = idParts && parts ? await resolveStoreObject(idParts, editorSession(), await useContextAt(pos)) : null;
         // Bail if the modifier was released or the mouse moved off this position
         // mid-await. Compare line/column, not object identity — Monaco hands out a
         // fresh Position on every move even for stationary sub-pixel jitter.
@@ -2237,10 +2261,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       void (async () => {
       const pos = e.target?.position;
-      const partsRaw = (pos && model)
-        ? await identifierAt(model.getLineContent(pos.lineNumber), pos.column - 1)
-        : null;
-      const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
+      const idParts = (pos && model) ? await identifierAt(pos) : null;
+      const parts = partTexts(idParts);
 
       const diagMarkerAtPos = (pos && model)
         ? (monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: model.uri }).find((m: any) =>
@@ -2330,7 +2352,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // Any object in the store (any kind). Plain hover → identity tooltip
         // (kind + name); with the modifier held → full DDL. No click needed.
-        const obj = await resolveStoreObject(parts, editorSession(), await useContextAt(pos));
+        const obj = idParts ? await resolveStoreObject(idParts, editorSession(), await useContextAt(pos)) : null;
         if (obj) {
           const shown = await showObjectTooltip(pos, obj, cmdModHeld);
           // Modifier held over a DDL-capable kind but the fetch failed → unpin the

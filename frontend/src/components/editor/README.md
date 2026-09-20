@@ -85,7 +85,8 @@ read `model.getValue()` directly, so they never depend on a React re-render.
 
 **Object hover + cmd/ctrl modifier (`ddlHoverTooltips` flag):** `resolveStoreObject(parts,
 session, useCtx)` (module-level) resolves a dotted identifier under the cursor to a store object
-of **any** kind (not just TABLE/VIEW).
+of **any** kind (not just TABLE/VIEW). `parts` is `IdentPart[]` — `{text, quoted}` per dotted
+segment, as `GetIdentifierAtColumn` returns it.
 
 The matching rules live in the backend — `sqleditor.ResolveStoreObject` qualifies the name from
 `useCtx` then `session` and matches strictly, so it resolves only where Snowflake would: 1-part →
@@ -94,8 +95,12 @@ context db + schema, 2-part → context db + written schema, 3-part → all thre
 loaded — or a temp table the script creates but has never run — got an underline whose DDL fetch
 then failed or showed a *different* object.
 
+A quoted part is matched case-sensitively and a bare one folded, Snowflake's own rule, so
+`"orders"` never resolves to `ORDERS` (#920) — which is why the identifier crosses the bridge as
+`IdentPart[]` rather than plain strings.
+
 This wrapper adds only the frontend's half. It pre-filters `objectStore` to objects whose name
-equals the last part (the whole store would otherwise cross the Wails bridge on every mouse-move
+equals the last part (case-insensitively — the backend applies the strict rule) (the whole store would otherwise cross the Wails bridge on every mouse-move
 while the modifier is held), and when the backend reports a miss with a `fetchDb`/`fetchSchema`
 hint it runs `ensureSchemaObjectsLoaded` for that namespace and asks once more. `session` is the
 caller's own `editorSession()`, so a split pane resolves against its own tab context (#717).
@@ -125,7 +130,14 @@ over an object" work without clicking in first. That path upgrades identity → 
 `showDdlAtLastPos()` — which honours diagnostic-marker precedence (`markerAt`) and bails if the mouse
 moved mid-fetch. While held, `evaluateCmdLink` underlines the identifier with a `.cmd-link`
 decoration (link affordance); `identifierRangeAt` (in `sqlEditorUtils.ts`, quote-aware so
-`DB."MY TABLE".COL` spans as one, unit-tested) computes the dotted-identifier span. All four hover
+`DB."MY TABLE".COL` spans as one, unit-tested) computes the dotted-identifier span.
+
+The identifier itself comes from `identifierAt(pos)`, which sends the **whole document** plus the
+1-based Monaco position to `GetIdentifierAtColumn` and memoizes on `(model version, line, column)`
+— the version is part of the key because an edit changes the answer. Sending the document (not the
+line) is what lets the backend see that the cursor sits in a block comment or a dollar-quoted body
+opened earlier, so hovering `ORDERS` inside `-- SELECT * FROM ORDERS` gets no underline and typing a
+dot inside a comment fires no `SHOW`/`DESCRIBE` (#920). All four hover
 tooltips (diagnostic, column, object, function) share `positionTooltip(pos, heightPx)` for screen
 placement. A resolved
 table alias short-circuits to the column path only — never object resolution — so `alias.col` can't

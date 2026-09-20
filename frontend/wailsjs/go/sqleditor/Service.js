@@ -34,8 +34,8 @@ export function GetAutocompleteContextFull(arg1) {
   return window['go']['sqleditor']['Service']['GetAutocompleteContextFull'](arg1);
 }
 
-export function GetIdentifierAtColumn(arg1, arg2) {
-  return window['go']['sqleditor']['Service']['GetIdentifierAtColumn'](arg1, arg2);
+export function GetIdentifierAtColumn(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['GetIdentifierAtColumn'](arg1, arg2, arg3);
 }
 
 export function GetSnowflakeKeywords() {

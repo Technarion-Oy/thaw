@@ -5060,6 +5060,20 @@ export namespace snowflake {
 	        this.name = source["name"];
 	    }
 	}
+	export class IdentPart {
+	    text: string;
+	    quoted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new IdentPart(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.quoted = source["quoted"];
+	    }
+	}
 	export class ImportTableParams {
 	    database: string;
 	    schema: string;

@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+// identAtCol0 adapts GetIdentifierAtColumn to the single-line, 0-based-column,
+// []string shape these table tests were written against: one line, Monaco
+// columns are 1-based, and a quoted part is rendered by its exact text while a
+// bare one is already folded.
+func identAtCol0(line string, col int) []string {
+	parts := GetIdentifierAtColumn(line, 1, col+1)
+	if parts == nil {
+		return nil
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = p.Text
+	}
+	return out
+}
+
 func TestGetIdentifierAtColumn(t *testing.T) {
 	tests := []struct {
 		name string
@@ -49,8 +65,10 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 
 		// Digits in identifier
 		{name: "identifier with digits", line: "table1.col2", col: 4, want: []string{"TABLE1", "COL2"}},
-		// Digit-led tokens: \w matches digits, so "123abc" is treated as one token (same as original TS /\w/)
-		{name: "identifier starting with digit matched as token", line: "123abc", col: 0, want: []string{"123ABC"}},
+		// Digit-led text tokenizes as a number literal followed by an identifier,
+		// so the cursor on the digits is on no identifier (#920).
+		{name: "digit-led token is a number literal", line: "123abc", col: 0, want: nil},
+		{name: "digit-led token - col on the word part", line: "123abc", col: 4, want: []string{"ABC"}},
 
 		// Two separate identifiers on the same line
 		{name: "two idents on line - col on first", line: "t1.c1, t2.c2", col: 1, want: []string{"T1", "C1"}},
@@ -84,9 +102,9 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetIdentifierAtColumn(tt.line, tt.col)
+			got := identAtCol0(tt.line, tt.col)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+				t.Errorf("identAtCol0(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
 			}
 		})
 	}

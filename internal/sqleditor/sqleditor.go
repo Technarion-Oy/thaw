@@ -415,85 +415,90 @@ func GetStatementRanges(sql string) []StatementRange {
 
 // ── GetIdentifierAtColumn ─────────────────────────────────────────────────────
 
-// GetIdentifierAtColumn parses a single line of SQL and returns the
-// dot-separated identifier parts (e.g. ["DB","SCHEMA","TABLE"]) when the
-// zero-indexed cursor column col falls on or between any of those parts,
-// including the dot separators.  Double-quoted identifiers (e.g. "My Table")
-// are unquoted before being returned.  Returns nil when the column is not on
-// any identifier.
-func GetIdentifierAtColumn(line string, col int) []string {
-	runes := []rune(line)
-	n := len(runes)
-	i := 0
-	for i < n {
-		r := runes[i]
-		if r != '"' && !isWordRune(r) {
-			i++
+// GetIdentifierAtColumn returns the dot-separated identifier parts under the
+// 1-based Monaco cursor position (line, col) — ["DB","SCHEMA","TABLE"] for a
+// cursor anywhere on db.schema.table, including its dots and a dangling
+// trailing dot (`db.|`, which is what fires schema autocomplete). Returns nil
+// when the cursor is not on an identifier.
+//
+// It takes the WHOLE document, not one line, and resolves through sqltok rather
+// than a rune scan (#920). Both properties are load-bearing:
+//
+//   - Comments and literals fall out for free — they are their own token kinds,
+//     so a cursor inside `-- SELECT * FROM ORDERS` or `'ORDERS'` is on no
+//     identifier and yields nil. A block comment or dollar-quoted body opened on
+//     an earlier line is only visible with the full document in hand.
+//   - Each part keeps its Quoted bit, so `"orders"` and ORDERS survive as the
+//     distinct objects Snowflake considers them (see sf.IdentEqual). A bare part
+//     is upper-cased — Snowflake folds unquoted identifiers — while a quoted one
+//     keeps its exact text with doubled quotes unescaped.
+//
+// Token columns are byte-based; the returned hit test is done in UTF-16 columns
+// (utf16Col), Monaco's coordinate system, so a non-ASCII character earlier on
+// the line doesn't shift the match.
+func GetIdentifierAtColumn(sql string, line, col int) []sf.IdentPart {
+	lines := strings.Split(sql, "\n")
+	sig := sqltok.Significant(sqltok.Tokenize(sql))
+	for i := 0; i < len(sig); i++ {
+		if !sig[i].Kind.IsIdentLike() {
 			continue
 		}
-
-		// Gather one dot-separated identifier chain starting at i.
-		parts := []string{}
-		containsCol := false
-
-		for i < n {
-			partStart := i
-			var partName []rune
-
-			if runes[i] == '"' {
-				i++ // skip opening quote
-				for i < n {
-					if runes[i] == '"' {
-						if i+1 < n && runes[i+1] == '"' {
-							partName = append(partName, '"')
-							i += 2
-							continue
-						}
-						i++ // skip closing quote
-						break
-					}
-					partName = append(partName, runes[i])
-					i++
-				}
-				parts = append(parts, string(partName))
-			} else if isWordRune(runes[i]) {
-				for i < n && isWordRune(runes[i]) {
-					partName = append(partName, runes[i])
-					i++
-				}
-				parts = append(parts, strings.ToUpper(string(partName)))
+		raw, next := sqltok.ReadIdentParts(sig, sql, i, 0)
+		end := next
+		if end < len(sig) && sig[end].Kind == sqltok.Dot {
+			end++ // a dangling `db.` belongs to the chain it trails
+		}
+		hit := false
+		for k := i; k < end && !hit; k++ {
+			hit = tokenHoldsCursor(lines, sig[k], sql, line, col)
+		}
+		i = next - 1 // resume past this chain (the loop's i++ lands on next)
+		if !hit {
+			continue
+		}
+		parts := make([]sf.IdentPart, len(raw))
+		for j, p := range raw {
+			if strings.HasPrefix(p, `"`) {
+				parts[j] = sf.IdentPart{Text: sqltok.Unquote(p), Quoted: true}
 			} else {
-				break
+				parts[j] = sf.IdentPart{Text: strings.ToUpper(p), Quoted: false}
 			}
-			if col >= partStart && col < i {
-				containsCol = true
-			}
-
-			// Continue chain if followed by '.'
-			if i < n && runes[i] == '.' {
-				if col == i {
-					containsCol = true
-				}
-				i++ // skip '.'
-
-				// If cursor is exactly after the dot, it also belongs to this chain.
-				if col == i {
-					containsCol = true
-				}
-
-				if i < n && (runes[i] == '"' || isWordRune(runes[i])) {
-					continue
-				}
-				break
-			}
-			break
 		}
-
-		if containsCol && len(parts) > 0 {
-			return parts
-		}
+		return parts
 	}
 	return nil
+}
+
+// tokenHoldsCursor reports whether the 1-based Monaco position (line, col) falls
+// on token t. A dot also claims the position just past it, so a cursor sitting
+// after the separator (`db.|schema`, `db.|`) still belongs to the chain.
+//
+// ponytail: only the token's first line is tested, so a cursor on the 2nd+ line
+// of a quoted identifier holding a newline misses. Walk the embedded newlines if
+// anyone ever writes one.
+func tokenHoldsCursor(lines []string, t sqltok.Token, src string, line, col int) bool {
+	if t.Line != line {
+		return false
+	}
+	start := utf16Col(lines, t.Line, t.Col)
+	end := start + utf16Len(t.Text(src))
+	if t.Kind == sqltok.Dot {
+		end++
+	}
+	return col >= start && col < end
+}
+
+// utf16Len returns the length of s in UTF-16 code units (Monaco's unit).
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r > 0xFFFF { // astral plane → surrogate pair
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 // isWordRune reports whether r is a SQL word character (\w equivalent).
@@ -3614,21 +3619,27 @@ func isTableOrView(kind string) bool {
 // ref.DB/ref.Schema from its session context BEFORE calling, which turns the
 // wildcards into an exact three-part match; see ResolveStoreObject.
 //
+// ref's parts are RAW identifier text — quotes preserved when the source quoted
+// them — so matching goes through sf.IdentEqual: a quoted `"orders"` compares
+// exactly, a bare ORDERS folds (#920). Callers that already stripped quoting
+// (ParseJoinTables normalises through normID) pass bare text, for which
+// IdentEqual is exactly the strings.EqualFold this used to do.
+//
 // Shared by ResolveTableRefs, findTableView and objectKnown so the match rule
-// (case-insensitive name, optional db/schema narrowing, kind filter) lives in
-// exactly one place.
+// (Snowflake identifier folding, optional db/schema narrowing, kind filter)
+// lives in exactly one place.
 func findStoreObject(objects []StoreObject, ref JoinTableRef, kindOK func(string) bool) (StoreObject, bool) {
 	for _, o := range objects {
 		if kindOK != nil && !kindOK(o.Kind) {
 			continue
 		}
-		if !strings.EqualFold(o.Name, ref.Name) {
+		if !sf.IdentEqual(ref.Name, o.Name) {
 			continue
 		}
-		if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
+		if ref.DB != "" && !sf.IdentEqual(ref.DB, o.DB) {
 			continue
 		}
-		if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
+		if ref.Schema != "" && !sf.IdentEqual(ref.Schema, o.Schema) {
 			continue
 		}
 		return o, true
@@ -3666,10 +3677,23 @@ type HoverObject struct {
 	FetchSchema string `json:"fetchSchema"`
 }
 
+// rawIdent re-renders an identifier part as it was written: quoted when the
+// source quoted it, bare otherwise. It is the inverse of the split in
+// GetIdentifierAtColumn and the input sf.IdentEqual expects.
+func rawIdent(p sf.IdentPart) string {
+	if p.Quoted {
+		return sf.QuoteIdent(p.Text)
+	}
+	return p.Text
+}
+
 // ResolveStoreObject resolves the dot-separated identifier under the editor
-// cursor — as GetIdentifierAtColumn returns it: already unquoted, bare parts
-// upper-cased — to a known store object of ANY kind. It backs the editor's hover
+// cursor — as GetIdentifierAtColumn returns it, each part carrying its Quoted
+// bit — to a known store object of ANY kind. It backs the editor's hover
 // identity tooltip and the cmd/ctrl-hold DDL link.
+//
+// The quoting bit survives into the match: a written `"orders"` resolves only to
+// a case-sensitively created orders, never to ORDERS (#920).
 //
 // Unlike ResolveTableRefs, which searches every namespace first and only then
 // falls back to context, the name is qualified from session FIRST and then
@@ -3704,7 +3728,7 @@ type HoverObject struct {
 // ponytail: a non-default SEARCH_PATH is still not tracked, so a name that only
 // resolves through it reads as non-existent here and gets no link. Read the
 // parameter and try each entry in turn if that bites.
-func ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
+func ResolveStoreObject(parts []sf.IdentPart, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
 	// The namespace an omitted qualifier resolves in: an in-script USE wins over
 	// the tab's session, the same precedence ResolveTableRefs applies (steps 3→4).
 	ctxDB, ctxSchema := "", ""
@@ -3719,14 +3743,22 @@ func ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseC
 			ctxSchema = useCtx.Schema
 		}
 	}
+	// findStoreObject matches on RAW text (sf.IdentEqual), so a quoted part goes
+	// back in quoted — that is what makes its comparison case-sensitive. Context
+	// names come from the session/USE and are already logical, hence bare.
+	// fetchDB/fetchSchema stay logical: they are handed to the frontend's object
+	// loader (ListObjects), which quotes them itself.
 	var ref JoinTableRef
+	fetchDB, fetchSchema := ctxDB, ctxSchema
 	switch {
 	case len(parts) >= 3:
-		ref = JoinTableRef{DB: parts[len(parts)-3], Schema: parts[len(parts)-2], Name: parts[len(parts)-1]}
+		ref = JoinTableRef{DB: rawIdent(parts[len(parts)-3]), Schema: rawIdent(parts[len(parts)-2]), Name: rawIdent(parts[len(parts)-1])}
+		fetchDB, fetchSchema = parts[len(parts)-3].Text, parts[len(parts)-2].Text
 	case len(parts) == 2:
-		ref = JoinTableRef{DB: ctxDB, Schema: parts[0], Name: parts[1]}
+		ref = JoinTableRef{DB: ctxDB, Schema: rawIdent(parts[0]), Name: rawIdent(parts[1])}
+		fetchSchema = parts[0].Text
 	case len(parts) == 1:
-		ref = JoinTableRef{DB: ctxDB, Schema: ctxSchema, Name: parts[0]}
+		ref = JoinTableRef{DB: ctxDB, Schema: ctxSchema, Name: rawIdent(parts[0])}
 	default:
 		return HoverObject{}
 	}
@@ -3740,7 +3772,7 @@ func ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseC
 			return HoverObject{Found: true, DB: o.DB, Schema: o.Schema, Name: o.Name, Kind: o.Kind}
 		}
 	}
-	return HoverObject{FetchDB: ref.DB, FetchSchema: ref.Schema}
+	return HoverObject{FetchDB: fetchDB, FetchSchema: fetchSchema}
 }
 
 // ResolveTableRefs resolves unqualified/partially-qualified table references

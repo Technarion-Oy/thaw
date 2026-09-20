@@ -5,6 +5,8 @@ package sqleditor
 import (
 	"strings"
 	"testing"
+
+	sf "thaw/internal/snowflake"
 )
 
 // Issue #918: the editor's cmd/ctrl-hover DDL link must only appear for objects
@@ -20,33 +22,33 @@ func TestResolveStoreObjectNamespaceScoping(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		parts     []string
+		parts     []sf.IdentPart
 		session   *SessionContext
 		wantFound bool
 		wantDB    string
 		wantSchem string
 		wantFetch [2]string // FetchDB, FetchSchema on a miss
 	}{
-		{"1-part in session schema", []string{"ORDERS"}, sess, true, "ANALYTICS", "PUBLIC", [2]string{}},
-		{"1-part case-folded", []string{"orders"}, sess, true, "ANALYTICS", "PUBLIC", [2]string{}},
+		{"1-part in session schema", bareParts("ORDERS"), sess, true, "ANALYTICS", "PUBLIC", [2]string{}},
+		{"1-part case-folded", bareParts("orders"), sess, true, "ANALYTICS", "PUBLIC", [2]string{}},
 		// The bug: ANALYTICS.RAW.EVENTS must not light up a bare EVENTS hovered
 		// while the session schema is PUBLIC.
-		{"1-part in another schema", []string{"EVENTS"}, sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
-		{"1-part in another database", []string{"CUSTOMERS"}, sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
+		{"1-part in another schema", bareParts("EVENTS"), sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
+		{"1-part in another database", bareParts("CUSTOMERS"), sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
 		// A temp table the script creates but has never run is in no schema listing.
-		{"1-part not created yet", []string{"ORDERS_TMP"}, sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
+		{"1-part not created yet", bareParts("ORDERS_TMP"), sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
 
-		{"2-part in session database", []string{"RAW", "EVENTS"}, sess, true, "ANALYTICS", "RAW", [2]string{}},
-		{"2-part in another database", []string{"PUBLIC", "CUSTOMERS"}, sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
+		{"2-part in session database", bareParts("RAW", "EVENTS"), sess, true, "ANALYTICS", "RAW", [2]string{}},
+		{"2-part in another database", bareParts("PUBLIC", "CUSTOMERS"), sess, false, "", "", [2]string{"ANALYTICS", "PUBLIC"}},
 
-		{"3-part exact", []string{"OTHER", "PUBLIC", "CUSTOMERS"}, sess, true, "OTHER", "PUBLIC", [2]string{}},
-		{"3-part wrong database", []string{"NOPE", "PUBLIC", "CUSTOMERS"}, sess, false, "", "", [2]string{"NOPE", "PUBLIC"}},
+		{"3-part exact", bareParts("OTHER", "PUBLIC", "CUSTOMERS"), sess, true, "OTHER", "PUBLIC", [2]string{}},
+		{"3-part wrong database", bareParts("NOPE", "PUBLIC", "CUSTOMERS"), sess, false, "", "", [2]string{"NOPE", "PUBLIC"}},
 		// A fully-qualified name needs no session at all.
-		{"3-part without session", []string{"OTHER", "PUBLIC", "CUSTOMERS"}, nil, true, "OTHER", "PUBLIC", [2]string{}},
+		{"3-part without session", bareParts("OTHER", "PUBLIC", "CUSTOMERS"), nil, true, "OTHER", "PUBLIC", [2]string{}},
 
 		// Nothing to resolve against → no hit and no namespace worth loading.
-		{"1-part without session schema", []string{"ORDERS"}, &SessionContext{Database: "ANALYTICS"}, false, "", "", [2]string{}},
-		{"2-part without session database", []string{"RAW", "EVENTS"}, &SessionContext{Schema: "PUBLIC"}, false, "", "", [2]string{}},
+		{"1-part without session schema", bareParts("ORDERS"), &SessionContext{Database: "ANALYTICS"}, false, "", "", [2]string{}},
+		{"2-part without session database", bareParts("RAW", "EVENTS"), &SessionContext{Schema: "PUBLIC"}, false, "", "", [2]string{}},
 		{"no parts", nil, sess, false, "", "", [2]string{}},
 	}
 
@@ -81,14 +83,14 @@ func TestResolveStoreObjectKindPreference(t *testing.T) {
 		{DB: "D", Schema: "S", Name: "MY_UDF", Kind: "FUNCTION"},
 		{DB: "D", Schema: "S", Name: "MY_PROC", Kind: "PROCEDURE"},
 	}
-	if got := ResolveStoreObject([]string{"ORDERS"}, objects, nil, sess); !got.Found || got.Kind != "TABLE" {
+	if got := ResolveStoreObject(bareParts("ORDERS"), objects, nil, sess); !got.Found || got.Kind != "TABLE" {
 		t.Errorf("ORDERS = %+v, want the TABLE", got)
 	}
-	if got := ResolveStoreObject([]string{"EVENTS"}, objects, nil, sess); !got.Found || got.Kind != "STREAM" {
+	if got := ResolveStoreObject(bareParts("EVENTS"), objects, nil, sess); !got.Found || got.Kind != "STREAM" {
 		t.Errorf("EVENTS = %+v, want the STREAM (only kind present)", got)
 	}
 	for _, n := range []string{"MY_UDF", "MY_PROC"} {
-		if got := ResolveStoreObject([]string{n}, objects, nil, sess); got.Found {
+		if got := ResolveStoreObject(bareParts(n), objects, nil, sess); got.Found {
 			t.Errorf("%s resolved to %+v, want no hit (callable kinds are excluded)", n, got)
 		}
 	}
@@ -106,18 +108,18 @@ func TestResolveStoreObjectUseContext(t *testing.T) {
 	}
 	sess := &SessionContext{Database: "ANALYTICS", Schema: "PUBLIC"}
 
-	if got := ResolveStoreObject([]string{"ORDERS"}, objects, &UseContext{Schema: "STAGING"}, sess); !got.Found || got.Schema != "STAGING" {
+	if got := ResolveStoreObject(bareParts("ORDERS"), objects, &UseContext{Schema: "STAGING"}, sess); !got.Found || got.Schema != "STAGING" {
 		t.Errorf("USE SCHEMA STAGING: got %+v, want ANALYTICS.STAGING", got)
 	}
-	if got := ResolveStoreObject([]string{"ORDERS"}, objects, &UseContext{Database: "OTHER", Schema: "STAGING"}, sess); !got.Found || got.DB != "OTHER" {
+	if got := ResolveStoreObject(bareParts("ORDERS"), objects, &UseContext{Database: "OTHER", Schema: "STAGING"}, sess); !got.Found || got.DB != "OTHER" {
 		t.Errorf("USE DATABASE OTHER: got %+v, want OTHER.STAGING", got)
 	}
 	// A partial USE leaves the other half to the session.
-	if got := ResolveStoreObject([]string{"STAGING", "ORDERS"}, objects, &UseContext{Schema: "IGNORED"}, sess); !got.Found || got.DB != "ANALYTICS" {
+	if got := ResolveStoreObject(bareParts("STAGING", "ORDERS"), objects, &UseContext{Schema: "IGNORED"}, sess); !got.Found || got.DB != "ANALYTICS" {
 		t.Errorf("2-part with USE SCHEMA: got %+v, want the session database", got)
 	}
 	// A fully-qualified name ignores both contexts.
-	if got := ResolveStoreObject([]string{"OTHER", "STAGING", "ORDERS"}, objects, &UseContext{Database: "ANALYTICS"}, sess); !got.Found || got.DB != "OTHER" {
+	if got := ResolveStoreObject(bareParts("OTHER", "STAGING", "ORDERS"), objects, &UseContext{Database: "ANALYTICS"}, sess); !got.Found || got.DB != "OTHER" {
 		t.Errorf("3-part: got %+v, want the written database", got)
 	}
 }
@@ -138,4 +140,17 @@ func TestUseContextAt(t *testing.T) {
 	if got := UseContextAt("SELECT * FROM ORDERS;", 5); got != nil {
 		t.Errorf("no USE statement: got %+v, want nil", got)
 	}
+}
+
+// bareParts builds the unquoted identifier path GetIdentifierAtColumn returns
+// for a name written without double quotes.
+func bareParts(names ...string) []sf.IdentPart {
+	if len(names) == 0 {
+		return nil
+	}
+	parts := make([]sf.IdentPart, len(names))
+	for i, n := range names {
+		parts[i] = sf.IdentPart{Text: n}
+	}
+	return parts
 }

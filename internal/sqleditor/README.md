@@ -70,7 +70,7 @@ Key capabilities:
   - `IsInJoinOnClause(textToCursor)` — cursor inside a JOIN … ON … not yet terminated
   - `DetectUsingClause(textToCursor)` — `InUsing` (empty USING) vs `IsPartial` (partial column list)
 - `GetStatementRanges(sql) []StatementRange` — per-statement line ranges and byte offsets; a bare (non-`$$`) scripting block (`scriptingblocks.go`) is coalesced into one range rather than split on its inner `;` (issue #793 A1)
-- `GetIdentifierAtColumn(line, col) []string` — dot-separated identifier parts under cursor
+- `GetIdentifierAtColumn(sql, line, col) []snowflake.IdentPart` — dot-separated identifier parts under the 1-based Monaco cursor position. Tokenized with `sqltok` over the **whole document**, so a cursor inside a comment, a string literal or a dollar-quoted body is on no identifier (nil) even when the `/* … */` opened on an earlier line, and each part keeps its `Quoted` bit — a bare part is upper-cased (Snowflake folds unquoted names), a quoted one keeps its exact text (#920). `ResolveStoreObject` feeds those parts back to `snowflake.IdentEqual`, so `"orders"` and `ORDERS` resolve to the distinct objects Snowflake considers them
 - `StarSelectAt(sql, line, col) *StarSelect` — select-list wildcard (`*`/`alias.*`) at a cursor position, with its replace span + qualifier (nil when not a wildcard)
 - `FromSourceCount(sql) int` — plain-table top-level FROM source count, or -1 when a bare `*` can't be safely expanded (nested SELECT/CTE, no FROM, or a non-table source: subquery / table function / PIVOT etc.)
 - `GetActiveFunctionCall(prefix) *FunctionCallContext` — innermost open function call + active parameter index

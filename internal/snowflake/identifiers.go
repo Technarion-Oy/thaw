@@ -108,8 +108,8 @@ func QualifyOrBare(db, schema, name string, caseSensitive bool) string {
 // quotes. Quoted signals case-sensitive intent, so a caller re-rendering the
 // name emits QuoteIdent for a quoted part and QuoteOrBare for a bare one.
 type IdentPart struct {
-	Text   string
-	Quoted bool
+	Text   string `json:"text"`
+	Quoted bool   `json:"quoted"`
 }
 
 // SplitQualifiedName splits a qualified Snowflake reference (DATABASE,

@@ -20,10 +20,13 @@ func TestGetIdentifierAtColumn_Extended(t *testing.T) {
 		want []string
 	}{
 		// ── Dollar sign in identifiers ────────────────────────────────────────
-		{name: "dollar variable single part", line: "$MY_VAR", col: 0, want: []string{"$MY_VAR"}},
-		{name: "dollar variable dot col", line: "$MY_VAR.col", col: 3, want: []string{"$MY_VAR", "COL"}},
-		{name: "dollar variable dot on dot", line: "$MY_VAR.col", col: 7, want: []string{"$MY_VAR", "COL"}},
-		{name: "dollar variable dot on second", line: "$MY_VAR.col", col: 9, want: []string{"$MY_VAR", "COL"}},
+		// A LEADING $ is its own token (a session-variable sigil, not part of the
+		// name), so the cursor on it is on no identifier; inside a name it is an
+		// ordinary identifier character (see "complex mixed" below).
+		{name: "dollar sigil is not the identifier", line: "$MY_VAR", col: 0, want: nil},
+		{name: "dollar variable dot col", line: "$MY_VAR.col", col: 3, want: []string{"MY_VAR", "COL"}},
+		{name: "dollar variable dot on dot", line: "$MY_VAR.col", col: 7, want: []string{"MY_VAR", "COL"}},
+		{name: "dollar variable dot on second", line: "$MY_VAR.col", col: 9, want: []string{"MY_VAR", "COL"}},
 
 		// ── Quoted identifiers with escaped double-quotes ─────────────────────
 		{name: "quoted with escaped dquote", line: `"My ""Crazy"" DB".schema`, col: 5, want: []string{`My "Crazy" DB`, "SCHEMA"}},
@@ -52,9 +55,10 @@ func TestGetIdentifierAtColumn_Extended(t *testing.T) {
 		{name: "ident after comma", line: "a, db.schema", col: 5, want: []string{"DB", "SCHEMA"}},
 
 		// ── Special characters ────────────────────────────────────────────────
-		{name: "all digits", line: "123", col: 1, want: []string{"123"}},
+		// Numbers are number literals, never identifiers (the old \w scan claimed them).
+		{name: "all digits", line: "123", col: 1, want: nil},
 		{name: "underscore only", line: "_", col: 0, want: []string{"_"}},
-		{name: "dollar only", line: "$", col: 0, want: []string{"$"}},
+		{name: "dollar only", line: "$", col: 0, want: nil},
 		{name: "complex mixed", line: `_a$1."Quoted Part"`, col: 0, want: []string{"_A$1", "Quoted Part"}},
 		{name: "complex mixed on quoted", line: `_a$1."Quoted Part"`, col: 10, want: []string{"_A$1", "Quoted Part"}},
 
@@ -71,9 +75,9 @@ func TestGetIdentifierAtColumn_Extended(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetIdentifierAtColumn(tt.line, tt.col)
+			got := identAtCol0(tt.line, tt.col)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+				t.Errorf("identAtCol0(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
 			}
 		})
 	}
@@ -2327,9 +2331,9 @@ func TestPkHeuristicConditions(t *testing.T) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 func TestGetIdentifierAtColumn_EmptyLine(t *testing.T) {
-	got := GetIdentifierAtColumn("", 0)
+	got := identAtCol0("", 0)
 	if got != nil {
-		t.Errorf("GetIdentifierAtColumn('', 0) = %v, want nil", got)
+		t.Errorf("identAtCol0('', 0) = %v, want nil", got)
 	}
 }
 
@@ -3353,9 +3357,9 @@ func TestGetScriptingCompletions_NeedsColonTrueForDMLInScript(t *testing.T) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 func TestGetIdentifierAtColumn_WhitespaceOnlyLine(t *testing.T) {
-	got := GetIdentifierAtColumn("   \t  ", 2)
+	got := identAtCol0("   \t  ", 2)
 	if got != nil {
-		t.Errorf("GetIdentifierAtColumn(whitespace, 2) = %v, want nil", got)
+		t.Errorf("identAtCol0(whitespace, 2) = %v, want nil", got)
 	}
 }
 
@@ -3506,22 +3510,22 @@ func TestGetIdentifierAtColumn_LeadingDotAtCol0(t *testing.T) {
 	// Col 0 sits on the leading dot itself, which is not a word char and not a quote.
 	// The scanner skips non-word, non-quote chars, then starts the chain at "a".
 	// Col 0 is before the chain's first part, so the chain should not contain it.
-	got := GetIdentifierAtColumn(".a.b", 0)
+	got := identAtCol0(".a.b", 0)
 	if got != nil {
-		t.Errorf("GetIdentifierAtColumn('.a.b', 0) = %v, want nil", got)
+		t.Errorf("identAtCol0('.a.b', 0) = %v, want nil", got)
 	}
 }
 
 func TestGetIdentifierAtColumn_OnlyDots(t *testing.T) {
-	got := GetIdentifierAtColumn("...", 1)
+	got := identAtCol0("...", 1)
 	if got != nil {
-		t.Errorf("GetIdentifierAtColumn('...', 1) = %v, want nil", got)
+		t.Errorf("identAtCol0('...', 1) = %v, want nil", got)
 	}
 }
 
 func TestGetIdentifierAtColumn_QuotedWithDotInside(t *testing.T) {
 	// A quoted identifier containing a dot should NOT split on the internal dot.
-	got := GetIdentifierAtColumn(`"db.schema"`, 5)
+	got := identAtCol0(`"db.schema"`, 5)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 part for quoted ident with dot, got %v", got)
 	}
@@ -4133,9 +4137,9 @@ func TestGetIdentifierAtColumn_OperatorBoundary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetIdentifierAtColumn(tt.line, tt.col)
+			got := identAtCol0(tt.line, tt.col)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+				t.Errorf("identAtCol0(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
 			}
 		})
 	}
