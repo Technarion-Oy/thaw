@@ -440,6 +440,12 @@ func GetIdentifierAtColumn(sql string, line, col int) []sf.IdentPart {
 	lines := strings.Split(sql, "\n")
 	sig := sqltok.Significant(sqltok.Tokenize(sql))
 	for i := 0; i < len(sig); i++ {
+		if sig[i].Kind == sqltok.DollarQuoted {
+			if parts := identInScriptingBody(lines, sig[i], sql, line, col); parts != nil {
+				return parts
+			}
+			continue
+		}
 		if !sig[i].Kind.IsIdentLike() {
 			continue
 		}
@@ -453,7 +459,9 @@ func GetIdentifierAtColumn(sql string, line, col int) []sf.IdentPart {
 		for k := i; k < next-1; k++ {
 			if sig[k].End != sig[k+1].Start {
 				next = k + 1
-				raw = raw[:(next-i+1)/2] // parts are at i, i+2, …
+				// Parts sit at even offsets from i, so next-i tokens hold
+				// ⌈(next-i)/2⌉ of them — the trailing dot, if any, is not one.
+				raw = raw[:(next-i+1)/2]
 				break
 			}
 		}
@@ -480,6 +488,48 @@ func GetIdentifierAtColumn(sql string, line, col int) []sf.IdentPart {
 		return parts
 	}
 	return nil
+}
+
+// identInScriptingBody resolves the identifier under the cursor inside a
+// Snowflake Scripting $$ … $$ body, or nil when the cursor is elsewhere or the
+// body is not scripting.
+//
+// A dollar-quoted token is opaque to the tokenizer, so without this a cursor
+// anywhere inside a procedure body or an EXECUTE IMMEDIATE block would be on no
+// identifier — no hover tooltip, no DDL link, no schema autocomplete after a
+// dot — even though the content is ordinary SQL. The rest of the package
+// already recurses into these bodies (validateSyntaxScope, validateBindVarColons,
+// scriptingContext); this keeps the hover path in step.
+//
+// "Scripting" is the same predicate validateSyntaxScope uses: an anonymous block,
+// i.e. a body opening with BEGIN or DECLARE. A plain string constant
+// (SELECT $$hi$$) or a non-SQL UDF body (LANGUAGE PYTHON … AS $$…$$) stays
+// opaque — reading identifiers out of Python is how #704 got phantom errors.
+func identInScriptingBody(lines []string, t sqltok.Token, src string, line, col int) []sf.IdentPart {
+	text := t.Text(src)
+	if t.Unterminated || len(text) < 2*len(t.Tag) {
+		return nil
+	}
+	inner := text[len(t.Tag) : len(text)-len(t.Tag)]
+	if kw := getFirstSQLToken(inner); kw != "BEGIN" && kw != "DECLARE" {
+		return nil
+	}
+	// Rebase the cursor into the body's own coordinates. Only its first line is
+	// offset — it starts len(tag) columns into the opening line (the tag is
+	// ASCII, so bytes and UTF-16 units agree); every later line is the body's
+	// alone. Same rebasing as validateSyntaxScope's, in the opposite direction.
+	bodyLines := strings.Count(inner, "\n") + 1
+	if line < t.Line || line > t.Line+bodyLines-1 {
+		return nil
+	}
+	innerLine, innerCol := line-t.Line+1, col
+	if innerLine == 1 {
+		innerCol = col - (utf16Col(lines, t.Line, t.Col) + len(t.Tag)) + 1
+	}
+	if innerCol < 1 {
+		return nil // on the opening $$ itself
+	}
+	return GetIdentifierAtColumn(inner, innerLine, innerCol)
 }
 
 // tokenHoldsCursor reports whether the 1-based Monaco position (line, col) falls

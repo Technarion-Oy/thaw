@@ -28,7 +28,7 @@ func TestGetIdentifierAtColumnTokenized(t *testing.T) {
 		{"line comment", 1, 19, nil},      // ORDERS inside --
 		{"string literal", 2, 10, nil},    // 'ORDERS'
 		{"block comment body", 4, 9, nil}, // ORDERS inside /* */ opened a line earlier
-		{"dollar-quoted body", 6, 9, nil}, // ORDERS inside $$ … $$
+		{"dollar-quoted body", 6, 9, nil}, // ORDERS inside a non-scripting $$ … $$
 		{"quoted ident keeps its case", 2, 33, []sf.IdentPart{{Text: "orders", Quoted: true}}},
 		{"bare parts fold, quoted part does not", 5, 22, []sf.IdentPart{
 			{Text: "DB"}, {Text: "My Schema", Quoted: true}, {Text: "TBL"},
@@ -38,6 +38,48 @@ func TestGetIdentifierAtColumnTokenized(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := GetIdentifierAtColumn(doc, tt.line, tt.col); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetIdentifierAtColumn(line %d, col %d) = %+v, want %+v", tt.line, tt.col, got, tt.want)
+			}
+		})
+	}
+}
+
+// A $$ … $$ body that is an anonymous block (BEGIN/DECLARE) holds ordinary SQL,
+// so the hover, DDL-link and dot-autocomplete paths must see through it — the
+// tokenizer reports it as one opaque DollarQuoted token. Every other body (a
+// plain string constant, a Python/JavaScript UDF) stays opaque, the same
+// predicate validateSyntaxScope applies (#704).
+func TestGetIdentifierAtColumnScriptingBody(t *testing.T) {
+	const proc = "CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL AS $$ BEGIN SELECT * FROM db.sch.tbl; END $$"
+	const block = "EXECUTE IMMEDIATE $$\nBEGIN\n  SELECT * FROM db.sch.\nEND\n$$"
+	dbSchTbl := []sf.IdentPart{{Text: "DB"}, {Text: "SCH"}, {Text: "TBL"}}
+
+	tests := []struct {
+		name      string
+		sql       string
+		line, col int
+		want      []sf.IdentPart
+	}{
+		// A procedure body on one line: the body starts mid-line, so only its
+		// first line is column-shifted.
+		{"procedure body, single line", proc, 1, 76, dbSchTbl},
+		{"procedure body, keyword in it", proc, 1, 60, []sf.IdentPart{{Text: "SELECT"}}},
+		// A multi-line EXECUTE IMMEDIATE block: later lines are the body's own.
+		{"block body, later line", "EXECUTE IMMEDIATE $$\nBEGIN\n  SELECT * FROM db.sch.tbl;\nEND\n$$", 3, 20, dbSchTbl},
+		// The dangling dot still fires schema autocomplete inside a body.
+		{"block body, trailing dot", block, 3, 24, []sf.IdentPart{{Text: "DB"}, {Text: "SCH"}}},
+		{"block body, past the trailing dot", block, 3, 25, nil},
+		// The $$ delimiters themselves are on no identifier.
+		{"on the opening delimiter", block, 1, 19, nil},
+		{"on the closing delimiter", block, 5, 1, nil},
+		// Non-scripting bodies stay opaque.
+		{"python body", "CREATE FUNCTION f() LANGUAGE PYTHON AS $$\nimport db.sch\n$$", 2, 9, nil},
+		{"plain string constant", "SELECT $$hi$$", 1, 10, nil},
+		{"non-block SQL body", "EXECUTE IMMEDIATE $$ SELECT * FROM orders $$", 1, 35, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetIdentifierAtColumn(tt.sql, tt.line, tt.col); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetIdentifierAtColumn(%q, %d, %d) = %+v, want %+v", tt.sql, tt.line, tt.col, got, tt.want)
 			}
 		})
 	}

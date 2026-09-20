@@ -137,7 +137,9 @@ The identifier itself comes from `identifierAt(pos)`, which sends the **whole do
 — the version is part of the key because an edit changes the answer. Sending the document (not the
 line) is what lets the backend see that the cursor sits in a block comment or a dollar-quoted body
 opened earlier, so hovering `ORDERS` inside `-- SELECT * FROM ORDERS` gets no underline and typing a
-dot inside a comment fires no `SHOW`/`DESCRIBE` (#920). All four hover
+dot inside a comment fires no `SHOW`/`DESCRIBE` (#920). A `$$ … $$` Snowflake Scripting body
+(`BEGIN`/`DECLARE`) is the exception the backend recurses into — it is ordinary SQL, so hover and
+dot-autocomplete work inside a procedure body just as they do outside one. All four hover
 tooltips (diagnostic, column, object, function) share `positionTooltip(pos, heightPx)` for screen
 placement. A resolved
 table alias short-circuits to the column path only — never object resolution — so `alias.col` can't
