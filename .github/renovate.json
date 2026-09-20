@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", ":semanticCommitsDisabled"],
   "timezone": "Europe/Helsinki",
-  "schedule": ["before 6am on monday"],
+  "schedule": ["on monday"],
   "configMigration": true,
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Dependency Dashboard",
@@ -18,6 +18,9 @@
   "commitBodyTable": true,
   "description": [
     "Renovate configuration for Thaw (Wails v2: Go backend + React/TS frontend).",
+    "The schedule is a whole day, not a morning window: GitHub starts the twice-daily cron in",
+    "renovate.yml 4-6h late (~10:30-11:40 Helsinki), which never matched `before 6am on monday`,",
+    "so no routine update ever left the dashboard's Awaiting Schedule list.",
     "Commit/PR titles use a bare `chore:` prefix because .github/workflows/pr-title-check.yml",
     "requires a conventional type followed immediately by a colon — `chore(deps):` would fail it.",
     "`chore:` also means routine dependency PRs do not trigger a semantic-release version bump;",
@@ -25,7 +28,7 @@
   ],
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on the first day of the month"],
+    "schedule": ["on the first day of the month"],
     "commitMessagePrefix": "chore:"
   },
   "vulnerabilityAlerts": {
