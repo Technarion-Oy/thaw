@@ -44,6 +44,21 @@ a flat list, so the shared `obj` entries (Tag References…, Insert Full Name, V
 Properties, Select for Comparison, Compare with…, Rename…) carry an explicit `objKind !== "TABLE"`
 guard to avoid double-rendering once they also appear inside a table submenu.
 
+### `openObjectProperties` — the one kind → Properties-modal dispatch
+Every **Properties** menu item in the tree routes through `viewProperties`, which parses the node key
+(`db:DB`, `schema:DB:SCHEMA`, `obj:DB:SCHEMA:KIND:NAME`) and hands `{kind, db, schema, name}` — plus
+`args` for the callable kinds, `isFinalizer` for tasks, `readOnly` for `INFORMATION_SCHEMA` — to
+`openObjectProperties`. That function is the **single** kind → modal mapping: one `switch` from `KIND`
+to the dedicated `set<Kind>PropsModal` setter, falling through to the generic read-only
+`GetObjectProperties` list (`PropertiesModal`) for kinds with no dedicated modal. Adding an object
+kind with an editable Properties modal means adding one `case` there — nowhere else.
+
+It is also reachable **from outside the sidebar**: a `thaw:open-object-properties` window event with
+the same `{kind, db, schema, name}` detail opens the modal (issue #921), which is how the SQL editor's
+right-click **Properties…** item works (see `components/editor/README.md`). The sidebar keeps owning
+the modal state, so nothing needs a store; the listener is registered once and calls the current
+render's closure through a ref.
+
 ### `isInfoSchema` — read-only system-schema guard
 `INFORMATION_SCHEMA` is Snowflake-owned and read-only (views + table functions only; no DDL,
 Time Travel, or tagging). The module-level `isInfoSchema(nodeKey)` helper reports whether a

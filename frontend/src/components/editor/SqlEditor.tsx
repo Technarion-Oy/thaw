@@ -590,17 +590,17 @@ async function statementTextAtLine(fullSql: string, line: number): Promise<strin
 // tokenizer (Service.StarSelectAt) — a `*` inside a quoted identifier
 // ("a*b table") or a multiplication (`a * b`) is never misread. The menu is
 // merely gated on a cheap `starMenuEligible` check; the authoritative decision
-// runs in the command against `_starMenuPos` (the click point, or the cursor for
+// runs in the command against `_ctxMenuPos` (the click point, or the cursor for
 // a keyboard-invoked menu — see the onContextMenu handler).
 
 // Where the context menu was invoked: the mouse click point for a right-click
 // (which, inside a selection, differs from the live cursor), or the cursor for a
-// keyboard-invoked menu. Set in onContextMenu; read by the command.
-let _starMenuPos: monacoLib.IPosition | null = null;
+// keyboard-invoked menu. Set in onContextMenu; read by the commands below.
+let _ctxMenuPos: monacoLib.IPosition | null = null;
 
-// The tab whose editor last opened the star menu; the command validates against
+// The tab whose editor last opened the context menu; the commands resolve against
 // this tab's own session (split pane vs. active tab). Set in onContextMenu. #717.
-let _starMenuTabId: string | undefined;
+let _ctxMenuTabId: string | undefined;
 
 let _expandWildcardRegistered = false;
 (() => {
@@ -612,7 +612,7 @@ let _expandWildcardRegistered = false;
     const editor = _activeSnippetEditor;
     if (!editor) return;
     const model = editor.getModel();
-    const position = _starMenuPos ?? editor.getPosition();
+    const position = _ctxMenuPos ?? editor.getPosition();
     if (!model || !position) return;
 
     // Bail if the document changes under us across the awaited round-trips below
@@ -648,7 +648,7 @@ let _expandWildcardRegistered = false;
         (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
         useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-        sessionForTab(_starMenuTabId) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        sessionForTab(_ctxMenuTabId) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
       );
     } catch { return; }
     if (!refs || refs.length === 0 || stale()) return;
@@ -700,6 +700,42 @@ let _expandWildcardRegistered = false;
     editor.executeEdits("thaw.expandWildcard", [{ range, text: parts.join(", "), forceMoveMarkers: true }]);
     editor.pushUndoStop();
     editor.focus();
+  });
+
+  // ── "Properties…" context menu item ──────────────────────────────────────────
+  // Right-click an object name → the same Properties modal the sidebar's node
+  // menu opens (#921). The sidebar owns the kind → modal mapping and listens for
+  // `thaw:open-object-properties`; all this command does is resolve the
+  // identifier under the click to {db, schema, kind, name} — the same
+  // hover/cmd-link path, so comments, string literals and quoted names behave
+  // identically (#920). Callable kinds (FUNCTION/PROCEDURE/…) are excluded by
+  // ResolveStoreObject, so they resolve to nothing and the item no-ops.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (CommandsRegistry as any).registerCommand("thaw.objectProperties", async () => {
+    const editor = _activeSnippetEditor;
+    const model  = editor?.getModel();
+    const pos    = _ctxMenuPos ?? editor?.getPosition();
+    if (!model || !pos) return;
+    const sql = model.getValue();
+    const [parts, useCtx] = await Promise.all([
+      GetIdentifierAtColumn(sql, pos.lineNumber, pos.column).catch(() => null),
+      GetUseContextAt(sql, model.getOffsetAt({ lineNumber: pos.lineNumber, column: 1 })).catch(() => null),
+    ]);
+    if (!parts || parts.length === 0) return;
+    const obj = await resolveStoreObject(parts, sessionForTab(_ctxMenuTabId), useCtx ?? null);
+    if (!obj) return;
+    window.dispatchEvent(new CustomEvent("thaw:open-object-properties", { detail: obj }));
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    command: { id: "thaw.objectProperties", title: "Properties…" },
+    group: "2_thaw_expand",
+    order: 1,
+    when: ContextKeyExpr.and(
+      ContextKeyExpr.equals("editorLangId", "sql"),
+      ContextKeyExpr.has("thawIdentUnderCursor"),
+    ),
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2644,23 +2680,29 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     // selection* (where Monaco leaves the cursor put, so e.target.position — the
     // click point — is the only source of truth). The authoritative wildcard decision
     // (alias / multiplication / range) runs in the command via Service.StarSelectAt.
-    const starCtxKey = editor.createContextKey<boolean>("thawStarUnderCursor", false);
-    const updateStarGate = (pos: monacoLib.IPosition | null | undefined) => {
+    // The "Properties…" item (#921) rides the same gates: identifierRangeAt is the
+    // same synchronous span the DDL hover uses, so the item shows on anything that
+    // *looks* like a name (a keyword included — telling them apart needs the IPC
+    // round-trip the command runs anyway, where a miss is a silent no-op).
+    const starCtxKey  = editor.createContextKey<boolean>("thawStarUnderCursor", false);
+    const identCtxKey = editor.createContextKey<boolean>("thawIdentUnderCursor", false);
+    const updateCtxMenuGates = (pos: monacoLib.IPosition | null | undefined) => {
       const model = editor.getModel();
       const line = model && pos ? model.getLineContent(pos.lineNumber) : "";
       starCtxKey.set(!!pos && starMenuEligible(line, pos.column));
+      identCtxKey.set(!!pos && identifierRangeAt(line, pos.column - 1) !== null);
     };
-    editor.onDidChangeCursorPosition((e) => updateStarGate(e.position));
+    editor.onDidChangeCursorPosition((e) => updateCtxMenuGates(e.position));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateStarGate(e.target?.position); });
+    editor.onMouseDown((e: any) => { if (e.event?.rightButton) updateCtxMenuGates(e.target?.position); });
     editor.onContextMenu((e) => {
       _activeSnippetEditor = editor;
-      _starMenuTabId = tabId; // validate Expand-* against this pane's own session (#717)
+      _ctxMenuTabId = tabId; // resolve against this pane's own session (#717)
       // The command reads this: the click point for a right-click (differs from the
       // live cursor inside a selection), or the cursor for a keyboard-invoked menu
       // (where e.target.position is null).
-      _starMenuPos = e.target.position ?? editor.getPosition();
-      updateStarGate(_starMenuPos);
+      _ctxMenuPos = e.target.position ?? editor.getPosition();
+      updateCtxMenuGates(_ctxMenuPos);
     });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;

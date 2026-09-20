@@ -184,7 +184,7 @@ rather than `onContextMenu` (whose listener may run after Monaco already showed 
 `onDidChangeCursorPosition` (keyboard nav + clicks that move the cursor) and the right-mouse
 `onMouseDown` (a right-click *inside a selection*, where Monaco leaves the cursor put so the click
 point `e.target.position` is the only truth). The authoritative decision runs in the command against
-`_starMenuPos` — the click point for a right-click, or `editor.getPosition()` for a keyboard-invoked
+`_ctxMenuPos` — the click point for a right-click, or `editor.getPosition()` for a keyboard-invoked
 menu (`e.target.position` is null there) — via `Service.StarSelectAt`, and no-ops if the token isn't
 really a wildcard. The command then scopes to the statement (`statementTextAtLine`, shared with the
 Explain SQL handler), resolves its `FROM`/`JOIN` refs (`ParseJoinTableRefs` + `ResolveTableRefs`,
@@ -208,6 +208,23 @@ same fetch instead of getting an empty list.) `starMenuEligible` also hides the 
 single-quoted string literal (`'x*y'`), which `identifierRangeAt` — double-quote-only — doesn't cover;
 its `'`-parity scan skips double-quoted identifiers so an apostrophe in a column name (`"it's"`) can't
 flip it.
+
+**Object Properties context menu (#921):** A second module-level `MenuRegistry` item
+(`thaw.objectProperties`, "Properties…", same `2_thaw_expand` group) opens the *same* Properties
+modal the sidebar's node menu opens, for the object name under the right-click — no detour through
+the tree. The command resolves the identifier at `_ctxMenuPos` exactly as the hover/cmd-link path
+does (`GetIdentifierAtColumn` + `GetUseContextAt` + the module-level `resolveStoreObject`, against
+`sessionForTab(_ctxMenuTabId)` so a split pane uses its own session, #717), then dispatches
+`thaw:open-object-properties` with `{db, schema, kind, name}`. The **sidebar** listens for that event
+and owns the kind → modal mapping (`openObjectProperties`, see `components/layout/README.md`), so the
+editor never imports a modal and no store is involved. It is independent of the `ddlHoverTooltips`
+feature flag. Misses are silent: `ResolveStoreObject` skips the callable kinds
+(`hoverExcludedKinds` — FUNCTION/PROCEDURE/EXTERNAL FUNCTION/DATA METRIC FUNCTION need an overload
+signature a bare name can't supply), and names in comments/string literals or with the wrong case on
+a quoted identifier resolve to nothing (#920). The display gate is the per-editor
+`thawIdentUnderCursor` context key, set alongside `thawStarUnderCursor` in the same
+`updateCtxMenuGates` from `identifierRangeAt` — cheap and synchronous (the menu renders before any
+IPC could answer), so the item shows on anything that *looks* like a name, keywords included.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
 `ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is
