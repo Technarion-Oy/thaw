@@ -234,7 +234,7 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess, onDef
   ];
 
   const divider = (label: string) => (
-    <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "16px 0 8px" }}>
+    <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "16px 0 8px" }}>
       {label}
     </Divider>
   );

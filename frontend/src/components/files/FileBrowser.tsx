@@ -29,7 +29,7 @@ import {
   ExportOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
-import type { Key } from "rc-tree/lib/interface";
+import type { Key } from "react";
 import {
   ListDirectory,
   ReadFile,

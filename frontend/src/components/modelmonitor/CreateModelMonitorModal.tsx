@@ -283,7 +283,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
           />
         </Form.Item>
 
-        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Model</Divider>
+        <Divider titlePlacement="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Model</Divider>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 12px" }}>
           <Form.Item label="Model" required style={itemStyle} help="Model in this schema">
@@ -319,7 +319,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
           </Form.Item>
         </div>
 
-        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Source & schedule</Divider>
+        <Divider titlePlacement="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Source & schedule</Divider>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
           <Form.Item label="Source table / view" required style={itemStyle}>
@@ -427,7 +427,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
           </Form.Item>
         </div>
 
-        <Divider orientation="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Columns</Divider>
+        <Divider titlePlacement="left" style={{ margin: "4px 0 12px", fontSize: 12 }}>Columns</Divider>
 
         <Form.Item label="Prediction score columns" style={itemStyle} required={!hasPrediction}
           help="At least one prediction column (score or class) is required">

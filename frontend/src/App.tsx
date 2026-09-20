@@ -355,10 +355,10 @@ export default function App() {
     <ConfigProvider
       theme={{
         algorithm: antdAlgorithm,
-        // Emit --ant-* CSS vars instead of inline-injected styles. Theme switches
-        // become cheap (single :root var change) and custom CSS can layer on top
-        // without specificity fights.
-        cssVar: true,
+        // --ant-* CSS vars (instead of inline-injected styles) are always on in
+        // antd v6, so there is no `cssVar` flag to set: theme switches are cheap
+        // (single :root var change) and custom CSS layers on top without
+        // specificity fights.
         hashed: false,
         token: {
           // ── Typography

@@ -151,7 +151,7 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           />
         </Form.Item>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
+        <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
           Identity
         </Divider>
 
@@ -174,7 +174,7 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           <Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="john@example.com" />
         </Form.Item>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
+        <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
           Defaults
         </Divider>
 
@@ -209,7 +209,7 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           <Input value={form.defaultNamespace} onChange={(e) => set("defaultNamespace", e.target.value)} placeholder="MY_DB.MY_SCHEMA" />
         </Form.Item>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
+        <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
           Security
         </Divider>
 
@@ -241,7 +241,7 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           <Input value={form.comment} onChange={(e) => set("comment", e.target.value)} />
         </Form.Item>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
+        <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
           Key Pair Authentication
         </Divider>
 

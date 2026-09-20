@@ -156,7 +156,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   };
 
   const divider = (label: string) => (
-    <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "12px 0 6px" }}>
+    <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "12px 0 6px" }}>
       {label}
     </Divider>
   );

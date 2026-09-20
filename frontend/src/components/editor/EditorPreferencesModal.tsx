@@ -39,7 +39,7 @@ order by amount desc nulls last`;
 
 function Section({ title }: { title: string }) {
   return (
-    <Divider orientation="left" style={{ fontSize: 12, color: "var(--text-muted)", margin: "20px 0 8px" }}>
+    <Divider titlePlacement="left" style={{ fontSize: 12, color: "var(--text-muted)", margin: "20px 0 8px" }}>
       {title}
     </Divider>
   );
