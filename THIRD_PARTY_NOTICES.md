@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (99)
-- [Frontend — npm packages](#frontend--npm-packages) (176)
+- [Frontend — npm packages](#frontend--npm-packages) (173)
 
 ## Backend — Go modules
 
@@ -9313,8 +9313,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@types/d3-transition` | 3.0.9 | MIT |
 | `@types/d3-zoom` | 3.0.8 | MIT |
 | `@types/pegjs` | 0.10.6 | MIT |
-| `@types/prop-types` | 15.7.15 | MIT |
-| `@types/react` | 18.3.28 | MIT |
+| `@types/react` | 19.3.0 | MIT |
 | `@types/trusted-types` | 2.0.7 | MIT |
 | `@types/use-sync-external-store` | 0.0.6 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
@@ -9360,11 +9359,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `immer` | 11.1.4 | MIT |
 | `internmap` | 2.0.3 | ISC |
 | `is-mobile` | 5.0.0 | MIT |
-| `js-tokens` | 4.0.0 | MIT |
 | `json2mq` | 0.2.0 | MIT |
 | `jsonc-parser` | 3.3.1 | MIT |
 | `leaflet` | 1.9.4 | BSD-2-Clause |
-| `loose-envify` | 1.4.0 | MIT |
 | `marked` | 14.0.0 | MIT |
 | `monaco-editor` | 0.55.1 | MIT |
 | `monaco-languageserver-types` | 0.4.0 | MIT |
@@ -9379,8 +9376,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `prettier` | 3.8.1 | MIT |
 | `railroad-diagrams` | 1.0.0 | CC0-1.0 |
 | `randexp` | 0.4.6 | MIT |
-| `react` | 18.3.1 | MIT |
-| `react-dom` | 18.3.1 | MIT |
+| `react` | 19.3.0 | MIT |
+| `react-dom` | 19.3.0 | MIT |
 | `react-is` | 19.3.0 | MIT |
 | `react-redux` | 9.2.0 | MIT |
 | `recharts` | 3.8.0 | MIT |
@@ -9388,7 +9385,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `redux-thunk` | 3.1.0 | MIT |
 | `reselect` | 5.1.1 | MIT |
 | `ret` | 0.1.15 | MIT |
-| `scheduler` | 0.23.2 | MIT |
+| `scheduler` | 0.28.0 | MIT |
 | `scroll-into-view-if-needed` | 3.1.0 | MIT |
 | `sql-formatter` | 15.7.3 | MIT |
 | `ssf` | 0.11.2 | Apache-2.0 |
@@ -11493,38 +11490,9 @@ SOFTWARE.
     SOFTWARE
 ```
 
-### @types/prop-types
-
-- **Version:** 15.7.15
-- **License:** MIT
-
-```
-    MIT License
-
-    Copyright (c) Microsoft Corporation.
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE
-```
-
 ### @types/react
 
-- **Version:** 18.3.28
+- **Version:** 19.3.0
 - **License:** MIT
 
 ```
@@ -14184,35 +14152,6 @@ THIS SOFTWARE.
 
 _No license file was found in the distributed package. Refer to the project's repository for its license terms._
 
-### js-tokens
-
-- **Version:** 4.0.0
-- **License:** MIT
-
-```
-The MIT License (MIT)
-
-Copyright (c) 2014, 2015, 2016, 2017, 2018 Simon Lydell
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-```
-
 ### json2mq
 
 - **Version:** 0.2.0
@@ -14303,35 +14242,6 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
-
-### loose-envify
-
-- **Version:** 1.4.0
-- **License:** MIT
-
-```
-The MIT License (MIT)
-
-Copyright (c) 2015 Andres Suarez <zertosh@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 ```
 
 ### marked
@@ -14899,13 +14809,13 @@ THE SOFTWARE.
 
 ### react
 
-- **Version:** 18.3.1
+- **Version:** 19.3.0
 - **License:** MIT
 
 ```
 MIT License
 
-Copyright (c) Facebook, Inc. and its affiliates.
+Copyright (c) Meta Platforms, Inc. and affiliates.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -14928,13 +14838,13 @@ SOFTWARE.
 
 ### react-dom
 
-- **Version:** 18.3.1
+- **Version:** 19.3.0
 - **License:** MIT
 
 ```
 MIT License
 
-Copyright (c) Facebook, Inc. and its affiliates.
+Copyright (c) Meta Platforms, Inc. and affiliates.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -15158,13 +15068,13 @@ THE SOFTWARE.
 
 ### scheduler
 
-- **Version:** 0.23.2
+- **Version:** 0.28.0
 - **License:** MIT
 
 ```
 MIT License
 
-Copyright (c) Facebook, Inc. and its affiliates.
+Copyright (c) Meta Platforms, Inc. and affiliates.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
