@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,27 +19,89 @@ var httpClient = &http.Client{Timeout: 3 * time.Second}
 var ollamaHttpClient = &http.Client{Timeout: 15 * time.Second}
 
 // GetSuggestion requests an inline SQL completion from the configured provider.
-// provider must be "openai", "google", or "ollama". Returns the trimmed completion text.
+// provider must be "openai", "google", or "ollama". Returns the completion text
+// ready to insert at the cursor: every provider's reply goes through Sanitize,
+// so prefix must be the text before the cursor that prompt was built from.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
 // ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
 // both are ignored for non-Ollama providers.
-func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort, ollamaNumCtx int) (string, error) {
+func GetSuggestion(provider, apiKey, model, prompt, prefix string, ollamaPort, ollamaNumCtx int) (string, error) {
+	var (
+		raw string
+		err error
+	)
 	switch provider {
 	case "openai":
-		return openAISuggestion(apiKey, model, prompt)
+		raw, err = openAISuggestion(apiKey, model, prompt)
 	case "google":
-		return googleSuggestion(apiKey, model, prompt)
+		raw, err = googleSuggestion(apiKey, model, prompt)
 	case "ollama":
-		return ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
+		raw, err = ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
+	if err != nil {
+		return "", err
+	}
+	return Sanitize(prefix, raw), nil
+}
+
+// fencedBlock matches the first markdown code fence in a reply and captures its
+// body, tolerating a missing closing fence (the reply can be cut off by the
+// token limit mid-block).
+var fencedBlock = regexp.MustCompile("(?s)```(?:[a-zA-Z]*\\n)?(.*?)(?:```|$)")
+
+// Sanitize turns a chat-style reply into text that can be inserted at the cursor.
+// Models answer the completion prompt as a question — a whole statement inside a
+// ```sql fence — so it takes the first fenced block when there is one, then drops
+// the longest suffix of prefix that the reply restates (case-insensitively).
+// Both defects are independent of the provider, hence one sanitiser on the shared path.
+func Sanitize(prefix, reply string) string {
+	if m := fencedBlock.FindStringSubmatch(reply); m != nil {
+		reply = m[1]
+	}
+	// Left-trim before matching, right-trim only after: the prefix ends in the
+	// whitespace the user typed, so an echo of it must still match. This is why
+	// the providers hand over their text untrimmed.
+	body := strings.TrimLeft(reply, " \t\r\n")
+	for i := range prefix {
+		// Only a suffix starting at a token boundary is a repetition. Without
+		// this, prefix "…from ac" + completion "count" reads as a repeated "c"
+		// and inserts "acount".
+		if i > 0 && isWordByte(prefix[i-1]) && isWordByte(prefix[i]) {
+			continue
+		}
+		suffix := prefix[i:]
+		// Byte-length compare: EqualFold folds per rune, so the handful of
+		// characters that change UTF-8 length when folded (e.g. the Kelvin sign)
+		// simply do not match. Identifiers that reach here are SQL text.
+		if len(body) >= len(suffix) && strings.EqualFold(body[:len(suffix)], suffix) {
+			return strings.TrimRight(body[len(suffix):], " \t\r\n")
+		}
+	}
+	// No repetition: the model is continuing the prefix, so keep one separator
+	// when it sent leading whitespace and the user's text does not end in any.
+	if len(body) < len(reply) && prefix != "" && !isSpaceByte(prefix[len(prefix)-1]) {
+		body = " " + body
+	}
+	return strings.TrimRight(body, " \t\r\n")
+}
+
+// isWordByte reports whether b can occur inside a SQL identifier.
+func isWordByte(b byte) bool {
+	return b == '_' || b == '$' ||
+		b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+func isSpaceByte(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 
 // openAISuggestion requests an inline SQL completion from the OpenAI Chat
-// Completions API. It returns the trimmed response text or an error.
+// Completions API. It returns the response text untrimmed (Sanitize owns
+// trimming: it must see the whitespace the model sent) or an error.
 func openAISuggestion(apiKey, model, prompt string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"model":      model,
@@ -85,7 +148,7 @@ func openAISuggestion(apiKey, model, prompt string) (string, error) {
 	if len(result.Choices) == 0 {
 		return "", nil
 	}
-	return strings.TrimSpace(result.Choices[0].Message.Content), nil
+	return result.Choices[0].Message.Content, nil
 }
 
 // ── Model listing ─────────────────────────────────────────────────────────────
@@ -395,7 +458,8 @@ func testOllamaModel(base, model string, numCtx int) error {
 	return nil
 }
 
-// ollamaSuggestion requests an inline SQL completion from the local Ollama /api/generate endpoint.
+// ollamaSuggestion requests an inline SQL completion from the local Ollama
+// /api/generate endpoint. The response text is returned untrimmed (see openAISuggestion).
 // numCtx sets the context window size; 0 means use Ollama's default.
 func ollamaSuggestion(base, model, prompt string, numCtx int) (string, error) {
 	payload := map[string]any{
@@ -434,13 +498,13 @@ func ollamaSuggestion(base, model, prompt string, numCtx int) (string, error) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(result.Response), nil
+	return result.Response, nil
 }
 
 // ── Google AI Studios (Gemini) ────────────────────────────────────────────────
 
 // googleSuggestion requests an inline SQL completion from the Google Gemini
-// generateContent API. It returns the trimmed response text or an error.
+// generateContent API. It returns the response text untrimmed (see openAISuggestion).
 func googleSuggestion(apiKey, model, prompt string) (string, error) {
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
@@ -495,5 +559,5 @@ func googleSuggestion(apiKey, model, prompt string) (string, error) {
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
 		return "", nil
 	}
-	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
+	return result.Candidates[0].Content.Parts[0].Text, nil
 }
