@@ -44,8 +44,8 @@ func (a *App) TestAIModel(provider, apiKey, model string, ollamaPort, ollamaNumC
 // schemaCtx carries the objects the current statement references with their
 // cached columns and foreign keys; it is rendered in front of the prompt so the
 // model completes against real column names instead of inventing them. It is
-// built from frontend caches (never fetched) and ignored when the user turned
-// "Include schema context" off.
+// built from frontend caches (never fetched) and ignored unless
+// cfg.AI.SchemaContextEnabled() — see that method for the unset case.
 func (a *App) GetAISuggestion(prefix string, schemaCtx ai.SchemaContext) string {
 	cfg, err := config.Load()
 	if err != nil {
@@ -64,12 +64,7 @@ func (a *App) GetAISuggestion(prefix string, schemaCtx ai.SchemaContext) string 
 		}
 	}
 
-	schemaBlock := ""
-	if !cfg.AI.NoSchemaContext {
-		schemaBlock = ai.SchemaBlock(schemaCtx, ai.SchemaCharBudget(cfg.AI.OllamaNumCtx))
-	}
-
-	prompt := schemaBlock + "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix
+	prompt := ai.BuildPrompt(prefix, schemaCtx, cfg.AI.OllamaNumCtx, cfg.AI.SchemaContextEnabled())
 
 	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, apiKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {

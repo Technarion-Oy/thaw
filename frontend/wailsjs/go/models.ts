@@ -90,7 +90,6 @@ export namespace ai {
 	    db: string;
 	    schema: string;
 	    name: string;
-	    kind: string;
 	    columns: SchemaColumn[];
 	    fks: SchemaFK[];
 	
@@ -103,7 +102,6 @@ export namespace ai {
 	        this.db = source["db"];
 	        this.schema = source["schema"];
 	        this.name = source["name"];
-	        this.kind = source["kind"];
 	        this.columns = this.convertValues(source["columns"], SchemaColumn);
 	        this.fks = this.convertValues(source["fks"], SchemaFK);
 	    }
@@ -616,7 +614,7 @@ export namespace config {
 	    enabled: boolean;
 	    ollamaPort?: number;
 	    ollamaNumCtx?: number;
-	    noSchemaContext?: boolean;
+	    schemaContext?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AIConfig(source);
@@ -630,7 +628,7 @@ export namespace config {
 	        this.enabled = source["enabled"];
 	        this.ollamaPort = source["ollamaPort"];
 	        this.ollamaNumCtx = source["ollamaNumCtx"];
-	        this.noSchemaContext = source["noSchemaContext"];
+	        this.schemaContext = source["schemaContext"];
 	    }
 	}
 	export class EditorPrefs {

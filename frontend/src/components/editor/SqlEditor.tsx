@@ -31,7 +31,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, aiSchemaTables, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -283,36 +283,6 @@ const getColInfos = (db: string, schema: string, table: string): Promise<ColInfo
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (cols ?? []).map((c: any) => ({ name: c.name ?? "", dataType: c.dataType ?? "" }));
   });
-
-// ── AI schema context ─────────────────────────────────────────────────────────
-// Turn the statement's resolved refs into the schema block fed to GetAISuggestion
-// (#924). Reads the caches diagnostics already warms and never fetches: a table
-// whose columns aren't cached yet is omitted and reappears on the next keystroke.
-// Nearest-the-cursor first, since the backend truncates from the tail when the
-// block exceeds the model's budget.
-function aiSchemaTables(refs: ResolvedRef[]): unknown[] {
-  const kindOf = new Map(
-    useObjectStore.getState().objects.map((o) => [colCacheKey(o.db, o.schema, o.name), o.kind]),
-  );
-  const seen = new Set<string>();
-  const tables: unknown[] = [];
-  for (let i = refs.length - 1; i >= 0; i--) {
-    const ref = refs[i];
-    const key = colCacheKey(ref.db, ref.schema, ref.name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const columns = colInfoCache.get(key);
-    if (!columns || columns.length === 0) continue;
-    tables.push({
-      db: ref.db, schema: ref.schema, name: ref.name, kind: kindOf.get(key) ?? "",
-      columns,
-      fks: getFKsCached(ref.db, ref.schema, ref.name).map((fk) => ({
-        column: fk.fkColumn, refTable: fk.pkTable, refColumn: fk.pkColumn,
-      })),
-    });
-  }
-  return tables;
-}
 
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
 const fetchedFKSchemas = new Set<string>(); 
@@ -2494,19 +2464,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
 
-          // The statement's table references, resolved against the object store.
-          // Both consumers below (JOIN ON shortcut, AI schema context) want the
-          // same list, so it is resolved at most once per provider call.
-          let refsPromise: Promise<ResolvedRef[]> | null = null;
-          const resolveRefsOnce = (): Promise<ResolvedRef[]> => refsPromise ??= (async () => {
-            const raw = await ParseJoinTableRefs(prefixFull);
+          // Resolve the refs against the object store. The two consumers below want
+          // different scopes — the JOIN shortcut completes the half-typed JOIN, so it
+          // wants the text up to the cursor; the AI path describes the statement being
+          // written, so it wants the whole statement (see below).
+          const resolveRefs = async (sql: string): Promise<ResolvedRef[]> => {
+            const raw = await ParseJoinTableRefs(sql);
             if (!raw || (raw as any[]).length === 0) return [];
             return (await ResolveTableRefs(raw as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any)) ?? [];
-          })();
+          };
 
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
-            const resolved = await resolveRefsOnce();
+            const resolved = await resolveRefs(prefixFull);
             if (resolved.length >= 2) {
               const fkEntries = resolved.map((ref) => ({
                 db: ref.db, schema: ref.schema, name: ref.name,
@@ -2536,7 +2506,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (trimmed.trim().length < 3) return { items: [] };
           if (!useFeatureFlagsStore.getState().flags.aiInlineCompletions) return { items: [] };
 
-          const suggestion = await GetAISuggestion(trimmed, { tables: aiSchemaTables(await resolveRefsOnce()) } as any);
+          // Schema context (#924) is scoped to the *statement* at the cursor, not to
+          // `prefixFull`: a worksheet's earlier statements would otherwise burn the
+          // budget with unrelated tables — and send their column names to a hosted
+          // provider — while `SELECT | FROM orders`, the case that needs columns most,
+          // would find none at all because its FROM sits after the cursor.
+          // Failing to resolve costs the context, never the completion.
+          let schemaTables: unknown[] = [];
+          try {
+            const stmtSql = await statementTextAtLine(model.getValue(), position.lineNumber);
+            schemaTables = aiSchemaTables(await resolveRefs(stmtSql), (key) => colInfoCache.get(key));
+          } catch { /* no schema context this keystroke */ }
+          // Three IPC round-trips happened since the last check; don't pay for an
+          // LLM request the user has already typed past.
+          if (token.isCancellationRequested) return { items: [] };
+
+          const suggestion = await GetAISuggestion(trimmed, { tables: schemaTables } as any);
           if (token.isCancellationRequested || !suggestion) return { items: [] };
 
           return { items: [{ insertText: suggestion }] };

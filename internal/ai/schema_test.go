@@ -8,7 +8,7 @@ import (
 )
 
 func tbl(name string, ncols int) SchemaTable {
-	t := SchemaTable{Name: name, Kind: "TABLE"}
+	t := SchemaTable{Name: name, Schema: "PUBLIC"}
 	for i := 0; i < ncols; i++ {
 		t.Columns = append(t.Columns, SchemaColumn{Name: "C" + string(rune('A'+i%26)) + string(rune('0'+i/26)), DataType: "NUMBER"})
 	}
@@ -53,7 +53,7 @@ func TestSchemaBlock_TruncatesColumns(t *testing.T) {
 
 func TestSchemaBlock_StopsAtBudget(t *testing.T) {
 	// Two tables, budget big enough for the header and the first only.
-	first := tableLine(tbl("A", 3))
+	first := tableLine(tbl("A", 3), false)
 	got := SchemaBlock(SchemaContext{Tables: []SchemaTable{tbl("A", 3), tbl("B", 3)}}, len("-- Schema context\n")+len(first))
 	if strings.Contains(got, "B(") {
 		t.Fatalf("second table should not fit: %q", got)
@@ -72,5 +72,47 @@ func TestSchemaCharBudget(t *testing.T) {
 	}
 	if got := SchemaCharBudget(32768); got != 32768 {
 		t.Fatalf("SchemaCharBudget(32768) = %d, want 32768", got)
+	}
+}
+
+func TestSchemaBlock_QuotesAndQualifies(t *testing.T) {
+	ctx := SchemaContext{Tables: []SchemaTable{
+		// Quoted in the source, so case-sensitive: the quotes have to survive.
+		{Schema: "RAW", Name: "Orders", Columns: []SchemaColumn{{Name: "Id", DataType: "NUMBER"}},
+			FKs: []SchemaFK{{Column: "Cust Id", RefTable: "CUSTOMERS", RefColumn: "ID"}}},
+		// Same name in two schemas: both get qualified, neither alone would.
+		{Schema: "RAW", Name: "ORDERS", Columns: []SchemaColumn{{Name: "ID", DataType: "NUMBER"}}},
+		{Schema: "STAGING", Name: "ORDERS", Columns: []SchemaColumn{{Name: "ID", DataType: "NUMBER"}}},
+	}}
+	got := SchemaBlock(ctx, 4096)
+	for _, want := range []string{
+		`"Orders"("Id" NUMBER)`,
+		`-- "Orders"."Cust Id" -> CUSTOMERS.ID`,
+		"RAW.ORDERS(ID NUMBER)",
+		"STAGING.ORDERS(ID NUMBER)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestBuildPrompt_HonoursIncludeSchema(t *testing.T) {
+	ctx := SchemaContext{Tables: []SchemaTable{
+		{Name: "ORDERS", Columns: []SchemaColumn{{Name: "CUSTOMER_ID", DataType: "NUMBER"}}},
+	}}
+
+	with := BuildPrompt("SELECT ", ctx, 0, true)
+	if !strings.Contains(with, "CUSTOMER_ID") || !strings.HasSuffix(with, "SELECT ") {
+		t.Fatalf("schema block or prefix missing:\n%s", with)
+	}
+
+	// The privacy-critical case: nothing from the catalog may reach the provider.
+	without := BuildPrompt("SELECT ", ctx, 0, false)
+	if strings.Contains(without, "CUSTOMER_ID") || strings.Contains(without, "Schema context") {
+		t.Fatalf("schema context leaked with includeSchema=false:\n%s", without)
+	}
+	if without != completionInstruction+"SELECT " {
+		t.Fatalf("prompt = %q, want instruction + prefix", without)
 	}
 }

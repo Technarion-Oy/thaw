@@ -14,8 +14,8 @@
 | File | Purpose |
 |------|---------|
 | `ai.go` | All exported API surface: `GetSuggestion`, `ListModels`, `TestModel`, plus internal provider implementations |
-| `schema.go` | `SchemaContext` types and `SchemaBlock` / `SchemaCharBudget` — the schema block prepended to completion prompts (#924) |
-| `schema_test.go` | Formatting, per-table column truncation and budget-cutoff rules for `SchemaBlock` |
+| `schema.go` | `SchemaContext` types, `BuildPrompt`, and `SchemaBlock` / `SchemaCharBudget` — the schema block prepended to completion prompts (#924) |
+| `schema_test.go` | Formatting, quoting/qualification, per-table column truncation, budget cutoff, and that `BuildPrompt` sends nothing from the catalog when schema context is off |
 | `doc.go` | Package doc and `// thaw:domain: AI Tooling` annotation |
 
 ## Key types & functions
@@ -31,9 +31,15 @@ func ListModels(provider, apiKey string, ollamaPort int) ([]string, error)
 func TestModel(provider, apiKey, model string, ollamaPort, ollamaNumCtx int) error
 
 // schema.go
+func BuildPrompt(prefix string, ctx SchemaContext, numCtx int, includeSchema bool) string
 func SchemaBlock(ctx SchemaContext, charBudget int) string
 func SchemaCharBudget(numCtx int) int
 ```
+
+**Prompt assembly:** `BuildPrompt` is the whole inline-completion prompt — schema block,
+standing instruction, then the text before the cursor. `includeSchema` is an explicit
+parameter rather than something inferred from an empty context: whether the catalog may be
+sent is a privacy decision, so it is one testable flag rather than an emergent property.
 
 **Schema block:** `SchemaContext` is what the editor already knows about the statement under
 the cursor — the resolved table refs with their cached columns (name + data type) and foreign
@@ -46,12 +52,17 @@ ORDERS(ID NUMBER, CUSTOMER_ID NUMBER)
 CUSTOMERS(ID NUMBER, EMAIL VARCHAR)
 ```
 
-Tables arrive nearest-the-cursor first and are emitted until `charBudget` would be exceeded;
-a table past `maxColumnsPerTable` (40) columns is truncated with a `…(+k more)` marker, and a
-table with no cached columns is skipped entirely (its bare name tells the model nothing the
-prefix doesn't). `SchemaCharBudget` derives the budget from the Ollama context window
-(~4 chars/token, so `numCtx` chars ≈ a quarter of the window), defaulting to 4096 for hosted
-providers.
+Tables arrive nearest-the-cursor first and are emitted until `charBudget` would be exceeded
+(by the trailing blank line, at most one byte); a table past `maxColumnsPerTable` (40) columns
+is truncated with a `…(+k more)` marker, and a table with no cached columns is skipped entirely
+(its bare name tells the model nothing the prefix doesn't). Identifiers that Snowflake would not
+fold to themselves keep their double quotes, so a case-sensitive name (#922) reaches the model
+spelled the way it must be typed; a name appearing in two schemas is qualified, and only then.
+`SchemaCharBudget` derives the budget from the Ollama context window (~4 chars/token, so
+`numCtx` chars ≈ a quarter of the window), defaulting to 4096 for hosted providers.
+
+`SchemaTable` carries no object kind: views, dynamic, external and iceberg tables all render
+identically, so nothing downstream would read it.
 
 **Provider routing:** each exported function switches on `provider` ("openai" | "google" | "ollama") and calls a private implementation.
 
@@ -75,6 +86,6 @@ providers.
 ## Gotchas
 
 - This package has no connection to `internal/snowflake`. It is a pure HTTP client layer — no Wails context, no `*App` receiver. `schema.go` is pure formatting: it never fetches the schema it renders, the caller passes what it already has.
-- The schema-context switch is persisted **inverted** (`config.AIConfig.NoSchemaContext`) so a config written before the field existed defaults to "on" without a migration. The UI reads it as "Include schema context".
+- The schema-context switch is a **tri-state** in config (`config.AIConfig.SchemaContext *bool`); `SchemaContextEnabled()` owns the unset case — off for an install that already had a hosted provider (upgrading must not start sending column names to OpenAI/Google unasked), on for Ollama. `GetAIConfig` resolves it before the modal sees it, so saving records an explicit choice.
 - The Ollama suggestion path uses `ollamaHttpClient` (15 s) while listing uses the shorter `httpClient` (3 s); do not swap them or listing will hang on cold model loads.
 - `listOpenAIModels` filters by the `"gpt-"` prefix. Newer OpenAI model families (e.g. `o1-*`) are intentionally excluded unless that filter is updated.

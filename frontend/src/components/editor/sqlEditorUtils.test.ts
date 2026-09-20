@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { describe, it, expect, beforeEach } from "vitest";
+import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines, aiSchemaTables, colCacheKey, setFKCache, clearFKCache } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -163,5 +163,55 @@ describe("gitDiffLines", () => {
   it("keeps interior and trailing blank lines beyond the terminator", () => {
     expect(gitDiffLines("a\n\nb\n")).toEqual(["a", "", "b"]);
     expect(gitDiffLines("a\n\n")).toEqual(["a", ""]);
+  });
+});
+
+// ── aiSchemaTables ────────────────────────────────────────────────────────────
+describe("aiSchemaTables", () => {
+  const ref = (name: string) => ({ db: "D", schema: "S", name });
+  const cols = (...names: string[]) => names.map((n) => ({ name: n, dataType: "NUMBER" }));
+  // Stand-in for the module-private colInfoCache in SqlEditor.tsx.
+  const cacheOf = (m: Record<string, { name: string; dataType: string }[]>) =>
+    (key: string) => m[key];
+
+  beforeEach(() => clearFKCache());
+
+  it("emits nearest-the-cursor first", () => {
+    const got = aiSchemaTables([ref("A"), ref("B")], cacheOf({
+      [colCacheKey("D", "S", "A")]: cols("ID"),
+      [colCacheKey("D", "S", "B")]: cols("ID"),
+    }));
+    expect(got.map((t) => t.name)).toEqual(["B", "A"]);
+  });
+
+  it("omits a table whose columns aren't cached yet, and one cached as empty", () => {
+    const got = aiSchemaTables([ref("COLD"), ref("EMPTY"), ref("WARM")], cacheOf({
+      [colCacheKey("D", "S", "EMPTY")]: [],
+      [colCacheKey("D", "S", "WARM")]: cols("ID"),
+    }));
+    expect(got.map((t) => t.name)).toEqual(["WARM"]);
+  });
+
+  it("dedups a self-join", () => {
+    const got = aiSchemaTables([ref("A"), ref("A")], cacheOf({
+      [colCacheKey("D", "S", "A")]: cols("ID", "PARENT_ID"),
+    }));
+    expect(got).toHaveLength(1);
+    expect(got[0].columns).toHaveLength(2);
+  });
+
+  it("maps cached FKs to the Go shape", () => {
+    setFKCache(colCacheKey("D", "S", "ORDERS"), [{
+      pkDatabase: "D", pkSchema: "S", pkTable: "CUSTOMERS", pkColumn: "ID",
+      fkColumn: "CUSTOMER_ID", constraintName: "FK1", keySequence: 1,
+    }]);
+    const got = aiSchemaTables([ref("ORDERS")], cacheOf({
+      [colCacheKey("D", "S", "ORDERS")]: cols("ID", "CUSTOMER_ID"),
+    }));
+    expect(got[0].fks).toEqual([{ column: "CUSTOMER_ID", refTable: "CUSTOMERS", refColumn: "ID" }]);
+  });
+
+  it("returns nothing for no refs", () => {
+    expect(aiSchemaTables([], cacheOf({}))).toEqual([]);
   });
 });
