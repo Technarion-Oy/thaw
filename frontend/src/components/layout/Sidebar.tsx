@@ -2012,13 +2012,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateStageModal({ db, schema });
   };
 
-  const openStageProperties = () => {
-    if (!ctxMenu) return;
-    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
-    const name = nameParts.join(":");
-    setCtxMenu(null);
-    setStagePropertiesModal({ db, schema, name });
-  };
 
   const openStageBrowser = () => {
     if (!ctxMenu) return;
@@ -2168,15 +2161,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreatePipeModal({ db, schema });
   };
 
-  const openPipeProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setPipePropsModal({ db, schema, name });
-  };
 
   const openRefreshPipe = () => {
     if (!ctxMenu) return;
@@ -2262,15 +2246,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateDynamicTableModal({ db, schema });
   };
 
-  const openDynamicTableProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setDynamicTablePropsModal({ db, schema, name });
-  };
 
   const suspendDynamicTable = () => {
     if (!ctxMenu) return;
@@ -2348,15 +2323,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateExternalTableModal({ db, schema });
   };
 
-  const openExternalTableProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setExternalTablePropsModal({ db, schema, name });
-  };
 
   const refreshExternalTable = () => {
     if (!ctxMenu) return;
@@ -2389,15 +2355,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateIcebergTableModal({ db, schema });
   };
 
-  const openIcebergTableProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setIcebergTablePropsModal({ db, schema, name });
-  };
 
   const refreshIcebergTable = () => {
     if (!ctxMenu) return;
@@ -2430,15 +2387,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateHybridTableModal({ db, schema });
   };
 
-  const openHybridTableProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setHybridTablePropsModal({ db, schema, name });
-  };
 
   const openCreateEventTable = () => {
     if (!ctxMenu) return;
@@ -2449,15 +2397,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateEventTableModal({ db, schema });
   };
 
-  const openEventTableProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setEventTablePropsModal({ db, schema, name });
-  };
 
   const openCreateExternalFunction = () => {
     if (!ctxMenu) return;
@@ -2468,17 +2407,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateExternalFunctionModal({ db, schema });
   };
 
-  const openExternalFunctionProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    // The argument signature resolves the overload for DESCRIBE / ALTER FUNCTION.
-    const args = ctxMenu.objArgs ?? "";
-    setCtxMenu(null);
-    setExternalFunctionPropsModal({ db, schema, name, args });
-  };
 
   const openCreateDataMetricFunction = () => {
     if (!ctxMenu) return;
@@ -2489,17 +2417,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateDataMetricFunctionModal({ db, schema });
   };
 
-  const openDataMetricFunctionProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    // The TABLE argument signature resolves the overload for DESCRIBE / ALTER FUNCTION.
-    const args = ctxMenu.objArgs ?? "";
-    setCtxMenu(null);
-    setDataMetricFunctionPropsModal({ db, schema, name, args });
-  };
 
   const openCreateMaterializedView = () => {
     if (!ctxMenu) return;
@@ -2510,15 +2427,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateMaterializedViewModal({ db, schema });
   };
 
-  const openMaterializedViewProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setMaterializedViewPropsModal({ db, schema, name });
-  };
 
   const openCreateView = () => {
     if (!ctxMenu) return;
@@ -2527,12 +2435,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateViewModal({ db: parts[1], schema: parts[2] });
   };
 
-  const openViewProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    setCtxMenu(null);
-    setViewPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
-  };
 
   const openCreateSequence = () => {
     if (!ctxMenu) return;
@@ -2541,12 +2443,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateSequenceModal({ db: parts[1], schema: parts[2] });
   };
 
-  const openSequenceProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    setCtxMenu(null);
-    setSequencePropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
-  };
 
   const openCreateStream = () => {
     if (!ctxMenu) return;
@@ -2555,12 +2451,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateStreamModal({ db: parts[1], schema: parts[2] });
   };
 
-  const openStreamProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    setCtxMenu(null);
-    setStreamPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
-  };
 
   const openCreateFunction = () => {
     if (!ctxMenu) return;
@@ -2569,13 +2459,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateFunctionModal({ db: parts[1], schema: parts[2] });
   };
 
-  const openFunctionProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const args = ctxMenu.objArgs ?? "";
-    setCtxMenu(null);
-    setFunctionPropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), args });
-  };
 
   const openCreateProcedure = () => {
     if (!ctxMenu) return;
@@ -2584,13 +2467,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateProcedureModal({ db: parts[1], schema: parts[2] });
   };
 
-  const openProcedureProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const args = ctxMenu.objArgs ?? "";
-    setCtxMenu(null);
-    setProcedurePropsModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), args });
-  };
 
   const suspendMaterializedView = () => {
     if (!ctxMenu) return;
@@ -2646,15 +2522,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateAlertModal({ db, schema });
   };
 
-  const openAlertProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setAlertPropsModal({ db, schema, name });
-  };
 
   const openCreateTag = () => {
     if (!ctxMenu) return;
@@ -2665,15 +2532,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateTagModal({ db, schema });
   };
 
-  const openTagProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setTagPropsModal({ db, schema, name });
-  };
 
   const openTagManagement = () => {
     setCtxMenu(null);
@@ -2723,15 +2581,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateMaskingPolicyModal({ db, schema });
   };
 
-  const openMaskingPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setMaskingPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreatePasswordPolicy = () => {
     if (!ctxMenu) return;
@@ -2742,15 +2591,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreatePasswordPolicyModal({ db, schema });
   };
 
-  const openPasswordPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setPasswordPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateSessionPolicy = () => {
     if (!ctxMenu) return;
@@ -2761,15 +2601,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateSessionPolicyModal({ db, schema });
   };
 
-  const openSessionPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setSessionPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateAggregationPolicy = () => {
     if (!ctxMenu) return;
@@ -2780,15 +2611,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateAggregationPolicyModal({ db, schema });
   };
 
-  const openAggregationPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setAggregationPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateProjectionPolicy = () => {
     if (!ctxMenu) return;
@@ -2799,15 +2621,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateProjectionPolicyModal({ db, schema });
   };
 
-  const openProjectionPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setProjectionPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateAuthenticationPolicy = () => {
     if (!ctxMenu) return;
@@ -2818,15 +2631,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateAuthenticationPolicyModal({ db, schema });
   };
 
-  const openAuthenticationPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setAuthenticationPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreatePackagesPolicy = () => {
     if (!ctxMenu) return;
@@ -2837,15 +2641,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreatePackagesPolicyModal({ db, schema });
   };
 
-  const openPackagesPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setPackagesPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateRowAccessPolicy = () => {
     if (!ctxMenu) return;
@@ -2856,15 +2651,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateRowAccessPolicyModal({ db, schema });
   };
 
-  const openRowAccessPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setRowAccessPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateJoinPolicy = () => {
     if (!ctxMenu) return;
@@ -2875,15 +2661,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateJoinPolicyModal({ db, schema });
   };
 
-  const openJoinPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setJoinPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreatePrivacyPolicy = () => {
     if (!ctxMenu) return;
@@ -2894,15 +2671,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreatePrivacyPolicyModal({ db, schema });
   };
 
-  const openPrivacyPolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setPrivacyPolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateStorageLifecyclePolicy = () => {
     if (!ctxMenu) return;
@@ -2913,15 +2681,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateStorageLifecyclePolicyModal({ db, schema });
   };
 
-  const openStorageLifecyclePolicyProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setStorageLifecyclePolicyPropsModal({ db, schema, name });
-  };
 
   const openCreateNetworkRule = () => {
     if (!ctxMenu) return;
@@ -2932,15 +2691,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateNetworkRuleModal({ db, schema });
   };
 
-  const openNetworkRuleProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setNetworkRulePropsModal({ db, schema, name });
-  };
 
   const openCreateImageRepository = () => {
     if (!ctxMenu) return;
@@ -2951,15 +2701,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateImageRepositoryModal({ db, schema });
   };
 
-  const openImageRepositoryProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setImageRepositoryPropsModal({ db, schema, name });
-  };
 
   const openCreateModel = () => {
     if (!ctxMenu) return;
@@ -2970,15 +2711,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateModelModal({ db, schema });
   };
 
-  const openModelProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setModelPropsModal({ db, schema, name });
-  };
 
   const openCreateModelMonitor = () => {
     if (!ctxMenu) return;
@@ -2989,15 +2721,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateModelMonitorModal({ db, schema });
   };
 
-  const openModelMonitorProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setModelMonitorPropsModal({ db, schema, name });
-  };
 
   const openCreateDataset = () => {
     if (!ctxMenu) return;
@@ -3008,15 +2731,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateDatasetModal({ db, schema });
   };
 
-  const openDatasetProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setDatasetPropsModal({ db, schema, name });
-  };
 
   const suspendModelMonitor = () => {
     if (!ctxMenu) return;
@@ -3072,15 +2786,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateCortexSearchModal({ db, schema });
   };
 
-  const openCortexSearchServiceProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setCortexSearchPropsModal({ db, schema, name });
-  };
 
   const openCreateAgent = () => {
     if (!ctxMenu) return;
@@ -3091,15 +2796,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateAgentModal({ db, schema });
   };
 
-  const openAgentProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setAgentPropsModal({ db, schema, name });
-  };
 
   const openCreateExternalAgent = () => {
     if (!ctxMenu) return;
@@ -3110,15 +2806,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateExternalAgentModal({ db, schema });
   };
 
-  const openExternalAgentProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setExternalAgentPropsModal({ db, schema, name });
-  };
 
   const openCreateMCPServer = () => {
     if (!ctxMenu) return;
@@ -3129,15 +2816,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateMCPServerModal({ db, schema });
   };
 
-  const openMCPServerProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setMCPServerPropsModal({ db, schema, name });
-  };
 
   const openCreateSemanticView = () => {
     if (!ctxMenu) return;
@@ -3148,15 +2826,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateSemanticViewModal({ db, schema });
   };
 
-  const openSemanticViewProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setSemanticViewPropsModal({ db, schema, name });
-  };
 
   const openCreateService = () => {
     if (!ctxMenu) return;
@@ -3167,15 +2836,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateServiceModal({ db, schema });
   };
 
-  const openServiceProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setServicePropsModal({ db, schema, name });
-  };
 
   const openCreateGateway = () => {
     if (!ctxMenu) return;
@@ -3186,15 +2846,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateGatewayModal({ db, schema });
   };
 
-  const openGatewayProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setGatewayPropsModal({ db, schema, name });
-  };
 
   const openCreateContact = () => {
     if (!ctxMenu) return;
@@ -3205,15 +2856,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateContactModal({ db, schema });
   };
 
-  const openContactProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setContactPropsModal({ db, schema, name });
-  };
 
   const openCreateStreamlit = () => {
     if (!ctxMenu) return;
@@ -3245,15 +2887,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDeployStreamlitModal({ db, schema, name });
   };
 
-  const openStreamlitProperties = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    setStreamlitPropsModal({ db, schema, name });
-  };
 
   const openCreateNotebook = () => {
     if (!ctxMenu) return;
@@ -4107,63 +3740,113 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const viewProperties = async () => {
-    if (!ctxMenu) return;
-    const { nodeKey, nodeType, objKind = "" } = ctxMenu;
-    setCtxMenu(null);
-
-    let db = "", schema = "", kind = "", name = "", title = "";
-
-    if (nodeType === "db") {
-      db   = nodeKey.slice("db:".length);
-      kind = "DATABASE";
-      name = db;
-      title = `Properties: DATABASE — ${db}`;
-    } else if (nodeType === "schema") {
-      // key format: schema:DB:SCHEMA
-      [, db, schema] = nodeKey.split(":");
-      kind  = "SCHEMA";
-      name  = schema;
-      title = `Properties: SCHEMA — ${db}.${schema}`;
-    } else {
-      // key format: obj:DB:SCHEMA:KIND:NAME
-      const [, d, s, , ...nameParts] = nodeKey.split(":");
-      db     = d;
-      schema = s;
-      kind   = objKind;
-      name   = nameParts.join(":");
-      title  = `Properties: ${objKind} — ${db}.${schema}.${name}`;
-    }
-
-    // Tasks get a dedicated editable properties modal.
-    if (kind === "TASK") {
-      setTaskPropsModal({ db, schema, name, isFinalizer: ctxMenu.isFinalizer });
-      return;
-    }
-
-    // Schemas get a dedicated editable properties modal (ALTER SCHEMA options).
-    // INFORMATION_SCHEMA is read-only, so it opens the same modal in a read-only
-    // mode (no ALTER controls, no Danger zone) rather than offering edits that
-    // Snowflake always rejects.
-    if (kind === "SCHEMA") {
-      setSchemaPropsModal({ db, schema, name, readOnly: isInfoSchema(nodeKey) });
-      return;
-    }
-
-    // Databases get a dedicated editable properties modal (ALTER DATABASE options).
-    if (kind === "DATABASE") {
-      setDbPropsModal({ db, name });
-      return;
+  // ── Properties dispatch ──────────────────────────────────────────────────────
+  // The ONE kind → Properties-modal mapping (#921). Every sidebar Properties menu
+  // item reaches it through viewProperties, and so does anything outside the
+  // sidebar that dispatches `thaw:open-object-properties` (the editor's
+  // context menu) — the modal state stays owned here, so nothing needs a store.
+  // A kind with no dedicated modal falls through to the generic read-only list.
+  const openObjectProperties = async (o: {
+    kind: string; db: string; schema: string; name: string;
+    args?: string; isFinalizer?: boolean; readOnly?: boolean;
+  }) => {
+    const { kind, db, schema, name } = o;
+    const p = { db, schema, name };
+    const args = o.args ?? "";
+    switch (kind) {
+      // Databases / schemas / tasks get dedicated editable modals (ALTER options).
+      // INFORMATION_SCHEMA opens the schema modal read-only (no ALTER controls, no
+      // Danger zone) rather than offering edits Snowflake always rejects.
+      case "DATABASE":                 return setDbPropsModal({ db, name });
+      case "SCHEMA":                   return setSchemaPropsModal({ ...p, readOnly: o.readOnly });
+      case "TASK":                     return setTaskPropsModal({ ...p, isFinalizer: o.isFinalizer });
+      case "STAGE":                    return setStagePropertiesModal(p);
+      case "PIPE":                     return setPipePropsModal(p);
+      case "DYNAMIC TABLE":            return setDynamicTablePropsModal(p);
+      case "EXTERNAL TABLE":           return setExternalTablePropsModal(p);
+      case "ICEBERG TABLE":            return setIcebergTablePropsModal(p);
+      case "HYBRID TABLE":             return setHybridTablePropsModal(p);
+      case "EVENT TABLE":              return setEventTablePropsModal(p);
+      case "MATERIALIZED VIEW":        return setMaterializedViewPropsModal(p);
+      case "VIEW":                     return setViewPropsModal(p);
+      case "SEQUENCE":                 return setSequencePropsModal(p);
+      case "STREAM":                   return setStreamPropsModal(p);
+      case "ALERT":                    return setAlertPropsModal(p);
+      case "TAG":                      return setTagPropsModal(p);
+      case "MASKING POLICY":           return setMaskingPolicyPropsModal(p);
+      case "PASSWORD POLICY":          return setPasswordPolicyPropsModal(p);
+      case "SESSION POLICY":           return setSessionPolicyPropsModal(p);
+      case "AGGREGATION POLICY":       return setAggregationPolicyPropsModal(p);
+      case "PROJECTION POLICY":        return setProjectionPolicyPropsModal(p);
+      case "AUTHENTICATION POLICY":    return setAuthenticationPolicyPropsModal(p);
+      case "PACKAGES POLICY":          return setPackagesPolicyPropsModal(p);
+      case "ROW ACCESS POLICY":        return setRowAccessPolicyPropsModal(p);
+      case "JOIN POLICY":              return setJoinPolicyPropsModal(p);
+      case "PRIVACY POLICY":           return setPrivacyPolicyPropsModal(p);
+      case "STORAGE LIFECYCLE POLICY": return setStorageLifecyclePolicyPropsModal(p);
+      case "NETWORK RULE":             return setNetworkRulePropsModal(p);
+      case "IMAGE REPOSITORY":         return setImageRepositoryPropsModal(p);
+      case "MODEL":                    return setModelPropsModal(p);
+      case "MODEL MONITOR":            return setModelMonitorPropsModal(p);
+      case "DATASET":                  return setDatasetPropsModal(p);
+      case "CORTEX SEARCH SERVICE":    return setCortexSearchPropsModal(p);
+      case "AGENT":                    return setAgentPropsModal(p);
+      case "EXTERNAL AGENT":           return setExternalAgentPropsModal(p);
+      case "MCP SERVER":               return setMCPServerPropsModal(p);
+      case "SEMANTIC VIEW":            return setSemanticViewPropsModal(p);
+      case "SERVICE":                  return setServicePropsModal(p);
+      case "GATEWAY":                  return setGatewayPropsModal(p);
+      case "CONTACT":                  return setContactPropsModal(p);
+      case "STREAMLIT":                return setStreamlitPropsModal(p);
+      // The callable kinds need the argument signature to resolve the overload
+      // for DESCRIBE / ALTER.
+      case "FUNCTION":                 return setFunctionPropsModal({ ...p, args });
+      case "PROCEDURE":                return setProcedurePropsModal({ ...p, args });
+      case "EXTERNAL FUNCTION":        return setExternalFunctionPropsModal({ ...p, args });
+      case "DATA METRIC FUNCTION":     return setDataMetricFunctionPropsModal({ ...p, args });
     }
 
     const tableContext = kind === "TABLE" ? { db, schema, table: name } : undefined;
-    setPropsModal({ title, rows: null, error: null, tableContext });
+    setPropsModal({ title: `Properties: ${kind} — ${db}.${schema}.${name}`, rows: null, error: null, tableContext });
     try {
       const rows = await GetObjectProperties(db, schema, kind, name);
       setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
     } catch (e) {
       setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
     }
+  };
+
+  // Outside-the-sidebar entry point for the dispatch above: the SQL editor's
+  // "Properties…" context-menu item resolves the identifier under the click and
+  // fires this event with {kind, db, schema, name}. A ref keeps the listener
+  // registered once while always calling the current render's closure.
+  const openObjectPropertiesRef = useRef(openObjectProperties);
+  openObjectPropertiesRef.current = openObjectProperties;
+  useEffect(() => {
+    const onOpenProps = (e: Event) => { void openObjectPropertiesRef.current((e as CustomEvent).detail); };
+    window.addEventListener("thaw:open-object-properties", onOpenProps);
+    return () => window.removeEventListener("thaw:open-object-properties", onOpenProps);
+  }, []);
+
+  const viewProperties = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, nodeType, objKind = "", objArgs, isFinalizer } = ctxMenu;
+    setCtxMenu(null);
+
+    if (nodeType === "db") {
+      const db = nodeKey.slice("db:".length);
+      void openObjectProperties({ kind: "DATABASE", db, schema: "", name: db });
+      return;
+    }
+    if (nodeType === "schema") {
+      // key format: schema:DB:SCHEMA
+      const [, db, schema] = nodeKey.split(":");
+      void openObjectProperties({ kind: "SCHEMA", db, schema, name: schema, readOnly: isInfoSchema(nodeKey) });
+      return;
+    }
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    void openObjectProperties({ kind: objKind, db, schema, name: nameParts.join(":"), args: objArgs, isFinalizer });
   };
 
   const selectObjForComparison = () => {
@@ -5231,11 +4914,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, openStageProperties)}
+            menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openDynamicTableProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshDynamicTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
@@ -5243,39 +4926,39 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeDynamicTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalTableProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshExternalTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openIcebergTableProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshIcebergTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "HYBRID TABLE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openHybridTableProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EVENT TABLE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openEventTableProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL FUNCTION" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalFunctionProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DATA METRIC FUNCTION" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openDataMetricFunctionProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaterializedViewProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendMaterializedView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MATERIALIZED VIEW" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeMaterializedView)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "VIEW" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openViewProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SEQUENCE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSequenceProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAM" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openFunctionProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openProcedureProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAlertProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendAlert)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
@@ -5283,69 +4966,69 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ALERT" &&
             menuItem("Execute", <ThunderboltOutlined style={{ fontSize: 12 }} />, executeAlert)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TAG" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openTagProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MASKING POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMaskingPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ROW ACCESS POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openRowAccessPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "JOIN POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openJoinPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PRIVACY POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPrivacyPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STORAGE LIFECYCLE POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStorageLifecyclePolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PASSWORD POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPasswordPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SESSION POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSessionPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AGGREGATION POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAggregationPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROJECTION POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openProjectionPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AUTHENTICATION POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAuthenticationPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PACKAGES POLICY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPackagesPolicyProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NETWORK RULE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openNetworkRuleProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "IMAGE REPOSITORY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openImageRepositoryProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openModelProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openModelMonitorProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendModelMonitor)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MODEL MONITOR" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeModelMonitor)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DATASET" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openDatasetProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "CORTEX SEARCH SERVICE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openCortexSearchServiceProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "AGENT" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openAgentProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL AGENT" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openExternalAgentProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "MCP SERVER" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openMCPServerProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SEMANTIC VIEW" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openSemanticViewProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openServiceProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendService)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeService)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GATEWAY" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openGatewayProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "CONTACT" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openContactProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openStreamlitProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STREAMLIT" &&
             menuItem("Redeploy from local folder…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openRedeployStreamlit)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
-            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, openRefreshPipe)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
