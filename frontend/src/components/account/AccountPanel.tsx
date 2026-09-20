@@ -19,7 +19,7 @@ import {
   DisconnectOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
-import type { Key } from "rc-tree/lib/interface";
+import type { Key } from "react";
 import {
   ListRoles,
   ListWarehouses,

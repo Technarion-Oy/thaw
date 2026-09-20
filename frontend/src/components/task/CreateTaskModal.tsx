@@ -240,7 +240,7 @@ export default function CreateTaskModal({
   ];
 
   const divider = (label: string) => (
-    <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
+    <Divider titlePlacement="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
       {label}
     </Divider>
   );

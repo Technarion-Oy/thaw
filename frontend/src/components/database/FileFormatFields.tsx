@@ -130,7 +130,7 @@ const ENCLOSED_BY_OPTIONS = [
 function divider(label: string) {
   return (
     <Divider
-      orientation="left"
+      titlePlacement="left"
       orientationMargin={0}
       style={{ fontSize: 11, color: "var(--text-muted)", margin: "14px 0 8px" }}
     >

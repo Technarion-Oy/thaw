@@ -342,7 +342,7 @@ export default function KeyPairAuthModal({
           {result && (
             <>
               <Divider
-                orientation="left"
+                titlePlacement="left"
                 orientationMargin={0}
                 style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 12px" }}
               >
