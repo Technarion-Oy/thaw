@@ -73,7 +73,7 @@ func (a *App) GetAISuggestion(prefix string, schemaCtx ai.SchemaContext) string 
 
 	prompt := ai.BuildPrompt(prefix, schemaCtx, numCtx, cfg.AI.SchemaContextEnabled())
 
-	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, apiKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
+	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, apiKey, cfg.AI.Model, prompt, prefix, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {
 		logger.L.Debug("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return ""

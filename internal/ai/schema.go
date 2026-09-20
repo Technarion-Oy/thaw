@@ -156,7 +156,7 @@ func SchemaCharBudget(numCtx int) int {
 
 // completionInstruction is the standing instruction for inline completions; it
 // follows the schema block so the model reads the catalog before the task.
-const completionInstruction = "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n"
+const completionInstruction = "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no code fences, no repetition of existing text. Keep it to 1–2 lines.\n\n-- SQL before the cursor, continue it directly:\n"
 
 // BuildPrompt assembles the inline-completion prompt: the schema block (when
 // includeSchema is set), the instruction, then the text before the cursor.

@@ -13,16 +13,18 @@
 
 | File | Purpose |
 |------|---------|
-| `ai.go` | All exported API surface: `GetSuggestion`, `ListModels`, `TestModel`, plus internal provider implementations |
+| `ai.go` | All exported API surface: `GetSuggestion`, `Sanitize`, `ListModels`, `TestModel`, plus internal provider implementations |
 | `schema.go` | `SchemaContext` types, `BuildPrompt`, and `SchemaBlock` / `SchemaCharBudget` — the schema block prepended to completion prompts (#924) |
 | `schema_test.go` | Formatting, quoting/qualification, per-table column truncation, budget cutoff, and that `BuildPrompt` sends nothing from the catalog when schema context is off |
+| `sanitize_test.go` | `Sanitize`: fence stripping (closed and unclosed) and prefix-repetition removal (#926) |
 | `doc.go` | Package doc and `// thaw:domain: AI Tooling` annotation |
 
 ## Key types & functions
 
 ```go
 // ai.go:33
-func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort, ollamaNumCtx int) (string, error)
+func GetSuggestion(provider, apiKey, model, prompt, prefix string, ollamaPort, ollamaNumCtx int) (string, error)
+func Sanitize(prefix, reply string) string
 
 // ai.go:105
 func ListModels(provider, apiKey string, ollamaPort int) ([]string, error)
@@ -35,6 +37,14 @@ func BuildPrompt(prefix string, ctx SchemaContext, numCtx int, includeSchema boo
 func SchemaBlock(ctx SchemaContext, charBudget int) string
 func SchemaCharBudget(numCtx int) int
 ```
+
+**Reply sanitising (#926):** models answer the completion prompt as a *question* and reply
+chat-style — the whole statement, prefix included, inside a ```` ```sql ```` fence. `GetSuggestion`
+therefore runs every provider's reply through `Sanitize`: take the first fenced block when there
+is one (tolerating a fence cut off by the 150-token limit), then drop the longest suffix of the
+prefix that the reply restates, case-insensitively. It is one sanitiser on the shared path
+because both defects are provider-independent — a per-provider fix would be three of them.
+Hence `GetSuggestion` takes `prefix` as well as `prompt`.
 
 **Prompt assembly:** `BuildPrompt` is the whole inline-completion prompt — schema block,
 standing instruction, then the text before the cursor. `includeSchema` is an explicit
@@ -88,4 +98,5 @@ identically, so nothing downstream would read it.
 - This package has no connection to `internal/snowflake`. It is a pure HTTP client layer — no Wails context, no `*App` receiver. `schema.go` is pure formatting: it never fetches the schema it renders, the caller passes what it already has.
 - The schema-context switch is a **tri-state** in config (`config.AIConfig.SchemaContext *bool`); `SchemaContextEnabled()` owns the unset case — off for an install that already had a hosted provider (upgrading must not start sending column names to OpenAI/Google unasked), on for Ollama. `GetAIConfig` resolves it before the modal sees it, so saving records an explicit choice.
 - The Ollama suggestion path uses `ollamaHttpClient` (15 s) while listing uses the shorter `httpClient` (3 s); do not swap them or listing will hang on cold model loads.
+- `Sanitize` matches the prefix before right-trimming the reply: the prefix ends in whatever whitespace the user typed, so trimming first would stop a pure echo (`"select "` → `"select "`) from being recognised as a repetition. The prompt hardening (fences forbidden, prefix labelled `-- SQL before the cursor`) is a hint, not a guarantee — small local models ignore it, which is why the sanitiser is the actual fix.
 - `listOpenAIModels` filters by the `"gpt-"` prefix. Newer OpenAI model families (e.g. `o1-*`) are intentionally excluded unless that filter is updated.

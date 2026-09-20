@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,21 +19,58 @@ var httpClient = &http.Client{Timeout: 3 * time.Second}
 var ollamaHttpClient = &http.Client{Timeout: 15 * time.Second}
 
 // GetSuggestion requests an inline SQL completion from the configured provider.
-// provider must be "openai", "google", or "ollama". Returns the trimmed completion text.
+// provider must be "openai", "google", or "ollama". Returns the completion text
+// ready to insert at the cursor: every provider's reply goes through Sanitize,
+// so prefix must be the text before the cursor that prompt was built from.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
 // ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
 // both are ignored for non-Ollama providers.
-func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort, ollamaNumCtx int) (string, error) {
+func GetSuggestion(provider, apiKey, model, prompt, prefix string, ollamaPort, ollamaNumCtx int) (string, error) {
+	var (
+		raw string
+		err error
+	)
 	switch provider {
 	case "openai":
-		return openAISuggestion(apiKey, model, prompt)
+		raw, err = openAISuggestion(apiKey, model, prompt)
 	case "google":
-		return googleSuggestion(apiKey, model, prompt)
+		raw, err = googleSuggestion(apiKey, model, prompt)
 	case "ollama":
-		return ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
+		raw, err = ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
+	if err != nil {
+		return "", err
+	}
+	return Sanitize(prefix, raw), nil
+}
+
+// fencedBlock matches the first markdown code fence in a reply and captures its
+// body, tolerating a missing closing fence (the reply can be cut off by the
+// token limit mid-block).
+var fencedBlock = regexp.MustCompile("(?s)```[a-zA-Z]*\\n?(.*?)(?:```|$)")
+
+// Sanitize turns a chat-style reply into text that can be inserted at the cursor.
+// Models answer the completion prompt as a question — a whole statement inside a
+// ```sql fence — so it takes the first fenced block when there is one, then drops
+// the longest suffix of prefix that the reply restates (case-insensitively).
+// Both defects are independent of the provider, hence one sanitiser on the shared path.
+func Sanitize(prefix, reply string) string {
+	if m := fencedBlock.FindStringSubmatch(reply); m != nil {
+		reply = m[1]
+	}
+	// Left-trim before matching, right-trim only after: the prefix ends in the
+	// whitespace the user typed, so an echo of it must still match.
+	reply = strings.TrimLeft(reply, " \t\r\n")
+	for i := range prefix {
+		suffix := prefix[i:]
+		if len(reply) >= len(suffix) && strings.EqualFold(reply[:len(suffix)], suffix) {
+			reply = reply[len(suffix):]
+			break
+		}
+	}
+	return strings.TrimRight(reply, " \t\r\n")
 }
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
