@@ -42,9 +42,10 @@ func SchemaCharBudget(numCtx int) int
 chat-style — the whole statement, prefix included, inside a ```` ```sql ```` fence. `GetSuggestion`
 therefore runs every provider's reply through `Sanitize`: take the first fenced block when there
 is one (tolerating a fence cut off by the 150-token limit), then drop the longest suffix of the
-prefix that the reply restates, case-insensitively. It is one sanitiser on the shared path
-because both defects are provider-independent — a per-provider fix would be three of them.
-Hence `GetSuggestion` takes `prefix` as well as `prompt`.
+prefix that the reply restates, case-insensitively — counting only a suffix that starts at a
+token boundary, so a prefix ending `…from ac` completed with `count` is not read as a repeated
+`c`. It is one sanitiser on the shared path because both defects are provider-independent — a
+per-provider fix would be three of them. Hence `GetSuggestion` takes `prefix` as well as `prompt`.
 
 **Prompt assembly:** `BuildPrompt` is the whole inline-completion prompt — schema block,
 standing instruction, then the text before the cursor. `includeSchema` is an explicit
@@ -98,5 +99,6 @@ identically, so nothing downstream would read it.
 - This package has no connection to `internal/snowflake`. It is a pure HTTP client layer — no Wails context, no `*App` receiver. `schema.go` is pure formatting: it never fetches the schema it renders, the caller passes what it already has.
 - The schema-context switch is a **tri-state** in config (`config.AIConfig.SchemaContext *bool`); `SchemaContextEnabled()` owns the unset case — off for an install that already had a hosted provider (upgrading must not start sending column names to OpenAI/Google unasked), on for Ollama. `GetAIConfig` resolves it before the modal sees it, so saving records an explicit choice.
 - The Ollama suggestion path uses `ollamaHttpClient` (15 s) while listing uses the shorter `httpClient` (3 s); do not swap them or listing will hang on cold model loads.
-- `Sanitize` matches the prefix before right-trimming the reply: the prefix ends in whatever whitespace the user typed, so trimming first would stop a pure echo (`"select "` → `"select "`) from being recognised as a repetition. The prompt hardening (fences forbidden, prefix labelled `-- SQL before the cursor`) is a hint, not a guarantee — small local models ignore it, which is why the sanitiser is the actual fix.
+- The provider functions return their text **untrimmed** — `Sanitize` owns all trimming. It matches the prefix before right-trimming, because the prefix ends in whatever whitespace the user typed: trim first and a pure echo (`"select "` → `"select "`) stops being recognised as a repetition and the editor shows `select select`. When nothing was repeated and the model sent leading whitespace, one separating space survives, so completing `…orders` with ` where …` does not insert `orderswhere`.
+- The prompt hardening (fences forbidden, prefix labelled `-- SQL before the cursor`) is a hint, not a guarantee — small local models ignore it, which is why the sanitiser is the actual fix.
 - `listOpenAIModels` filters by the `"gpt-"` prefix. Newer OpenAI model families (e.g. `o1-*`) are intentionally excluded unless that filter is updated.
