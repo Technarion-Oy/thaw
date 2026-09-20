@@ -16,7 +16,7 @@ func TestSanitize(t *testing.T) {
 		},
 		{name: "unclosed fence", prefix: "select ", reply: "```sql\nselect * from orders", want: "* from orders"},
 		{name: "case-insensitive repetition", prefix: "SELECT ", reply: "select * from orders", want: "* from orders"},
-		{name: "partial word repetition", prefix: "sel", reply: "select 1", want: "ect 1"},
+		{name: "partial word repetition", prefix: "sel", reply: "select 1", want: "ect 1"}, //nolint:misspell // half a SQL keyword, not a typo
 		{name: "whole multiline prefix restated", prefix: "select *\nfrom ", reply: "select *\nfrom orders", want: "orders"},
 		{name: "clean completion untouched", prefix: "select * from ", reply: "orders o join customers c on c.id = o.cid", want: "orders o join customers c on c.id = o.cid"},
 		{name: "echo only", prefix: "select ", reply: "select ", want: ""},
@@ -28,7 +28,7 @@ func TestSanitize(t *testing.T) {
 		{name: "double letter ac+count", prefix: "select * from ac", reply: "count", want: "count"},
 		{name: "double letter ad+dress", prefix: "select * from ad", reply: "dress", want: "dress"},
 		{name: "double letter of+fset", prefix: "select * from of", reply: "fset", want: "fset"},
-		{name: "double letter clas+s", prefix: "select * from clas", reply: "s", want: "s"},
+		{name: "double letter clas+s", prefix: "select * from clas", reply: "s", want: "s"}, //nolint:misspell // half an identifier, not a typo
 
 		// Providers hand their text over untrimmed, so Sanitize sees what the
 		// model actually sent — including a pure echo and a leading separator.
