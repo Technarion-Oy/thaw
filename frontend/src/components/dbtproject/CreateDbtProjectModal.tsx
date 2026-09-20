@@ -46,7 +46,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [loadingEai, setLoadingEai] = useState(false);
   const [preview, setPreview] = useState("");
-  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const { creating, error, setError, submit } = useCreateSubmit();

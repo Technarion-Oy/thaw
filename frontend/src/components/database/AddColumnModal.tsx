@@ -54,7 +54,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   const [preview, setPreview] = useState("");
   const [isNumericType, setIsNumericType] = useState(false);
   const [collations, setCollations] = useState<snowflake.CollationOption[]>([]);
-  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // FK cascading dropdown state
   const [fkDatabases, setFkDatabases] = useState<string[]>([]);

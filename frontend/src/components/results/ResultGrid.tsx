@@ -597,7 +597,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
   // Defer column selection start so a double-click (sort) cancels it,
   // preventing a brief selection flash before the sort re-render.
-  const columnSelectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const columnSelectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleColumnMouseDown = useCallback(
     (e: React.MouseEvent, colIndex: number) => {
       if (e.button !== 0) return;

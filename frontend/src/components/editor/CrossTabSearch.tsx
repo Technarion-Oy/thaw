@@ -189,7 +189,7 @@ export default function CrossTabSearch({ onClose }: Props) {
   const [isReplacing, setIsReplacing] = useState(false);
   const [lastReplaceInfo, setLastReplaceInfo] = useState<{ count: number; tabs: number; nonUndoableTabs?: number } | null>(null);
   const searchRef = useRef<InputRef>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isReplacingRef = useRef(false);
   const prevMatchRef = useRef<{ tabId: string; line: number; column: number } | null>(null);
   const navigationCleanupRef = useRef<(() => void) | null>(null);

@@ -28,7 +28,7 @@ export default function AddDbtProjectVersionModal({ db, schema, name, onClose, o
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [preview, setPreview] = useState("");
-  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let stale = false;
