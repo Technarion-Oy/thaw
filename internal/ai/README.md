@@ -14,6 +14,8 @@
 | File | Purpose |
 |------|---------|
 | `ai.go` | All exported API surface: `GetSuggestion`, `ListModels`, `TestModel`, plus internal provider implementations |
+| `schema.go` | `SchemaContext` types and `SchemaBlock` / `SchemaCharBudget` — the schema block prepended to completion prompts (#924) |
+| `schema_test.go` | Formatting, per-table column truncation and budget-cutoff rules for `SchemaBlock` |
 | `doc.go` | Package doc and `// thaw:domain: AI Tooling` annotation |
 
 ## Key types & functions
@@ -27,7 +29,29 @@ func ListModels(provider, apiKey string, ollamaPort int) ([]string, error)
 
 // ai.go:230
 func TestModel(provider, apiKey, model string, ollamaPort, ollamaNumCtx int) error
+
+// schema.go
+func SchemaBlock(ctx SchemaContext, charBudget int) string
+func SchemaCharBudget(numCtx int) int
 ```
+
+**Schema block:** `SchemaContext` is what the editor already knows about the statement under
+the cursor — the resolved table refs with their cached columns (name + data type) and foreign
+keys. `SchemaBlock` renders it as DDL-like lines that every model completes well against:
+
+```
+-- Schema context
+ORDERS(ID NUMBER, CUSTOMER_ID NUMBER)
+-- ORDERS.CUSTOMER_ID -> CUSTOMERS.ID
+CUSTOMERS(ID NUMBER, EMAIL VARCHAR)
+```
+
+Tables arrive nearest-the-cursor first and are emitted until `charBudget` would be exceeded;
+a table past `maxColumnsPerTable` (40) columns is truncated with a `…(+k more)` marker, and a
+table with no cached columns is skipped entirely (its bare name tells the model nothing the
+prefix doesn't). `SchemaCharBudget` derives the budget from the Ollama context window
+(~4 chars/token, so `numCtx` chars ≈ a quarter of the window), defaulting to 4096 for hosted
+providers.
 
 **Provider routing:** each exported function switches on `provider` ("openai" | "google" | "ollama") and calls a private implementation.
 
@@ -50,6 +74,7 @@ func TestModel(provider, apiKey, model string, ollamaPort, ollamaNumCtx int) err
 
 ## Gotchas
 
-- This package has no connection to `internal/snowflake`. It is a pure HTTP client layer — no Wails context, no `*App` receiver.
+- This package has no connection to `internal/snowflake`. It is a pure HTTP client layer — no Wails context, no `*App` receiver. `schema.go` is pure formatting: it never fetches the schema it renders, the caller passes what it already has.
+- The schema-context switch is persisted **inverted** (`config.AIConfig.NoSchemaContext`) so a config written before the field existed defaults to "on" without a migration. The UI reads it as "Include schema context".
 - The Ollama suggestion path uses `ollamaHttpClient` (15 s) while listing uses the shorter `httpClient` (3 s); do not swap them or listing will hang on cold model loads.
 - `listOpenAIModels` filters by the `"gpt-"` prefix. Newer OpenAI model families (e.g. `o1-*`) are intentionally excluded unless that filter is updated.

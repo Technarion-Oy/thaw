@@ -61,6 +61,7 @@ import {app} from '../models';
 import {tasks} from '../models';
 import {keypair} from '../models';
 import {config} from '../models';
+import {ai} from '../models';
 import {fnmeta} from '../models';
 import {queryhistory} from '../models';
 import {querylog} from '../models';
@@ -539,7 +540,7 @@ export function GenerateMigrationScript(arg1:Array<migration.MigrationDiffItem>,
 
 export function GetAIConfig():Promise<config.AIConfig>;
 
-export function GetAISuggestion(arg1:string):Promise<string>;
+export function GetAISuggestion(arg1:string,arg2:ai.SchemaContext):Promise<string>;
 
 export function GetAccountParameters():Promise<Array<snowflake.SessionParam>>;
 

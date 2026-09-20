@@ -21,6 +21,10 @@ interface AIState {
   model:         string;
   ollamaPort:    number; // 0 means default (11434)
   ollamaNumCtx:  number; // 0 means let Ollama decide (usually 4096)
+  // Persisted inverted (`noSchemaContext`) so an existing config, written before
+  // the field existed, reads as "on" without a migration. The UI shows it as
+  // "Include schema context", hence the negation at every boundary.
+  noSchemaContext: boolean;
 }
 
 // Context-window presets for Ollama. 0 = auto (Ollama default, usually 4K).
@@ -65,6 +69,7 @@ export default function AISettingsModal({ onClose }: Props) {
     model:        DEFAULT_MODEL.openai,
     ollamaPort:   0,
     ollamaNumCtx: 0,
+    noSchemaContext: false,
   });
   const [saving, setSaving]       = useState(false);
   const [detectedRAM, setDetectedRAM] = useState(0);
@@ -103,6 +108,7 @@ export default function AISettingsModal({ onClose }: Props) {
         model,
         ollamaPort:   cfg.ollamaPort ?? 0,
         ollamaNumCtx: cfg.ollamaNumCtx ?? 0,
+        noSchemaContext: cfg.noSchemaContext ?? false,
       });
       setSavedConfig({ provider, model });
     });
@@ -199,6 +205,7 @@ export default function AISettingsModal({ onClose }: Props) {
         model:        state.model,
         ollamaPort:   state.ollamaPort,
         ollamaNumCtx: state.ollamaNumCtx,
+        noSchemaContext: state.noSchemaContext,
       } as any);
       setSavedConfig({ provider: state.provider, model: state.model });
       message.success("AI settings saved");
@@ -231,6 +238,24 @@ export default function AISettingsModal({ onClose }: Props) {
             onChange={(v) => setState((s) => ({ ...s, enabled: v }))}
           />
         </div>
+
+        {/* Schema context: the referenced tables' column names leave the machine
+            for OpenAI / Google, so it gets its own visible switch. */}
+        {state.enabled && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div>
+              <Text>Include schema context in completions</Text>
+              <Text type="secondary" style={{ display: "block", fontSize: 12 }}>
+                Sends the columns and foreign keys of the tables the statement references
+                {state.provider === "ollama" ? " to your local Ollama." : " to the provider."}
+              </Text>
+            </div>
+            <Switch
+              checked={!state.noSchemaContext}
+              onChange={(v) => setState((s) => ({ ...s, noSchemaContext: !v }))}
+            />
+          </div>
+        )}
 
         {/* Feature-flag gate: this modal's toggle has no effect while the flag is off. */}
         {state.enabled && !featureFlagOn && (

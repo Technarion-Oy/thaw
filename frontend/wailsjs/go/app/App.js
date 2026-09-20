@@ -930,8 +930,8 @@ export function GetAIConfig() {
   return window['go']['app']['App']['GetAIConfig']();
 }
 
-export function GetAISuggestion(arg1) {
-  return window['go']['app']['App']['GetAISuggestion'](arg1);
+export function GetAISuggestion(arg1, arg2) {
+  return window['go']['app']['App']['GetAISuggestion'](arg1, arg2);
 }
 
 export function GetAccountParameters() {

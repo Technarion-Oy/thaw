@@ -73,7 +73,17 @@ keystroke, and each call can fire 2–3 Wails round-trips (JOIN ON resolution vi
 `aiInlineCompletions` flag on, a blocking `GetAISuggestion` LLM request. The provider first
 awaits a ~180 ms pause and bails when the request was superseded (Monaco cancels the
 outstanding token on the next edit), so a burst of typing coalesces into a single run and
-in-flight requests don't pile up.
+in-flight requests don't pile up. Both consumers share one `ParseJoinTableRefs`/`ResolveTableRefs`
+resolution per call (`resolveRefsOnce`).
+
+**Schema context for AI completions (#924):** `aiSchemaTables()` turns those resolved refs into
+the `ai.SchemaContext` passed as `GetAISuggestion`'s second argument — each table's cached
+`ColInfo` list plus `getFKsCached` edges, deduped, nearest-the-cursor first. It reads
+`colInfoCache` / the FK cache **synchronously and never fetches**: a cache miss omits that table
+for this keystroke (the diagnostics pass warms both within ~400 ms), because a Snowflake
+round-trip in front of the LLM one is exactly what the debounce exists to avoid. Go renders and
+budgets the block (`ai.SchemaBlock`), and drops it entirely when the user turned
+**Include schema context** off.
 
 **SqlEditor re-renders per keystroke (#762):** it reads `sql` for Monaco's controlled `value`,
 so unlike `QueryPage`/`TabBar` it can't be kept off the typing path. To keep that render cheap,

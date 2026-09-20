@@ -575,7 +575,13 @@ Compare the DDL or content of any two database objects, files, roles, or warehou
 
 ### AI Inline Completions
 
-Ghost-text SQL suggestions appear automatically as you type in the editor. Press `Tab` to accept. Powered by OpenAI or Google AI Studios.
+Ghost-text SQL suggestions appear automatically as you type in the editor. Press `Tab` to accept. Powered by OpenAI, Google AI Studios, or a local Ollama model.
+
+### Schema-aware completions
+
+Suggestions are grounded in the actual catalog: the tables the current statement references are resolved against the object browser, and their **columns with data types** and **foreign keys** are sent in front of the prompt as a compact schema block, so the model completes with real column names and real join keys instead of inventing them. The context comes from the caches the editor's diagnostics pass already fills — no extra Snowflake query and no added latency; a table whose columns aren't cached yet is simply left out and appears on the next keystroke. The block is budgeted against the model's context window (for Ollama, the configured **Context window** setting), listing the tables nearest the cursor first and truncating very wide tables with a `…(+k more)` marker.
+
+Column names leave your machine for hosted providers, so it is a single visible switch: **Include schema context in completions** in **Tools → Configure AI Inline Completions…** (on by default; unaffected for Ollama, which is local).
 
 ### Model Validation
 

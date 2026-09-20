@@ -68,6 +68,11 @@ type AIConfig struct {
 	Enabled      bool   `json:"enabled"`
 	OllamaPort   int    `json:"ollamaPort,omitempty"`   // 0 means default (11434)
 	OllamaNumCtx int    `json:"ollamaNumCtx,omitempty"` // 0 means let Ollama decide (usually 4096)
+	// NoSchemaContext turns *off* the schema block (resolved tables, their columns
+	// and foreign keys) that inline completions prepend to the prompt. Inverted on
+	// purpose: the feature defaults to on, and the zero value of a config written
+	// before this field existed must mean "on" without a migration.
+	NoSchemaContext bool `json:"noSchemaContext,omitempty"`
 }
 
 // SnowparkConfig holds Snowpark environment settings.

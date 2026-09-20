@@ -284,6 +284,36 @@ const getColInfos = (db: string, schema: string, table: string): Promise<ColInfo
     return (cols ?? []).map((c: any) => ({ name: c.name ?? "", dataType: c.dataType ?? "" }));
   });
 
+// ── AI schema context ─────────────────────────────────────────────────────────
+// Turn the statement's resolved refs into the schema block fed to GetAISuggestion
+// (#924). Reads the caches diagnostics already warms and never fetches: a table
+// whose columns aren't cached yet is omitted and reappears on the next keystroke.
+// Nearest-the-cursor first, since the backend truncates from the tail when the
+// block exceeds the model's budget.
+function aiSchemaTables(refs: ResolvedRef[]): unknown[] {
+  const kindOf = new Map(
+    useObjectStore.getState().objects.map((o) => [colCacheKey(o.db, o.schema, o.name), o.kind]),
+  );
+  const seen = new Set<string>();
+  const tables: unknown[] = [];
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i];
+    const key = colCacheKey(ref.db, ref.schema, ref.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const columns = colInfoCache.get(key);
+    if (!columns || columns.length === 0) continue;
+    tables.push({
+      db: ref.db, schema: ref.schema, name: ref.name, kind: kindOf.get(key) ?? "",
+      columns,
+      fks: getFKsCached(ref.db, ref.schema, ref.name).map((fk) => ({
+        column: fk.fkColumn, refTable: fk.pkTable, refColumn: fk.pkColumn,
+      })),
+    });
+  }
+  return tables;
+}
+
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
 const fetchedFKSchemas = new Set<string>(); 
 
@@ -2463,27 +2493,35 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (token.isCancellationRequested) return { items: [] };
 
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
+
+          // The statement's table references, resolved against the object store.
+          // Both consumers below (JOIN ON shortcut, AI schema context) want the
+          // same list, so it is resolved at most once per provider call.
+          let refsPromise: Promise<ResolvedRef[]> | null = null;
+          const resolveRefsOnce = (): Promise<ResolvedRef[]> => refsPromise ??= (async () => {
+            const raw = await ParseJoinTableRefs(prefixFull);
+            if (!raw || (raw as any[]).length === 0) return [];
+            return (await ResolveTableRefs(raw as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any)) ?? [];
+          })();
+
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
-            const ghostRefs = await ParseJoinTableRefs(prefixFull);
-            if (ghostRefs && (ghostRefs as any[]).length >= 2) {
-              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
-              if (resolved && resolved.length >= 2) {
-                const fkEntries = resolved.map((ref) => ({
-                  db: ref.db, schema: ref.schema, name: ref.name,
-                  fks: getFKsCached(ref.db, ref.schema, ref.name),
-                }));
-                const colEntries = resolved.map((ref) => ({
-                  db: ref.db, schema: ref.schema, name: ref.name,
-                  cols: colInfoCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
-                }));
-                const conds = await ComputeJoinOnConditions({
-                  resolvedRefs: resolved as any, fkEntries: fkEntries as any,
-                  colEntries: colEntries as any, prefix: "ON ",
-                } as any);
-                if ((conds as any[]).length > 0 && !token.isCancellationRequested) {
-                  return { items: [{ insertText: (conds as any[])[0].condition }] };
-                }
+            const resolved = await resolveRefsOnce();
+            if (resolved.length >= 2) {
+              const fkEntries = resolved.map((ref) => ({
+                db: ref.db, schema: ref.schema, name: ref.name,
+                fks: getFKsCached(ref.db, ref.schema, ref.name),
+              }));
+              const colEntries = resolved.map((ref) => ({
+                db: ref.db, schema: ref.schema, name: ref.name,
+                cols: colInfoCache.get(colCacheKey(ref.db, ref.schema, ref.name)) ?? [],
+              }));
+              const conds = await ComputeJoinOnConditions({
+                resolvedRefs: resolved as any, fkEntries: fkEntries as any,
+                colEntries: colEntries as any, prefix: "ON ",
+              } as any);
+              if ((conds as any[]).length > 0 && !token.isCancellationRequested) {
+                return { items: [{ insertText: (conds as any[])[0].condition }] };
               }
             }
           }
@@ -2498,7 +2536,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (trimmed.trim().length < 3) return { items: [] };
           if (!useFeatureFlagsStore.getState().flags.aiInlineCompletions) return { items: [] };
 
-          const suggestion = await GetAISuggestion(trimmed);
+          const suggestion = await GetAISuggestion(trimmed, { tables: aiSchemaTables(await resolveRefsOnce()) } as any);
           if (token.isCancellationRequested || !suggestion) return { items: [] };
 
           return { items: [{ insertText: suggestion }] };
