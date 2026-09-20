@@ -228,3 +228,68 @@ export function buildVariableSuggestions(
     range,
   }));
 }
+
+// ── statementTextInRanges ─────────────────────────────────────────────────────
+// The text of the statement covering the 1-based `line`, or "" when none does.
+// Split out from the IPC call so the *fail-closed* half — no ranges, or a line
+// inside none of them — is testable without mocking the bridge. A line can
+// legitimately be in no range: a comment after a `;`, or one written above a
+// statement that doesn't exist yet.
+export function statementTextInRanges(
+  fullSql: string,
+  line: number,
+  ranges: { startLine: number; endLine: number }[] | null | undefined,
+): string {
+  for (const r of ranges || []) {
+    if (line >= r.startLine && line <= r.endLine) {
+      return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
+    }
+  }
+  return "";
+}
+
+// ── aiSchemaTables ────────────────────────────────────────────────────────────
+// Turn the statement's resolved table refs into the schema context sent with
+// `GetAISuggestion` (#924): each table's cached columns plus its foreign keys,
+// shaped as the Go `ai.SchemaTable`.
+//
+// Reads caches only — `colsFor` is a synchronous lookup into the column-type
+// cache and FKs come from `getFKsCached`. A table whose columns aren't cached
+// yet is omitted and reappears once the diagnostics pass has warmed it (~400 ms),
+// because a Snowflake round-trip in front of the LLM one is exactly what the
+// inline-completion debounce (#762) exists to avoid.
+//
+// Last-referenced first (reverse source order, not true cursor distance — it
+// decides only which tables survive when the block exceeds the model's budget),
+// deduped, since a self-join names one table twice.
+export interface AISchemaTable {
+  db: string;
+  schema: string;
+  name: string;
+  columns: { name: string; dataType: string }[];
+  fks: { column: string; refTable: string; refColumn: string }[];
+}
+
+export function aiSchemaTables(
+  refs: { db: string; schema: string; name: string }[],
+  colsFor: (key: string) => { name: string; dataType: string }[] | undefined,
+): AISchemaTable[] {
+  const seen = new Set<string>();
+  const tables: AISchemaTable[] = [];
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i];
+    const key = colCacheKey(ref.db, ref.schema, ref.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const columns = colsFor(key);
+    if (!columns || columns.length === 0) continue;
+    tables.push({
+      db: ref.db, schema: ref.schema, name: ref.name,
+      columns,
+      fks: getFKsCached(ref.db, ref.schema, ref.name).map((fk) => ({
+        column: fk.fkColumn, refTable: fk.pkTable, refColumn: fk.pkColumn,
+      })),
+    });
+  }
+  return tables;
+}

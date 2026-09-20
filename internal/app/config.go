@@ -21,6 +21,11 @@ func (a *App) GetAIConfig() config.AIConfig {
 	if key, err := secrets.Get(secrets.KeyAIAPIKey); err == nil {
 		cfg.AI.APIKey = key
 	}
+	// Resolve the unset schema-context state here rather than re-deriving the rule
+	// in the modal: the switch must show what is actually in force, and saving it
+	// then records the user's now-explicit choice.
+	enabled := cfg.AI.SchemaContextEnabled()
+	cfg.AI.SchemaContext = &enabled
 	return cfg.AI
 }
 

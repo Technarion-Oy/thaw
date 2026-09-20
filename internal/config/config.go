@@ -68,6 +68,28 @@ type AIConfig struct {
 	Enabled      bool   `json:"enabled"`
 	OllamaPort   int    `json:"ollamaPort,omitempty"`   // 0 means default (11434)
 	OllamaNumCtx int    `json:"ollamaNumCtx,omitempty"` // 0 means let Ollama decide (usually 4096)
+	// SchemaContext controls the schema block (resolved tables, their columns and
+	// foreign keys) that inline completions prepend to the prompt. Deliberately a
+	// pointer: unset is a third state, and SchemaContextEnabled reads it as "off"
+	// for an install that was already sending completions to a hosted provider
+	// before this feature existed. See SchemaContextEnabled.
+	SchemaContext *bool `json:"schemaContext,omitempty"`
+}
+
+// SchemaContextEnabled reports whether inline completions may send the schema
+// block along with the prompt.
+//
+// An explicit choice always wins. Unset means the user has never seen the switch,
+// and the answer then turns on where the data would go: an install that already
+// has a hosted provider configured predates the feature, so it stays off until
+// the user opts in — upgrading must not silently start shipping column names to
+// OpenAI or Google. Ollama is local, and a config with no provider yet will get
+// an explicit value the moment the settings modal is saved.
+func (c AIConfig) SchemaContextEnabled() bool {
+	if c.SchemaContext != nil {
+		return *c.SchemaContext
+	}
+	return c.Provider == "ollama" || c.Provider == ""
 }
 
 // SnowparkConfig holds Snowpark environment settings.

@@ -20,6 +20,7 @@ import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { useAIPrefsStore } from "../../store/aiPrefsStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -31,7 +32,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, aiSchemaTables, statementTextInRanges, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -569,19 +570,25 @@ let _explainMenuRegistered = false;
   });
 })();
 
+// Returns the text of the statement containing the 1-based `line`, or "" when no
+// statement covers it. Fails *closed*: a comment line after a `;`, or above a
+// statement not yet written, is inside no range, and for a caller that describes
+// the cursor's surroundings "nothing" is the honest answer — "the whole file" is
+// not. Used by the AI schema context (#924), where the difference is whether an
+// unrelated statement's column names reach a hosted provider.
+async function statementTextAtLineOrNone(fullSql: string, line: number): Promise<string> {
+  return statementTextInRanges(fullSql, line, await GetSqlStatementRanges(fullSql));
+}
+
 // Returns the text of the statement containing the 1-based `line`, or the full
 // SQL when statement ranges can't be computed or none matches. Shared by the
-// "Explain SQL" and "Expand *" handlers.
+// "Explain SQL" and "Expand *" handlers, which want something to run.
 async function statementTextAtLine(fullSql: string, line: number): Promise<string> {
   try {
-    const ranges = await GetSqlStatementRanges(fullSql);
-    for (const r of ranges || []) {
-      if (line >= r.startLine && line <= r.endLine) {
-        return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
-      }
-    }
-  } catch { /* fall through to full SQL */ }
-  return fullSql;
+    return (await statementTextAtLineOrNone(fullSql, line)) || fullSql;
+  } catch {
+    return fullSql;
+  }
 }
 
 // ── "Expand *" context menu item ─────────────────────────────────────────────
@@ -2463,27 +2470,35 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (token.isCancellationRequested) return { items: [] };
 
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
+
+          // Resolve the refs against the object store. The two consumers below want
+          // different scopes — the JOIN shortcut completes the half-typed JOIN, so it
+          // wants the text up to the cursor; the AI path describes the statement being
+          // written, so it wants the whole statement (see below).
+          const resolveRefs = async (sql: string): Promise<ResolvedRef[]> => {
+            const raw = await ParseJoinTableRefs(sql);
+            if (!raw || (raw as any[]).length === 0) return [];
+            return (await ResolveTableRefs(raw as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any)) ?? [];
+          };
+
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
-            const ghostRefs = await ParseJoinTableRefs(prefixFull);
-            if (ghostRefs && (ghostRefs as any[]).length >= 2) {
-              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, editorSession() as any);
-              if (resolved && resolved.length >= 2) {
-                const fkEntries = resolved.map((ref) => ({
-                  db: ref.db, schema: ref.schema, name: ref.name,
-                  fks: getFKsCached(ref.db, ref.schema, ref.name),
-                }));
-                const colEntries = resolved.map((ref) => ({
-                  db: ref.db, schema: ref.schema, name: ref.name,
-                  cols: colInfoCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
-                }));
-                const conds = await ComputeJoinOnConditions({
-                  resolvedRefs: resolved as any, fkEntries: fkEntries as any,
-                  colEntries: colEntries as any, prefix: "ON ",
-                } as any);
-                if ((conds as any[]).length > 0 && !token.isCancellationRequested) {
-                  return { items: [{ insertText: (conds as any[])[0].condition }] };
-                }
+            const resolved = await resolveRefs(prefixFull);
+            if (resolved.length >= 2) {
+              const fkEntries = resolved.map((ref) => ({
+                db: ref.db, schema: ref.schema, name: ref.name,
+                fks: getFKsCached(ref.db, ref.schema, ref.name),
+              }));
+              const colEntries = resolved.map((ref) => ({
+                db: ref.db, schema: ref.schema, name: ref.name,
+                cols: colInfoCache.get(colCacheKey(ref.db, ref.schema, ref.name)) ?? [],
+              }));
+              const conds = await ComputeJoinOnConditions({
+                resolvedRefs: resolved as any, fkEntries: fkEntries as any,
+                colEntries: colEntries as any, prefix: "ON ",
+              } as any);
+              if ((conds as any[]).length > 0 && !token.isCancellationRequested) {
+                return { items: [{ insertText: (conds as any[])[0].condition }] };
               }
             }
           }
@@ -2498,7 +2513,29 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (trimmed.trim().length < 3) return { items: [] };
           if (!useFeatureFlagsStore.getState().flags.aiInlineCompletions) return { items: [] };
 
-          const suggestion = await GetAISuggestion(trimmed);
+          // Schema context (#924) is scoped to the *statement* at the cursor, not to
+          // `prefixFull`: a worksheet's earlier statements would otherwise burn the
+          // budget with unrelated tables — and send their column names to a hosted
+          // provider — while `SELECT | FROM orders`, the case that needs columns most,
+          // would find none at all because its FROM sits after the cursor.
+          // Failing to resolve costs the context, never the completion.
+          let schemaTables: unknown[] = [];
+          // Skip the resolution entirely when the user has schema context off:
+          // the backend drops it anyway, so this is pure latency for them.
+          await useAIPrefsStore.getState().ensureLoaded();
+          if (useAIPrefsStore.getState().schemaContext) {
+            try {
+              const stmtSql = await statementTextAtLineOrNone(model.getValue(), position.lineNumber);
+              if (stmtSql) {
+                schemaTables = aiSchemaTables(await resolveRefs(stmtSql), (key) => colInfoCache.get(key));
+              }
+            } catch { /* no schema context this keystroke */ }
+          }
+          // Three IPC round-trips happened since the last check; don't pay for an
+          // LLM request the user has already typed past.
+          if (token.isCancellationRequested) return { items: [] };
+
+          const suggestion = await GetAISuggestion(trimmed, { tables: schemaTables } as any);
           if (token.isCancellationRequested || !suggestion) return { items: [] };
 
           return { items: [{ insertText: suggestion }] };
