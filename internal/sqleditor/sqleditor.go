@@ -444,8 +444,21 @@ func GetIdentifierAtColumn(sql string, line, col int) []sf.IdentPart {
 			continue
 		}
 		raw, next := sqltok.ReadIdentParts(sig, sql, i, 0)
+		// ReadIdentParts joins across whatever Significant dropped, so `t.` typed
+		// in front of an existing `FROM` (or a newline, or a comment) would read
+		// as the two-part chain T.FROM and send the completion provider looking
+		// for a schema named FROM. A real dotted name is written without gaps —
+		// as the byte-adjacent scanner this replaced required — so cut the chain
+		// at the first gap in the source.
+		for k := i; k < next-1; k++ {
+			if sig[k].End != sig[k+1].Start {
+				next = k + 1
+				raw = raw[:(next-i+1)/2] // parts are at i, i+2, …
+				break
+			}
+		}
 		end := next
-		if end < len(sig) && sig[end].Kind == sqltok.Dot {
+		if end < len(sig) && sig[end].Kind == sqltok.Dot && sig[end-1].End == sig[end].Start {
 			end++ // a dangling `db.` belongs to the chain it trails
 		}
 		hit := false
