@@ -15,6 +15,12 @@ name: Renovate
 #   contents: write        — push branches
 #   pull-requests: write   — open/update PRs
 #   issues: write          — maintain the Dependency Dashboard issue
+#   statuses: write        — Renovate posts commit statuses (renovate/stability-days,
+#                            renovate/artifacts, …) on every branch it pushes. Without
+#                            it the POST returns 403 "Resource not accessible by
+#                            integration" and Renovate aborts the whole pass as
+#                            "Repository has changed during renovation" — before
+#                            opening the PR or refreshing the dashboard.
 #   workflows: write       — required because renovate.json pins GitHub Actions
 #                            to digests, which edits files under .github/workflows/.
 #                            Without it those pushes fail with "refusing to allow
@@ -30,11 +36,12 @@ permissions:
 
 on:
   schedule:
-    # Twice a day (03:00 / 15:00 UTC). Renovate's own `schedule` in
-    # .github/renovate.json still gates routine updates to Monday mornings, so
-    # most runs are a no-op extract; the extra runs exist so security fixes
-    # (which are exempt from that schedule) are picked up within ~12h.
-    - cron: "0 3,15 * * *"
+    # Twice a day. Renovate's own `schedule` in .github/renovate.json still
+    # gates routine updates to Mondays, so most runs are a no-op extract; the
+    # extra runs exist so security fixes (which are exempt from that schedule)
+    # are picked up within ~12h. Off the top of the hour: GitHub fires popular
+    # slots hours late (the previous `0 3,15` landed at 07:30-08:40 UTC).
+    - cron: "23 2,14 * * *"
   workflow_dispatch:
     inputs:
       dry-run:
