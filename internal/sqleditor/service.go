@@ -81,10 +81,11 @@ func (s *Service) GetSqlStatementRanges(sql string) []StatementRange {
 }
 
 // GetIdentifierAtColumn parses the dot-separated identifier (e.g. db.schema.table)
-// under the zero-indexed cursor column col within a single line of SQL.
-// Returns nil when the column is not on any identifier.
-func (s *Service) GetIdentifierAtColumn(line string, col int) []string {
-	return GetIdentifierAtColumn(line, col)
+// under the 1-based Monaco cursor position (line, col) in sql, each part carrying
+// whether the source quoted it. Returns nil when the cursor is not on an
+// identifier — including when it sits inside a comment or a string literal.
+func (s *Service) GetIdentifierAtColumn(sql string, line, col int) []snowflake.IdentPart {
+	return GetIdentifierAtColumn(sql, line, col)
 }
 
 // StarSelectAt reports whether the token at the 1-based Monaco cursor position
@@ -142,7 +143,7 @@ func (s *Service) ResolveTableRefs(refs []JoinTableRef, storeObjects []StoreObje
 // known store object of any kind, scoped to the namespace the name would really
 // resolve against. Backs the hover identity tooltip and its cmd/ctrl DDL link; a
 // miss names the schema the caller should load on demand before retrying.
-func (s *Service) ResolveStoreObject(parts []string, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
+func (s *Service) ResolveStoreObject(parts []snowflake.IdentPart, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) HoverObject {
 	return ResolveStoreObject(parts, storeObjects, useCtx, session)
 }
 

@@ -103,15 +103,7 @@ func utf16Col(lines []string, lineNum, byteCol int) int {
 	}
 	line := lines[lineNum-1]
 	b := min(max(byteCol-1, 0), len(line))
-	n := 0
-	for _, r := range line[:b] {
-		if r > 0xFFFF { // astral plane → surrogate pair (2 UTF-16 units)
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n + 1
+	return utf16Len(line[:b]) + 1
 }
 
 // introducesSelectItem reports whether a select-list item (and thus a bare `*`)
