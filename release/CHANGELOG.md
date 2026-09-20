@@ -1,3 +1,19 @@
+# [0.8.0](https://github.com/Technarion-Oy/thaw/compare/v0.7.1...v0.8.0) (2026-09-20)
+
+
+### Bug Fixes
+
+* false column-not-found warnings (CTAS, comma FROM, CREATE TASK) ([#917](https://github.com/Technarion-Oy/thaw/issues/917)) ([d91629d](https://github.com/Technarion-Oy/thaw/commit/d91629d6128276797a4564e50af489e782e71edf)), closes [#916](https://github.com/Technarion-Oy/thaw/issues/916) [#916](https://github.com/Technarion-Oy/thaw/issues/916)
+* no cmd-hover DDL link for objects that don't exist ([#919](https://github.com/Technarion-Oy/thaw/issues/919)) ([92f0486](https://github.com/Technarion-Oy/thaw/commit/92f0486fc2b916c35f303429d9c39aae367a4939)), closes [#918](https://github.com/Technarion-Oy/thaw/issues/918) [#717](https://github.com/Technarion-Oy/thaw/issues/717) [#920](https://github.com/Technarion-Oy/thaw/issues/920)
+* no hover/DDL link inside comments; quoted names case-sensitive ([#922](https://github.com/Technarion-Oy/thaw/issues/922)) ([ffa10d4](https://github.com/Technarion-Oy/thaw/commit/ffa10d44c6e2fbe199256d9eed79ca4a788aea80)), closes [#918](https://github.com/Technarion-Oy/thaw/issues/918)
+* sanitise AI inline completions before inserting them ([#932](https://github.com/Technarion-Oy/thaw/issues/932)) ([6223af1](https://github.com/Technarion-Oy/thaw/commit/6223af16a413ad14a71124904abf8529bd1c4742))
+
+
+### Features
+
+* editor context menu → open the object's Properties modal ([#923](https://github.com/Technarion-Oy/thaw/issues/923)) ([70e9053](https://github.com/Technarion-Oy/thaw/commit/70e905376ad6bbb86c5ee431cb5383fd81bb0485)), closes [#717](https://github.com/Technarion-Oy/thaw/issues/717) [#920](https://github.com/Technarion-Oy/thaw/issues/920)
+* schema-aware AI inline completions ([#925](https://github.com/Technarion-Oy/thaw/issues/925)) ([cbc8dae](https://github.com/Technarion-Oy/thaw/commit/cbc8daee9379b0b4257a277d64570a2aa215e21d)), closes [#919](https://github.com/Technarion-Oy/thaw/issues/919) [#922](https://github.com/Technarion-Oy/thaw/issues/922) [#762](https://github.com/Technarion-Oy/thaw/issues/762)
+
 ## [0.7.1](https://github.com/Technarion-Oy/thaw/compare/v0.7.0...v0.7.1) (2026-09-06)
 
 
