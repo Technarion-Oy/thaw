@@ -229,6 +229,25 @@ export function buildVariableSuggestions(
   }));
 }
 
+// ── statementTextInRanges ─────────────────────────────────────────────────────
+// The text of the statement covering the 1-based `line`, or "" when none does.
+// Split out from the IPC call so the *fail-closed* half — no ranges, or a line
+// inside none of them — is testable without mocking the bridge. A line can
+// legitimately be in no range: a comment after a `;`, or one written above a
+// statement that doesn't exist yet.
+export function statementTextInRanges(
+  fullSql: string,
+  line: number,
+  ranges: { startLine: number; endLine: number }[] | null | undefined,
+): string {
+  for (const r of ranges || []) {
+    if (line >= r.startLine && line <= r.endLine) {
+      return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
+    }
+  }
+  return "";
+}
+
 // ── aiSchemaTables ────────────────────────────────────────────────────────────
 // Turn the statement's resolved table refs into the schema context sent with
 // `GetAISuggestion` (#924): each table's cached columns plus its foreign keys,
@@ -240,8 +259,9 @@ export function buildVariableSuggestions(
 // because a Snowflake round-trip in front of the LLM one is exactly what the
 // inline-completion debounce (#762) exists to avoid.
 //
-// Nearest-the-cursor first (the backend drops tables from the tail when the
-// block exceeds the model's budget), deduped — a self-join names one table twice.
+// Last-referenced first (reverse source order, not true cursor distance — it
+// decides only which tables survive when the block exceeds the model's budget),
+// deduped, since a self-join names one table twice.
 export interface AISchemaTable {
   db: string;
   schema: string;

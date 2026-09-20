@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines, aiSchemaTables, colCacheKey, setFKCache, clearFKCache } from "./sqlEditorUtils";
+import { identifierRangeAt, starMenuEligible, normId, byteColToUtf16Col, gitDiffLines, aiSchemaTables, statementTextInRanges, colCacheKey, setFKCache, clearFKCache } from "./sqlEditorUtils";
 
 // identifierRangeAt(line, idx0) → 1-based Monaco {start, end} (end exclusive) of the
 // dotted identifier at 0-based char index idx0, quote-aware. Substring is
@@ -213,5 +213,35 @@ describe("aiSchemaTables", () => {
 
   it("returns nothing for no refs", () => {
     expect(aiSchemaTables([], cacheOf({}))).toEqual([]);
+  });
+});
+
+// ── statementTextInRanges ─────────────────────────────────────────────────────
+describe("statementTextInRanges", () => {
+  const sql = "SELECT * FROM secret_t;\n-- top customers\nSELECT ";
+  const ranges = [{ startLine: 1, endLine: 1 }, { startLine: 3, endLine: 3 }];
+
+  it("returns the statement covering the line", () => {
+    expect(statementTextInRanges(sql, 1, ranges)).toBe("SELECT * FROM secret_t;");
+    expect(statementTextInRanges(sql, 3, ranges)).toBe("SELECT ");
+  });
+
+  it("returns a multi-line statement whole", () => {
+    const multi = "SELECT a,\n  b\nFROM t;";
+    expect(statementTextInRanges(multi, 2, [{ startLine: 1, endLine: 3 }])).toBe(multi);
+  });
+
+  it("fails closed on a line inside no statement", () => {
+    // Line 2 is a comment between statements: it belongs to neither range, and
+    // falling back to the whole document would hand every table in the worksheet
+    // to the AI provider (#924).
+    expect(statementTextInRanges(sql, 2, ranges)).toBe("");
+  });
+
+  it("fails closed when ranges are missing", () => {
+    // What an IPC failure or an empty parse looks like to this function.
+    expect(statementTextInRanges(sql, 1, null)).toBe("");
+    expect(statementTextInRanges(sql, 1, undefined)).toBe("");
+    expect(statementTextInRanges(sql, 1, [])).toBe("");
   });
 });

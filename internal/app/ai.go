@@ -64,7 +64,14 @@ func (a *App) GetAISuggestion(prefix string, schemaCtx ai.SchemaContext) string 
 		}
 	}
 
-	prompt := ai.BuildPrompt(prefix, schemaCtx, cfg.AI.OllamaNumCtx, cfg.AI.SchemaContextEnabled())
+	// OllamaNumCtx stays in config after switching provider, so a 32K window once
+	// set for Ollama must not silently become a 32K-char schema block for OpenAI.
+	numCtx := 0
+	if cfg.AI.Provider == "ollama" {
+		numCtx = cfg.AI.OllamaNumCtx
+	}
+
+	prompt := ai.BuildPrompt(prefix, schemaCtx, numCtx, cfg.AI.SchemaContextEnabled())
 
 	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, apiKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {
@@ -72,6 +79,21 @@ func (a *App) GetAISuggestion(prefix string, schemaCtx ai.SchemaContext) string 
 		return ""
 	}
 	return suggestion
+}
+
+// GetAISchemaContextEnabled reports whether inline completions may send the
+// schema block. The editor reads it to skip building the context entirely when
+// the user has it off — the backend drops it either way, but the resolution IPCs
+// are wasted latency for exactly the users who declined the feature.
+//
+// Deliberately not part of GetAIConfig: that one hydrates the API key from the
+// OS secure store, and this runs on the inline-completion path.
+func (a *App) GetAISchemaContextEnabled() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	return cfg.AI.SchemaContextEnabled()
 }
 
 // GetFunctionSuggestions returns up to 50 Snowflake functions whose name

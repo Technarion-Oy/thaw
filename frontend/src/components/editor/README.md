@@ -84,14 +84,24 @@ Snowflake round-trip in front of the LLM one is exactly what the debounce exists
 renders and budgets the block (`ai.BuildPrompt` → `ai.SchemaBlock`), and drops it entirely when
 the user turned **Include schema context** off.
 
-Its refs are scoped to the **statement at the cursor** (`statementTextAtLine`), not to the text
-before the cursor like the JOIN-ON shortcut's: in a multi-statement worksheet `prefixFull` drags
+Its refs are scoped to the **statement at the cursor** (`statementTextAtLineOrNone`), not to the
+text before the cursor like the JOIN-ON shortcut's: in a multi-statement worksheet `prefixFull` drags
 in every table of every earlier statement — budget spent on noise, and their column names sent to
 a hosted provider — while `SELECT | FROM orders`, the case that needs columns most, resolves
 nothing at all because its `FROM` sits after the cursor. The two consumers therefore resolve
 separately. Resolution is wrapped in `try`/`catch` and followed by a cancellation check: a failed
 resolve costs the context, never the ghost text, and a keystroke landing during those IPCs must
 not still pay for an LLM request.
+
+That scoping **fails closed**, which is why it doesn't reuse `statementTextAtLine`: that helper
+returns the whole document when no statement range covers the line, which suits "Explain SQL" and
+"Expand *" (they want something to run) but would hand a hosted provider every table in the
+worksheet. A line in no range is ordinary — a comment after a `;`, or one written above a
+statement that doesn't exist yet, which is exactly when someone waits for ghost text. Both share
+the pure `statementTextInRanges()` (in `sqlEditorUtils.ts`, tested); only the fallback differs.
+
+The whole block is skipped when `aiPrefsStore.schemaContext` is off, so the users who declined the
+feature don't pay for resolution the backend would discard anyway.
 
 **SqlEditor re-renders per keystroke (#762):** it reads `sql` for Monaco's controlled `value`,
 so unlike `QueryPage`/`TabBar` it can't be kept off the typing path. To keep that render cheap,

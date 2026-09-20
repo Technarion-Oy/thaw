@@ -20,6 +20,7 @@ import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { useAIPrefsStore } from "../../store/aiPrefsStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -31,7 +32,7 @@ import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeS
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
-import { UC, quoteIfNecessary, colCacheKey, normId, aiSchemaTables, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
+import { UC, quoteIfNecessary, colCacheKey, normId, aiSchemaTables, statementTextInRanges, getFKs, getFKsCached, setFKCache, clearFKCache, currentCacheGeneration, bumpCacheGeneration, FKEntry, buildVariableSuggestions, identifierRangeAt, starMenuEligible, byteColToUtf16Col, gitDiffLines } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { kindSupportsDdl } from "../../utils/objectDdl";
@@ -569,19 +570,25 @@ let _explainMenuRegistered = false;
   });
 })();
 
+// Returns the text of the statement containing the 1-based `line`, or "" when no
+// statement covers it. Fails *closed*: a comment line after a `;`, or above a
+// statement not yet written, is inside no range, and for a caller that describes
+// the cursor's surroundings "nothing" is the honest answer — "the whole file" is
+// not. Used by the AI schema context (#924), where the difference is whether an
+// unrelated statement's column names reach a hosted provider.
+async function statementTextAtLineOrNone(fullSql: string, line: number): Promise<string> {
+  return statementTextInRanges(fullSql, line, await GetSqlStatementRanges(fullSql));
+}
+
 // Returns the text of the statement containing the 1-based `line`, or the full
 // SQL when statement ranges can't be computed or none matches. Shared by the
-// "Explain SQL" and "Expand *" handlers.
+// "Explain SQL" and "Expand *" handlers, which want something to run.
 async function statementTextAtLine(fullSql: string, line: number): Promise<string> {
   try {
-    const ranges = await GetSqlStatementRanges(fullSql);
-    for (const r of ranges || []) {
-      if (line >= r.startLine && line <= r.endLine) {
-        return fullSql.split("\n").slice(r.startLine - 1, r.endLine).join("\n");
-      }
-    }
-  } catch { /* fall through to full SQL */ }
-  return fullSql;
+    return (await statementTextAtLineOrNone(fullSql, line)) || fullSql;
+  } catch {
+    return fullSql;
+  }
 }
 
 // ── "Expand *" context menu item ─────────────────────────────────────────────
@@ -2513,10 +2520,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           // would find none at all because its FROM sits after the cursor.
           // Failing to resolve costs the context, never the completion.
           let schemaTables: unknown[] = [];
-          try {
-            const stmtSql = await statementTextAtLine(model.getValue(), position.lineNumber);
-            schemaTables = aiSchemaTables(await resolveRefs(stmtSql), (key) => colInfoCache.get(key));
-          } catch { /* no schema context this keystroke */ }
+          // Skip the resolution entirely when the user has schema context off:
+          // the backend drops it anyway, so this is pure latency for them.
+          await useAIPrefsStore.getState().ensureLoaded();
+          if (useAIPrefsStore.getState().schemaContext) {
+            try {
+              const stmtSql = await statementTextAtLineOrNone(model.getValue(), position.lineNumber);
+              if (stmtSql) {
+                schemaTables = aiSchemaTables(await resolveRefs(stmtSql), (key) => colInfoCache.get(key));
+              }
+            } catch { /* no schema context this keystroke */ }
+          }
           // Three IPC round-trips happened since the last check; don't pay for an
           // LLM request the user has already typed past.
           if (token.isCancellationRequested) return { items: [] };

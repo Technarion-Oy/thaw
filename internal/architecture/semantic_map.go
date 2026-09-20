@@ -294,7 +294,9 @@ func GetCodebaseSemanticMap() string {
       "backend_paths": [
         "internal/ai/"
       ],
-      "frontend_paths": null,
+      "frontend_paths": [
+        "frontend/src/store/aiPrefsStore.ts"
+      ],
       "description": "API clients for LLM providers; inline completion and model management."
     },
     {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
 import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/app/App";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { useAIPrefsStore } from "../../store/aiPrefsStore";
 import { SecretStorageIndicator } from "./SecretStorageIndicator";
 
 const { Text } = Typography;
@@ -207,6 +208,9 @@ export default function AISettingsModal({ onClose }: Props) {
         ollamaNumCtx: state.ollamaNumCtx,
         schemaContext: state.schemaContext,
       } as any);
+      // The editor caches this switch to decide whether to build schema context
+      // at all, so a save has to invalidate it.
+      await useAIPrefsStore.getState().load();
       setSavedConfig({ provider: state.provider, model: state.model });
       message.success("AI settings saved");
       onClose();

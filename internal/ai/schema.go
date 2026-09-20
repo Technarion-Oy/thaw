@@ -55,7 +55,7 @@ const maxColumnsPerTable = 40
 //	CUSTOMERS(ID NUMBER, EMAIL VARCHAR)
 //
 // charBudget caps the whole block; tables are emitted in the order given (the
-// caller passes them nearest-to-the-cursor first) and the first one that would
+// caller passes them last-referenced first) and the first one that would
 // overflow ends the block. Returns "" when nothing fits or nothing is known.
 func SchemaBlock(ctx SchemaContext, charBudget int) string {
 	const header = "-- Schema context\n"

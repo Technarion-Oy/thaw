@@ -540,6 +540,8 @@ export function GenerateMigrationScript(arg1:Array<migration.MigrationDiffItem>,
 
 export function GetAIConfig():Promise<config.AIConfig>;
 
+export function GetAISchemaContextEnabled():Promise<boolean>;
+
 export function GetAISuggestion(arg1:string,arg2:ai.SchemaContext):Promise<string>;
 
 export function GetAccountParameters():Promise<Array<snowflake.SessionParam>>;

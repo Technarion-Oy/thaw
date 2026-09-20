@@ -52,7 +52,7 @@ ORDERS(ID NUMBER, CUSTOMER_ID NUMBER)
 CUSTOMERS(ID NUMBER, EMAIL VARCHAR)
 ```
 
-Tables arrive nearest-the-cursor first and are emitted until `charBudget` would be exceeded
+Tables arrive last-referenced first and are emitted until `charBudget` would be exceeded
 (by the trailing blank line, at most one byte); a table past `maxColumnsPerTable` (40) columns
 is truncated with a `…(+k more)` marker, and a table with no cached columns is skipped entirely
 (its bare name tells the model nothing the prefix doesn't). Identifiers that Snowflake would not

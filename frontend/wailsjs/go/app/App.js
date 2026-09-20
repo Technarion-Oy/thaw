@@ -930,6 +930,10 @@ export function GetAIConfig() {
   return window['go']['app']['App']['GetAIConfig']();
 }
 
+export function GetAISchemaContextEnabled() {
+  return window['go']['app']['App']['GetAISchemaContextEnabled']();
+}
+
 export function GetAISuggestion(arg1, arg2) {
   return window['go']['app']['App']['GetAISuggestion'](arg1, arg2);
 }
