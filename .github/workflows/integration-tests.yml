@@ -16,7 +16,7 @@ jobs:
   test:
     name: Snowflake integration tests
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
     permissions:
       contents: read
       checks: write
@@ -28,9 +28,9 @@ jobs:
           apt-get update
           apt-get install -y git curl wget gcc bash
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: false
@@ -58,7 +58,7 @@ jobs:
           go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | tee /dev/stderr | go-junit-report -set-exit-code > report.xml
 
       - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2
         if: always()
         # Best-effort reporting; the go test step already fails the job on real
         # failures. Don't let a flaky GitHub API throttle (429) fail the build.

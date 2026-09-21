@@ -31,7 +31,7 @@ jobs:
   vitest:
     name: Vitest
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
     permissions:
       contents: read
       checks: write
@@ -50,9 +50,9 @@ jobs:
           apt-get install -y git curl wget
         working-directory: /
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
@@ -70,7 +70,7 @@ jobs:
         run: npx vitest run --reporter=default --reporter=junit --outputFile=report-vitest.xml
 
       - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
+        uses: EnricoMi/publish-unit-test-result-action/linux@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2
         if: always()
         # Best-effort reporting: real failures already fail the job via the
         # vitest step above; a flaky GitHub API throttle in the publisher must

@@ -15,7 +15,7 @@ jobs:
   check-title:
     name: Validate PR title
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
     steps:
       - name: Check PR title prefix
         env:
