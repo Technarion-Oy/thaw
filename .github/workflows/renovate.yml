@@ -74,7 +74,7 @@ jobs:
     name: Renovate
     if: github.event_name != 'pull_request'
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
     permissions:
       contents: read
 
@@ -112,7 +112,7 @@ jobs:
 
       - name: Generate Bot Token
         id: generate-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -137,7 +137,7 @@ jobs:
 
       # Renovate clones the repo itself; this checkout is what setup-go reads
       # go.mod from (and keeps the run reproducible if a step needs the tree).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # binarySource=global (below) means Renovate shells out to whatever go /
       # npm are on PATH instead of downloading its own toolchains — so both must
@@ -145,7 +145,7 @@ jobs:
       #
       # cache: false — the self-hosted runners' cache backend is slow for large
       # caches; matches every other workflow in this repo.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: false
@@ -158,7 +158,7 @@ jobs:
       # No `cache:` input — this job never runs `npm ci` against the repo's own
       # lockfile, and setup-node rejects `cache: false` outright (unlike
       # setup-go, whose `cache: false` above is valid).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
 
@@ -223,7 +223,7 @@ jobs:
     name: Validate config
     if: github.event_name == 'pull_request'
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
     permissions:
       contents: read
 
@@ -248,11 +248,11 @@ jobs:
           apt-get update
           apt-get install -y git curl wget jq ca-certificates
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Matches the bot job: the validator ships in the same package, which
       # requires Node >= 24.11.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
 
