@@ -9406,7 +9406,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `xlsx` | 0.18.5 | Apache-2.0 |
 | `yaml` | 2.8.2 | ISC |
 | `zustand` | 4.5.7 | MIT |
-| `zustand` | 5.0.11 | MIT |
+| `zustand` | 5.0.15 | MIT |
 
 ### @ant-design/colors
 
@@ -16340,7 +16340,7 @@ SOFTWARE.
 
 ### zustand
 
-- **Version:** 5.0.11
+- **Version:** 5.0.15
 - **License:** MIT
 
 ```
