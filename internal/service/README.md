@@ -4,7 +4,8 @@
 
 ## Responsibility
 
-Builds the `CREATE SERVICE` DDL from a structured config. A service is a
+Builds the `CREATE SERVICE` DDL from a structured config, the `ALTER SERVICE …
+FROM SPECIFICATION` redeploy clause, and `GRANT` / `REVOKE SERVICE ROLE`. A service is a
 long-running, containerized application that runs in a compute pool, defined by a
 YAML specification (supplied inline or referenced from a stage file). Services
 expose ingress endpoints, container logs, and a per-container status.
@@ -21,7 +22,7 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `ServiceConfig`, `BuildCreateServiceSql`, spec-source constants |
+| `sql.go` | `ServiceConfig`, `BuildCreateServiceSql`, `BuildAlterServiceSpecClause`, `ServiceRoleGrant` + grant/revoke builders, spec-source & grantee-kind constants |
 | `sql_test.go` | Unit tests for the SQL builder |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
@@ -32,6 +33,10 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
 | `ServiceConfig` | CREATE parameters: name, case sensitivity, `IfNotExists`, `ComputePool`, `SpecSource` (`inline`/`stage`), `Template` (toggles the `SPECIFICATION_TEMPLATE[_FILE]` variants), `SpecInline`/`SpecStage`/`SpecFile`, `TemplateVars` (`USING` bindings), `ExternalAccessIntegrations`, `AutoResume`, `MinInstances`, `MaxInstances`, `QueryWarehouse`, `Comment` |
 | `BuildCreateServiceSql(db, schema, cfg)` | Emits `CREATE SERVICE [IF NOT EXISTS] <fqn> IN COMPUTE POOL … { FROM SPECIFICATION[_TEMPLATE] $$…$$ \| FROM @<stage> SPECIFICATION[_TEMPLATE]_FILE='…' } [USING (k => v, …)] [options];` |
 | `TemplateVar` | A single `name => value` binding for the `USING` clause of a templated spec |
+| `BuildAlterServiceSpecClause(cfg)` | Redeploy clause (`FROM SPECIFICATION $$…$$` / `FROM @<stage> SPECIFICATION_FILE = '…'`, TEMPLATE/USING variants) for `App.RedeployService` → `App.AlterService`; reuses `specClause` but errors on an empty source or an inline spec containing `$$` |
+| `ServiceRoleGrant` | Service role + grantee kind (`ROLE` / `DATABASE ROLE` / `APPLICATION ROLE`) + optional parent (database / application) + grantee |
+| `ParseServiceRoleGrants(res, role)` | `SHOW GRANTS OF SERVICE ROLE` → `[]ServiceRoleGrant`; `grantee_name` split with the quote-aware `snowflake.SplitQualifiedName` (`"MY.DB".DR` → parent `MY.DB`) |
+| `BuildGrantServiceRoleSql` / `BuildRevokeServiceRoleSql` | `GRANT SERVICE ROLE "db"."sc"."svc"!"role" TO <kind> <grantee>;` / `REVOKE … FROM …`; every identifier is `QuoteIdent`-quoted, so names containing `!` or `.` survive; a DATABASE/APPLICATION ROLE grantee without a parent is rejected |
 | `SpecSourceInline` / `SpecSourceStage` | `SpecSource` values selecting inline vs. staged specification |
 
 ## Patterns & integration

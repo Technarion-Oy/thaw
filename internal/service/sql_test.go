@@ -3,8 +3,11 @@
 package service
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateServiceSql(t *testing.T) {
@@ -196,5 +199,88 @@ func TestBuildCreateServiceSql(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildAlterServiceSpecClause(t *testing.T) {
+	got, err := BuildAlterServiceSpecClause(ServiceConfig{SpecSource: SpecSourceInline, SpecInline: "spec:\n  containers: []\n"})
+	if err != nil || got != "FROM SPECIFICATION $$\nspec:\n  containers: []\n$$" {
+		t.Errorf("inline: got %q, %v", got, err)
+	}
+	got, err = BuildAlterServiceSpecClause(ServiceConfig{SpecSource: SpecSourceStage, SpecStage: `"DB"."SC"."STG"`, SpecFile: "a/spec.yaml"})
+	if err != nil || got != `FROM @"DB"."SC"."STG"`+"\n  SPECIFICATION_FILE = 'a/spec.yaml'" {
+		t.Errorf("stage: got %q, %v", got, err)
+	}
+	for _, bad := range []ServiceConfig{
+		{SpecSource: SpecSourceInline, SpecInline: "  "},
+		{SpecSource: SpecSourceInline, SpecInline: "x: $$"},
+		{SpecSource: SpecSourceStage, SpecStage: "@", SpecFile: "spec.yaml"},
+		{SpecSource: SpecSourceStage, SpecStage: "STG"},
+	} {
+		if _, err := BuildAlterServiceSpecClause(bad); err == nil {
+			t.Errorf("expected error for %+v", bad)
+		}
+	}
+}
+
+func TestBuildServiceRoleGrantSql(t *testing.T) {
+	tests := []struct {
+		g      ServiceRoleGrant
+		grant  string
+		revoke string
+	}{
+		{
+			ServiceRoleGrant{Role: "all_endpoints_usage", GranteeKind: "role", Grantee: "ANALYST"},
+			`GRANT SERVICE ROLE "DB"."SC"."SVC"!"all_endpoints_usage" TO ROLE "ANALYST";`,
+			`REVOKE SERVICE ROLE "DB"."SC"."SVC"!"all_endpoints_usage" FROM ROLE "ANALYST";`,
+		},
+		{
+			ServiceRoleGrant{Role: "r!x", GranteeKind: "DATABASE ROLE", Parent: "DB", Grantee: `D"R`},
+			`GRANT SERVICE ROLE "DB"."SC"."SVC"!"r!x" TO DATABASE ROLE "DB"."D""R";`,
+			`REVOKE SERVICE ROLE "DB"."SC"."SVC"!"r!x" FROM DATABASE ROLE "DB"."D""R";`,
+		},
+		{
+			ServiceRoleGrant{Role: "R", GranteeKind: "application role", Parent: "APP", Grantee: "AR"},
+			`GRANT SERVICE ROLE "DB"."SC"."SVC"!"R" TO APPLICATION ROLE "APP"."AR";`,
+			`REVOKE SERVICE ROLE "DB"."SC"."SVC"!"R" FROM APPLICATION ROLE "APP"."AR";`,
+		},
+	}
+	for _, tt := range tests {
+		if got, err := BuildGrantServiceRoleSql("DB", "SC", "SVC", tt.g); err != nil || got != tt.grant {
+			t.Errorf("grant: got %q, %v; want %q", got, err, tt.grant)
+		}
+		if got, err := BuildRevokeServiceRoleSql("DB", "SC", "SVC", tt.g); err != nil || got != tt.revoke {
+			t.Errorf("revoke: got %q, %v; want %q", got, err, tt.revoke)
+		}
+	}
+	for _, bad := range []ServiceRoleGrant{
+		{Role: "R", GranteeKind: "USER", Grantee: "U"},
+		{GranteeKind: "ROLE", Grantee: "U"},
+		{Role: "R", GranteeKind: "ROLE"},
+		{Role: "R", GranteeKind: "DATABASE ROLE", Grantee: "DR"},
+		{Role: "R", GranteeKind: "APPLICATION ROLE", Parent: " ", Grantee: "AR"},
+	} {
+		if _, err := BuildGrantServiceRoleSql("DB", "SC", "SVC", bad); err == nil {
+			t.Errorf("expected error for %+v", bad)
+		}
+	}
+}
+
+func TestParseServiceRoleGrants(t *testing.T) {
+	res := &snowflake.QueryResult{
+		Columns: []string{"created_on", "role", "granted_to", "grantee_name"},
+		Rows: [][]any{
+			{nil, "R", "ROLE", "ANALYST"},
+			{nil, "R", "DATABASE_ROLE", `"MY.DB".DR`},
+			{nil, "R", "APPLICATION_ROLE", "APP.AR"},
+		},
+	}
+	want := []ServiceRoleGrant{
+		{Role: "R", GranteeKind: "ROLE", Grantee: "ANALYST"},
+		{Role: "R", GranteeKind: "DATABASE ROLE", Parent: "MY.DB", Grantee: "DR"},
+		{Role: "R", GranteeKind: "APPLICATION ROLE", Parent: "APP", Grantee: "AR"},
+	}
+	if got := ParseServiceRoleGrants(res, "R"); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v\nwant %+v", got, want)
 	}
 }

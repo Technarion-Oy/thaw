@@ -194,3 +194,120 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 
 	return sb.String() + ";", nil
 }
+
+// BuildAlterServiceSpecClause renders the clause that redeploys a service from a
+// new specification — everything after `ALTER SERVICE <fqn>`, ready for
+// App.AlterService. It reuses the spec-source branch of BuildCreateServiceSql
+// (inline $$ … $$, staged file, and the TEMPLATE/USING variants) but, unlike the
+// CREATE preview, rejects an empty source instead of emitting a placeholder:
+//
+//	FROM SPECIFICATION $$ … $$
+//	FROM @<stage> SPECIFICATION_FILE = '…'
+//	FROM SPECIFICATION_TEMPLATE $$ … $$ USING ( k => v, … )
+func BuildAlterServiceSpecClause(cfg ServiceConfig) (string, error) {
+	if cfg.SpecSource == SpecSourceStage {
+		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(cfg.SpecStage), "@")) == "" ||
+			strings.TrimSpace(cfg.SpecFile) == "" {
+			return "", fmt.Errorf("stage and specification file are required")
+		}
+	} else {
+		if strings.TrimSpace(cfg.SpecInline) == "" {
+			return "", fmt.Errorf("specification cannot be empty")
+		}
+		if strings.Contains(cfg.SpecInline, "$$") {
+			return "", fmt.Errorf("inline specification cannot contain $$")
+		}
+	}
+	return specClause(cfg), nil
+}
+
+// Grantee kinds a service role can be granted to.
+const (
+	GranteeRole            = "ROLE"
+	GranteeDatabaseRole    = "DATABASE ROLE"
+	GranteeApplicationRole = "APPLICATION ROLE"
+)
+
+// ServiceRoleGrant describes a GRANT / REVOKE SERVICE ROLE target: the service
+// role (declared in the service spec) and the grantee. Parent is the database
+// (for a DATABASE ROLE grantee) or application (for an APPLICATION ROLE
+// grantee) and is required for those kinds; it is ignored for account roles.
+type ServiceRoleGrant struct {
+	Role        string `json:"role"`        // service role name
+	GranteeKind string `json:"granteeKind"` // ROLE | DATABASE ROLE | APPLICATION ROLE
+	Parent      string `json:"parent"`      // database / application of the grantee
+	Grantee     string `json:"grantee"`     // grantee role name
+}
+
+// serviceRoleGrantParts validates g and returns the quoted `<svc>!<role>`
+// reference, the canonical grantee kind, and the quoted grantee.
+func serviceRoleGrantParts(db, schema, svc string, g ServiceRoleGrant) (ref, kind, grantee string, err error) {
+	if strings.TrimSpace(g.Role) == "" || strings.TrimSpace(g.Grantee) == "" {
+		return "", "", "", fmt.Errorf("service role and grantee are required")
+	}
+	kind, err = snowflake.ValidateEnumValue("grantee kind", g.GranteeKind,
+		GranteeRole, GranteeDatabaseRole, GranteeApplicationRole)
+	if err != nil {
+		return "", "", "", err
+	}
+	ref = snowflake.Qualify(db, schema, svc) + "!" + snowflake.QuoteIdent(g.Role)
+	switch {
+	case kind == GranteeRole:
+		grantee = snowflake.QuoteIdent(g.Grantee)
+	case strings.TrimSpace(g.Parent) == "":
+		return "", "", "", fmt.Errorf("%s grantee requires its database / application name", strings.ToLower(kind))
+	default:
+		grantee = snowflake.Qualify(g.Parent, g.Grantee)
+	}
+	return ref, kind, grantee, nil
+}
+
+// ParseServiceRoleGrants converts a SHOW GRANTS OF SERVICE ROLE result into
+// ServiceRoleGrant rows for role. granted_to (ROLE / DATABASE_ROLE /
+// APPLICATION_ROLE) becomes the grantee kind; for database/application roles
+// grantee_name ("PARENT.ROLE", parts quoted when needed) is split with the
+// quote-aware snowflake.SplitQualifiedName, so a parent like "MY.DB" survives.
+// Rows whose grantee name does not parse fall back to the raw name, unqualified.
+func ParseServiceRoleGrants(res *snowflake.QueryResult, role string) []ServiceRoleGrant {
+	if res == nil {
+		return nil
+	}
+	kindIdx := snowflake.ColIdx(res.Columns, "granted_to")
+	nameIdx := snowflake.ColIdx(res.Columns, "grantee_name")
+	out := make([]ServiceRoleGrant, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		g := ServiceRoleGrant{
+			Role:        role,
+			GranteeKind: strings.ToUpper(strings.ReplaceAll(snowflake.Cell(row, kindIdx), "_", " ")),
+			Grantee:     snowflake.Cell(row, nameIdx),
+		}
+		if g.GranteeKind != GranteeRole {
+			if parts, err := snowflake.SplitQualifiedName(g.Grantee, 2); err == nil && len(parts) == 2 {
+				g.Parent, g.Grantee = parts[0].Text, parts[1].Text
+			}
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// BuildGrantServiceRoleSql emits
+// `GRANT SERVICE ROLE "db"."sc"."svc"!"role" TO { ROLE | DATABASE ROLE | APPLICATION ROLE } <grantee>;`.
+// Every identifier is double-quoted, so names containing `!` or `.` stay intact.
+func BuildGrantServiceRoleSql(db, schema, svc string, g ServiceRoleGrant) (string, error) {
+	ref, kind, grantee, err := serviceRoleGrantParts(db, schema, svc, g)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("GRANT SERVICE ROLE %s TO %s %s;", ref, kind, grantee), nil
+}
+
+// BuildRevokeServiceRoleSql is the REVOKE … FROM counterpart of
+// BuildGrantServiceRoleSql.
+func BuildRevokeServiceRoleSql(db, schema, svc string, g ServiceRoleGrant) (string, error) {
+	ref, kind, grantee, err := serviceRoleGrantParts(db, schema, svc, g)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("REVOKE SERVICE ROLE %s FROM %s %s;", ref, kind, grantee), nil
+}

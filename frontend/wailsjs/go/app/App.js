@@ -1458,6 +1458,10 @@ export function GitUpdateRemoteURL(arg1, arg2) {
   return window['go']['app']['App']['GitUpdateRemoteURL'](arg1, arg2);
 }
 
+export function GrantServiceRole(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GrantServiceRole'](arg1, arg2, arg3, arg4);
+}
+
 export function HybridIndexColumnOptions(arg1) {
   return window['go']['app']['App']['HybridIndexColumnOptions'](arg1);
 }
@@ -1584,6 +1588,10 @@ export function ListBasicObjects(arg1, arg2) {
 
 export function ListComputePools() {
   return window['go']['app']['App']['ListComputePools']();
+}
+
+export function ListDatabaseRoles(arg1) {
+  return window['go']['app']['App']['ListDatabaseRoles'](arg1);
 }
 
 export function ListDatabases() {
@@ -1728,6 +1736,22 @@ export function ListSemanticMetrics(arg1, arg2, arg3) {
 
 export function ListServiceEndpoints(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListServiceEndpoints'](arg1, arg2, arg3);
+}
+
+export function ListServiceInstances(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListServiceInstances'](arg1, arg2, arg3);
+}
+
+export function ListServiceRoleGrants(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ListServiceRoleGrants'](arg1, arg2, arg3, arg4);
+}
+
+export function ListServiceRoles(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListServiceRoles'](arg1, arg2, arg3);
+}
+
+export function ListServiceVolumes(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ListServiceVolumes'](arg1, arg2, arg3);
 }
 
 export function ListStageEntries(arg1, arg2, arg3, arg4) {
@@ -1938,6 +1962,10 @@ export function ReconcileSecondaryRoles(arg1) {
   return window['go']['app']['App']['ReconcileSecondaryRoles'](arg1);
 }
 
+export function RedeployService(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RedeployService'](arg1, arg2, arg3, arg4);
+}
+
 export function RemoveEditorTab(arg1) {
   return window['go']['app']['App']['RemoveEditorTab'](arg1);
 }
@@ -1992,6 +2020,10 @@ export function RevealInFinder(arg1) {
 
 export function RevealLogFile() {
   return window['go']['app']['App']['RevealLogFile']();
+}
+
+export function RevokeServiceRole(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RevokeServiceRole'](arg1, arg2, arg3, arg4);
 }
 
 export function RunExplain(arg1, arg2) {

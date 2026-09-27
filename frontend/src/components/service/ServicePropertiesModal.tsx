@@ -4,17 +4,25 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, InputNumber, Space, Typography, Alert, Tooltip, Table, Tag, Select,
+  App as AntApp, Modal, Spin, Button, Input, InputNumber, Space, Typography, Alert, Tooltip, Table, Tag, Select,
+  AutoComplete, Radio, message,
 } from "antd";
 import {
-  DeploymentUnitOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
+  DeploymentUnitOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, PlusOutlined,
+  CloudUploadOutlined,
 } from "@ant-design/icons";
+import Editor from "@monaco-editor/react";
 import {
   GetObjectProperties, AlterService, ListServiceEndpoints, GetServiceContainers, GetServiceLogs,
+  ListServiceInstances, ListServiceVolumes, ListServiceRoles, ListServiceRoleGrants,
+  GrantServiceRole, RevokeServiceRole, RedeployService, ListRoles, ListDatabaseRoles,
 } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
+import StageFilePicker from "../shared/StageFilePicker";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { useThemeStore } from "../../store/themeStore";
+import { patchMonacoClipboard } from "../../utils/monacoClipboard";
+import { service as svcModels, type snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -168,6 +176,202 @@ function tableFromResult(res: snowflake.QueryResult | null) {
   return { columns, data };
 }
 
+// Read one named column (case-insensitive) from every row of a QueryResult.
+function column(res: snowflake.QueryResult | null, name: string): string[] {
+  const idx = (res?.columns ?? []).findIndex((c) => c.toLowerCase() === name);
+  return idx < 0 ? [] : (res?.rows ?? []).map((r) => String(r[idx] ?? ""));
+}
+
+// ─── LazyTable (SHOW … IN SERVICE sections) ──────────────────────────────────
+
+/**
+ * A lazily loaded section rendering a raw QueryResult as an antd table: a
+ * "Load <noun>s" button until first load, then a count + Refresh. Backs the
+ * Endpoints / Instances / Containers / Volumes sections.
+ */
+function LazyTable({ title, noun, load }: {
+  title: string;
+  noun: string;
+  load: () => Promise<snowflake.QueryResult>;
+}) {
+  const [res, setRes] = useState<snowflake.QueryResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setRes(await load() ?? null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const t = tableFromResult(res);
+  return (
+    <>
+      <div style={SECTION_HEAD}>{title}</div>
+      {error && (
+        <Alert type="error" message={`Failed to load ${noun}s`} description={error} showIcon style={{ marginBottom: 8 }} />
+      )}
+      {res ? (
+        <>
+          <Space style={{ marginBottom: 8 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {t.data.length === 0 ? `No ${noun}s.` : `${t.data.length} ${noun}${t.data.length === 1 ? "" : "s"}.`}
+            </Text>
+            <Button size="small" icon={<ReloadOutlined />} onClick={run} loading={loading}>Refresh</Button>
+          </Space>
+          {t.data.length > 0 && (
+            <Table size="small" columns={t.columns} dataSource={t.data} pagination={false} scroll={{ x: true }} />
+          )}
+        </>
+      ) : (
+        <Button size="small" icon={<ReloadOutlined />} onClick={run} loading={loading}>Load {noun}s</Button>
+      )}
+    </>
+  );
+}
+
+// ─── ServiceRoleGrants (per service role chip editor) ────────────────────────
+
+const GRANTEE_KINDS = [
+  { value: "ROLE", label: "Role" },
+  { value: "DATABASE ROLE", label: "Database role" },
+  { value: "APPLICATION ROLE", label: "Application role" },
+];
+
+/**
+ * Grantees of one service role as removable chips (SHOW GRANTS OF SERVICE ROLE),
+ * plus an add row — grantee kind + parent (database / application) + grantee —
+ * modelled on UserPropertiesModal's PolicyManager. When the account can't list
+ * grantees, the chips are replaced by a note and only the grant form remains.
+ */
+function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
+  db: string; schema: string; name: string; role: string; accountRoles: string[];
+}) {
+  const { modal } = AntApp.useApp();
+  const [grants, setGrants] = useState<svcModels.ServiceRoleGrant[] | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  const [kind, setKind] = useState("ROLE");
+  const [parent, setParent] = useState(""); // database / application; reset per kind
+  const [grantee, setGrantee] = useState("");
+  const [dbRoles, setDbRoles] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    setListErr(null);
+    try {
+      setGrants(await ListServiceRoleGrants(db, schema, name, role) ?? []);
+    } catch (e) {
+      setGrants(null);
+      setListErr(String(e));
+    }
+  }, [db, schema, name, role]);
+  useEffect(() => { reload(); }, [reload]);
+
+  // Debounced so typing a database name doesn't fire SHOW per keystroke; the
+  // cleanup flag drops responses for a parent the user has since changed.
+  useEffect(() => {
+    setDbRoles([]);
+    if (kind !== "DATABASE ROLE" || !parent.trim()) return;
+    let stale = false;
+    const t = setTimeout(() => {
+      ListDatabaseRoles(parent.trim())
+        .then((r) => { if (!stale) setDbRoles(r ?? []); })
+        .catch(() => { if (!stale) setDbRoles([]); });
+    }, 300);
+    return () => { stale = true; clearTimeout(t); };
+  }, [kind, parent]);
+
+  const add = async () => {
+    setBusy(true);
+    try {
+      await GrantServiceRole(db, schema, name, svcModels.ServiceRoleGrant.createFrom({
+        role, granteeKind: kind, parent: kind === "ROLE" ? "" : parent.trim(), grantee: grantee.trim(),
+      }));
+      message.success(`Granted ${role} to ${grantee}`);
+      setGrantee("");
+      await reload();
+    } catch (e) {
+      message.error(String(e), 6);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label = (g: svcModels.ServiceRoleGrant) =>
+    `${g.granteeKind.toLowerCase()}: ${g.parent ? `${g.parent}.` : ""}${g.grantee}`;
+
+  const remove = (g: svcModels.ServiceRoleGrant) => {
+    modal.confirm({
+      title: `Revoke ${role} from ${g.grantee}?`,
+      okText: "Revoke",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await RevokeServiceRole(db, schema, name, g);
+          message.success(`Revoked ${role} from ${g.grantee}`);
+          await reload();
+        } catch (e) {
+          message.error(String(e), 6);
+        }
+      },
+    });
+  };
+
+  const options = (kind === "ROLE" ? accountRoles : kind === "DATABASE ROLE" ? dbRoles : [])
+    .map((r) => ({ value: r }));
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>{role}</td>
+      <td style={{ padding: "6px 0" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+          {listErr ? (
+            <Text type="secondary" style={{ fontSize: 11, fontStyle: "italic" }}>
+              Grantees unavailable — {listErr}. You can still grant below.
+            </Text>
+          ) : grants === null ? (
+            <Spin size="small" />
+          ) : grants.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>(not granted)</Text>
+          ) : grants.map((g) => (
+            <Tag key={label(g)} closable onClose={(e) => { e.preventDefault(); remove(g); }}>{label(g)}</Tag>
+          ))}
+        </div>
+        <Space wrap size={6}>
+          <Select size="small" value={kind} onChange={(v) => { setKind(v); setGrantee(""); setParent(v === "DATABASE ROLE" ? db : ""); }} options={GRANTEE_KINDS} style={{ width: 140 }} />
+          {kind !== "ROLE" && (
+            <Input
+              size="small"
+              value={parent}
+              onChange={(e) => setParent(e.target.value)}
+              placeholder={kind === "DATABASE ROLE" ? "database" : "application"}
+              style={{ width: 130 }}
+            />
+          )}
+          <AutoComplete
+            size="small"
+            value={grantee}
+            onChange={setGrantee}
+            options={options}
+            filterOption={(input, opt) => String(opt?.value ?? "").toLowerCase().includes(input.toLowerCase())}
+            placeholder="grantee"
+            style={{ width: 170 }}
+          />
+          <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy} disabled={!grantee.trim() || (kind !== "ROLE" && !parent.trim())} onClick={add}>
+            Grant
+          </Button>
+        </Space>
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -182,15 +386,21 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Lazily-loaded endpoints (SHOW ENDPOINTS IN SERVICE).
-  const [endpoints, setEndpoints] = useState<snowflake.QueryResult | null>(null);
-  const [endpointsLoading, setEndpointsLoading] = useState(false);
-  const [endpointsError, setEndpointsError] = useState<string | null>(null);
+  const { modal } = AntApp.useApp();
+  const editorTheme = useThemeStore((s) => s.resolved) === "dark" ? "vs-dark" : "vs";
 
-  // Lazily-loaded container status (SHOW SERVICE CONTAINERS IN SERVICE).
-  const [containers, setContainers] = useState<snowflake.QueryResult | null>(null);
-  const [containersLoading, setContainersLoading] = useState(false);
-  const [containersError, setContainersError] = useState<string | null>(null);
+  // Specification editor (redeploy via ALTER SERVICE … FROM SPECIFICATION).
+  const [specSource, setSpecSource] = useState<"inline" | "stage">("inline");
+  const [specDraft, setSpecDraft] = useState<string | null>(null); // null = untouched
+  const [specStage, setSpecStage] = useState("");
+  const [specFile, setSpecFile] = useState("");
+  const [redeploying, setRedeploying] = useState(false);
+
+  // Lazily-loaded service roles (SHOW ROLES IN SERVICE).
+  const [svcRoles, setSvcRoles] = useState<string[] | null>(null);
+  const [accountRoles, setAccountRoles] = useState<string[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState<string | null>(null);
 
   // Lazily-loaded logs (SYSTEM$GET_SERVICE_LOGS).
   const [logContainer, setLogContainer] = useState("");
@@ -246,29 +456,41 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
   const saveQueryWarehouse = (v: string) =>
     runAlter(v.trim() === "" ? "UNSET QUERY_WAREHOUSE" : `SET QUERY_WAREHOUSE = ${qid(v.trim())}`, "Update query warehouse");
 
-  const loadEndpoints = useCallback(async () => {
-    setEndpointsLoading(true);
-    setEndpointsError(null);
+  const loadRoles = async () => {
+    setRolesLoading(true);
+    setRolesError(null);
     try {
-      setEndpoints(await ListServiceEndpoints(db, schema, name) ?? null);
+      setSvcRoles(column(await ListServiceRoles(db, schema, name), "name"));
+      ListRoles().then((r) => setAccountRoles(r ?? [])).catch(() => setAccountRoles([]));
     } catch (e) {
-      setEndpointsError(String(e));
+      setRolesError(String(e));
     } finally {
-      setEndpointsLoading(false);
+      setRolesLoading(false);
     }
-  }, [db, schema, name]);
+  };
 
-  const loadContainers = useCallback(async () => {
-    setContainersLoading(true);
-    setContainersError(null);
-    try {
-      setContainers(await GetServiceContainers(db, schema, name) ?? null);
-    } catch (e) {
-      setContainersError(String(e));
-    } finally {
-      setContainersLoading(false);
-    }
-  }, [db, schema, name]);
+  const redeploy = () => {
+    modal.confirm({
+      title: `Redeploy ${name}?`,
+      content: "Snowflake restarts the service instances with the new spec.",
+      okText: "Redeploy",
+      onOk: async () => {
+        setRedeploying(true);
+        try {
+          await RedeployService(db, schema, name, svcModels.ServiceConfig.createFrom({
+            specSource, specInline: specDraft ?? "", specStage, specFile,
+          }));
+          message.success("Service redeployed.");
+          setSpecDraft(null);
+          await reload();
+        } catch (e) {
+          message.error(`Redeploy failed: ${String(e)}`, 6);
+        } finally {
+          setRedeploying(false);
+        }
+      },
+    });
+  };
 
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -296,8 +518,14 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
     "status", "spec", "comment", "min_instances", "max_instances", "auto_resume", "query_warehouse",
   ]);
 
-  const ep = tableFromResult(endpoints);
-  const ct = tableFromResult(containers);
+  const specText = specDraft ?? spec;
+  // GetObjectProperties drops the spec when DESCRIBE SERVICE fails, so a
+  // missing key means "couldn't read", not "empty" — warn before a redeploy
+  // from a blank editor replaces a spec the user can't see.
+  const specMissing = !rows?.some((r) => r.key.toLowerCase() === "spec");
+  const canRedeploy = specSource === "inline"
+    ? specDraft !== null && specDraft !== spec && specDraft.trim() !== ""
+    : specStage !== "" && specFile !== "";
 
   return (
     <Modal
@@ -359,55 +587,90 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
           </table>
 
           <div style={SECTION_HEAD}>Specification</div>
-          {spec ? (
-            <Input.TextArea
-              value={spec}
-              readOnly
-              autoSize={{ minRows: 4, maxRows: 16 }}
-              style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+          <Space wrap style={{ marginBottom: 8 }}>
+            <Radio.Group
+              size="small"
+              value={specSource}
+              onChange={(e) => setSpecSource(e.target.value)}
+              options={[{ value: "inline", label: "Inline YAML" }, { value: "stage", label: "Staged file" }]}
+              optionType="button"
             />
+            <Button
+              size="small"
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              onClick={redeploy}
+              loading={redeploying}
+              disabled={!canRedeploy}
+            >
+              Redeploy
+            </Button>
+            {specSource === "inline" && specDraft !== null && specDraft !== spec && (
+              <>
+                <Text type="warning" style={{ fontSize: 11 }}>Unsaved changes</Text>
+                <Button size="small" onClick={() => setSpecDraft(null)}>Discard</Button>
+              </>
+            )}
+          </Space>
+          {specMissing && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message="The current specification could not be read (DESCRIBE SERVICE failed or your role lacks privileges)."
+              description="The editor below is empty, not the service's spec. Redeploying replaces the live specification with whatever you enter."
+            />
+          )}
+          {specSource === "inline" ? (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+              <Editor
+                height={300}
+                language="yaml"
+                theme={editorTheme}
+                value={specText}
+                onChange={(v) => setSpecDraft(v ?? "")}
+                onMount={(editor) => patchMonacoClipboard(editor)}
+                options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 12, wordWrap: "on", automaticLayout: true }}
+              />
+            </div>
           ) : (
-            <Text type="secondary">(unavailable)</Text>
-          )}
-
-          <div style={SECTION_HEAD}>Endpoints</div>
-          {endpointsError && (
-            <Alert type="error" message="Failed to load endpoints" description={endpointsError} showIcon style={{ marginBottom: 8 }} />
-          )}
-          {endpoints ? (
             <>
-              <Space style={{ marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {ep.data.length === 0 ? "No endpoints." : `${ep.data.length} endpoint${ep.data.length === 1 ? "" : "s"}.`}
-                </Text>
-                <Button size="small" icon={<ReloadOutlined />} onClick={loadEndpoints} loading={endpointsLoading}>Refresh</Button>
-              </Space>
-              {ep.data.length > 0 && (
-                <Table size="small" columns={ep.columns} dataSource={ep.data} pagination={false} scroll={{ x: true }} />
+              <StageFilePicker
+                db={db}
+                schema={schema}
+                label="Browse internal stage — select the new specification file"
+                onPick={(stage, file) => { setSpecStage(stage); setSpecFile(file); }}
+              />
+              {specFile && (
+                <Text style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>@{specStage}/{specFile}</Text>
               )}
             </>
-          ) : (
-            <Button size="small" icon={<ReloadOutlined />} onClick={loadEndpoints} loading={endpointsLoading}>Load endpoints</Button>
           )}
+          <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 6 }}>
+            Redeploy runs ALTER SERVICE … FROM SPECIFICATION; Snowflake restarts the service instances with the new spec.
+          </Text>
 
-          <div style={SECTION_HEAD}>Containers</div>
-          {containersError && (
-            <Alert type="error" message="Failed to load containers" description={containersError} showIcon style={{ marginBottom: 8 }} />
+          <LazyTable title="Endpoints" noun="endpoint" load={() => ListServiceEndpoints(db, schema, name)} />
+          <LazyTable title="Instances" noun="instance" load={() => ListServiceInstances(db, schema, name)} />
+          <LazyTable title="Containers" noun="container" load={() => GetServiceContainers(db, schema, name)} />
+          <LazyTable title="Volumes" noun="volume" load={() => ListServiceVolumes(db, schema, name)} />
+
+          <div style={SECTION_HEAD}>Service roles</div>
+          {rolesError && (
+            <Alert type="error" message="Failed to load service roles" description={rolesError} showIcon style={{ marginBottom: 8 }} />
           )}
-          {containers ? (
-            <>
-              <Space style={{ marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {ct.data.length === 0 ? "No containers." : `${ct.data.length} container${ct.data.length === 1 ? "" : "s"}.`}
-                </Text>
-                <Button size="small" icon={<ReloadOutlined />} onClick={loadContainers} loading={containersLoading}>Refresh</Button>
-              </Space>
-              {ct.data.length > 0 && (
-                <Table size="small" columns={ct.columns} dataSource={ct.data} pagination={false} scroll={{ x: true }} />
-              )}
-            </>
+          {svcRoles === null ? (
+            <Button size="small" icon={<ReloadOutlined />} onClick={loadRoles} loading={rolesLoading}>Load service roles</Button>
+          ) : svcRoles.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>No service roles declared in the spec.</Text>
           ) : (
-            <Button size="small" icon={<ReloadOutlined />} onClick={loadContainers} loading={containersLoading}>Load containers</Button>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <tbody>
+                {svcRoles.map((r) => (
+                  <ServiceRoleGrants key={r} db={db} schema={schema} name={name} role={r} accountRoles={accountRoles} />
+                ))}
+              </tbody>
+            </table>
           )}
 
           <div style={SECTION_HEAD}>Logs</div>
