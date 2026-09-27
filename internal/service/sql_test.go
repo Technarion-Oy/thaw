@@ -3,8 +3,11 @@
 package service
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 func TestBuildCreateServiceSql(t *testing.T) {
@@ -254,9 +257,30 @@ func TestBuildServiceRoleGrantSql(t *testing.T) {
 		{Role: "R", GranteeKind: "USER", Grantee: "U"},
 		{GranteeKind: "ROLE", Grantee: "U"},
 		{Role: "R", GranteeKind: "ROLE"},
+		{Role: "R", GranteeKind: "DATABASE ROLE", Grantee: "DR"},
+		{Role: "R", GranteeKind: "APPLICATION ROLE", Parent: " ", Grantee: "AR"},
 	} {
 		if _, err := BuildGrantServiceRoleSql("DB", "SC", "SVC", bad); err == nil {
 			t.Errorf("expected error for %+v", bad)
 		}
+	}
+}
+
+func TestParseServiceRoleGrants(t *testing.T) {
+	res := &snowflake.QueryResult{
+		Columns: []string{"created_on", "role", "granted_to", "grantee_name"},
+		Rows: [][]any{
+			{nil, "R", "ROLE", "ANALYST"},
+			{nil, "R", "DATABASE_ROLE", `"MY.DB".DR`},
+			{nil, "R", "APPLICATION_ROLE", "APP.AR"},
+		},
+	}
+	want := []ServiceRoleGrant{
+		{Role: "R", GranteeKind: "ROLE", Grantee: "ANALYST"},
+		{Role: "R", GranteeKind: "DATABASE ROLE", Parent: "MY.DB", Grantee: "DR"},
+		{Role: "R", GranteeKind: "APPLICATION ROLE", Parent: "APP", Grantee: "AR"},
+	}
+	if got := ParseServiceRoleGrants(res, "R"); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v\nwant %+v", got, want)
 	}
 }

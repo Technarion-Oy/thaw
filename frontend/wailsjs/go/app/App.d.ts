@@ -946,7 +946,7 @@ export function ListServiceEndpoints(arg1:string,arg2:string,arg3:string):Promis
 
 export function ListServiceInstances(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
-export function ListServiceRoleGrants(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+export function ListServiceRoleGrants(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<service.ServiceRoleGrant>>;
 
 export function ListServiceRoles(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

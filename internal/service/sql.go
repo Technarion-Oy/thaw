@@ -231,8 +231,7 @@ const (
 // ServiceRoleGrant describes a GRANT / REVOKE SERVICE ROLE target: the service
 // role (declared in the service spec) and the grantee. Parent is the database
 // (for a DATABASE ROLE grantee) or application (for an APPLICATION ROLE
-// grantee); it is ignored for account roles and may be blank to leave the
-// grantee unqualified.
+// grantee) and is required for those kinds; it is ignored for account roles.
 type ServiceRoleGrant struct {
 	Role        string `json:"role"`        // service role name
 	GranteeKind string `json:"granteeKind"` // ROLE | DATABASE ROLE | APPLICATION ROLE
@@ -252,12 +251,44 @@ func serviceRoleGrantParts(db, schema, svc string, g ServiceRoleGrant) (ref, kin
 		return "", "", "", err
 	}
 	ref = snowflake.Qualify(db, schema, svc) + "!" + snowflake.QuoteIdent(g.Role)
-	if kind != GranteeRole && strings.TrimSpace(g.Parent) != "" {
-		grantee = snowflake.Qualify(g.Parent, g.Grantee)
-	} else {
+	switch {
+	case kind == GranteeRole:
 		grantee = snowflake.QuoteIdent(g.Grantee)
+	case strings.TrimSpace(g.Parent) == "":
+		return "", "", "", fmt.Errorf("%s grantee requires its database / application name", strings.ToLower(kind))
+	default:
+		grantee = snowflake.Qualify(g.Parent, g.Grantee)
 	}
 	return ref, kind, grantee, nil
+}
+
+// ParseServiceRoleGrants converts a SHOW GRANTS OF SERVICE ROLE result into
+// ServiceRoleGrant rows for role. granted_to (ROLE / DATABASE_ROLE /
+// APPLICATION_ROLE) becomes the grantee kind; for database/application roles
+// grantee_name ("PARENT.ROLE", parts quoted when needed) is split with the
+// quote-aware snowflake.SplitQualifiedName, so a parent like "MY.DB" survives.
+// Rows whose grantee name does not parse fall back to the raw name, unqualified.
+func ParseServiceRoleGrants(res *snowflake.QueryResult, role string) []ServiceRoleGrant {
+	if res == nil {
+		return nil
+	}
+	kindIdx := snowflake.ColIdx(res.Columns, "granted_to")
+	nameIdx := snowflake.ColIdx(res.Columns, "grantee_name")
+	out := make([]ServiceRoleGrant, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		g := ServiceRoleGrant{
+			Role:        role,
+			GranteeKind: strings.ToUpper(strings.ReplaceAll(snowflake.Cell(row, kindIdx), "_", " ")),
+			Grantee:     snowflake.Cell(row, nameIdx),
+		}
+		if g.GranteeKind != GranteeRole {
+			if parts, err := snowflake.SplitQualifiedName(g.Grantee, 2); err == nil && len(parts) == 2 {
+				g.Parent, g.Grantee = parts[0].Text, parts[1].Text
+			}
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 // BuildGrantServiceRoleSql emits

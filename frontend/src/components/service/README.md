@@ -42,8 +42,12 @@
 - **`SHOW SERVICES` omits the spec** — the YAML specification is fetched via
   `DESCRIBE SERVICE` (the `spec` column) and merged into the properties.
 - **Grantees may be unlistable** — if `SHOW GRANTS OF SERVICE ROLE` fails, the
-  role row shows a note instead of chips and keeps only the grant form.
-  Database/application-role grantees come back as `PARENT.ROLE` and are split on
-  the first `.`.
+  role row shows the error instead of chips and keeps only the grant form.
+  Grantees arrive already split into parent/grantee (Go-side
+  `service.ParseServiceRoleGrants`); a database/application-role grant needs its
+  parent filled in (the field resets per grantee kind).
+- **Spec unreadable ≠ spec empty** — `GetObjectProperties` omits the `spec` row
+  when `DESCRIBE SERVICE` fails; the modal then shows a warning above the (empty)
+  editor, since redeploying from it would replace a spec the user can't see.
 - **Suspend deletes containers** — suspending a service shuts down and removes its
   containers; resuming reconstructs them from the spec.

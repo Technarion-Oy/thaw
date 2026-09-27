@@ -257,7 +257,7 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
   const [grants, setGrants] = useState<svcModels.ServiceRoleGrant[] | null>(null);
   const [listErr, setListErr] = useState<string | null>(null);
   const [kind, setKind] = useState("ROLE");
-  const [parent, setParent] = useState(db);
+  const [parent, setParent] = useState(""); // database / application; reset per kind
   const [grantee, setGrantee] = useState("");
   const [dbRoles, setDbRoles] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -265,19 +265,7 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
   const reload = useCallback(async () => {
     setListErr(null);
     try {
-      const res = await ListServiceRoleGrants(db, schema, name, role);
-      const kinds = column(res, "granted_to");
-      setGrants(column(res, "grantee_name").map((g, i) => {
-        const k = kinds[i].replace(/_/g, " ").toUpperCase();
-        // ponytail: DB/app-role grantees come back as "PARENT.ROLE"; a parent
-        // name containing "." would split wrong — parse quoted parts if that bites.
-        const dot = k === "ROLE" ? -1 : g.indexOf(".");
-        return svcModels.ServiceRoleGrant.createFrom({
-          role, granteeKind: k,
-          parent: dot < 0 ? "" : g.slice(0, dot),
-          grantee: dot < 0 ? g : g.slice(dot + 1),
-        });
-      }));
+      setGrants(await ListServiceRoleGrants(db, schema, name, role) ?? []);
     } catch (e) {
       setGrants(null);
       setListErr(String(e));
@@ -285,10 +273,18 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
   }, [db, schema, name, role]);
   useEffect(() => { reload(); }, [reload]);
 
+  // Debounced so typing a database name doesn't fire SHOW per keystroke; the
+  // cleanup flag drops responses for a parent the user has since changed.
   useEffect(() => {
     setDbRoles([]);
     if (kind !== "DATABASE ROLE" || !parent.trim()) return;
-    ListDatabaseRoles(parent.trim()).then((r) => setDbRoles(r ?? [])).catch(() => setDbRoles([]));
+    let stale = false;
+    const t = setTimeout(() => {
+      ListDatabaseRoles(parent.trim())
+        .then((r) => { if (!stale) setDbRoles(r ?? []); })
+        .catch(() => { if (!stale) setDbRoles([]); });
+    }, 300);
+    return () => { stale = true; clearTimeout(t); };
   }, [kind, parent]);
 
   const add = async () => {
@@ -337,7 +333,7 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
           {listErr ? (
             <Text type="secondary" style={{ fontSize: 11, fontStyle: "italic" }}>
-              Grantees unavailable (SHOW GRANTS OF SERVICE ROLE failed) — you can still grant below.
+              Grantees unavailable — {listErr}. You can still grant below.
             </Text>
           ) : grants === null ? (
             <Spin size="small" />
@@ -348,7 +344,7 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
           ))}
         </div>
         <Space wrap size={6}>
-          <Select size="small" value={kind} onChange={(v) => { setKind(v); setGrantee(""); }} options={GRANTEE_KINDS} style={{ width: 140 }} />
+          <Select size="small" value={kind} onChange={(v) => { setKind(v); setGrantee(""); setParent(v === "DATABASE ROLE" ? db : ""); }} options={GRANTEE_KINDS} style={{ width: 140 }} />
           {kind !== "ROLE" && (
             <Input
               size="small"
@@ -367,7 +363,7 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
             placeholder="grantee"
             style={{ width: 170 }}
           />
-          <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy} disabled={!grantee.trim()} onClick={add}>
+          <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy} disabled={!grantee.trim() || (kind !== "ROLE" && !parent.trim())} onClick={add}>
             Grant
           </Button>
         </Space>
@@ -523,6 +519,10 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
   ]);
 
   const specText = specDraft ?? spec;
+  // GetObjectProperties drops the spec when DESCRIBE SERVICE fails, so a
+  // missing key means "couldn't read", not "empty" — warn before a redeploy
+  // from a blank editor replaces a spec the user can't see.
+  const specMissing = !rows?.some((r) => r.key.toLowerCase() === "spec");
   const canRedeploy = specSource === "inline"
     ? specDraft !== null && specDraft !== spec && specDraft.trim() !== ""
     : specStage !== "" && specFile !== "";
@@ -612,6 +612,15 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
               </>
             )}
           </Space>
+          {specMissing && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message="The current specification could not be read (DESCRIBE SERVICE failed or your role lacks privileges)."
+              description="The editor below is empty, not the service's spec. Redeploying replaces the live specification with whatever you enter."
+            />
+          )}
           {specSource === "inline" ? (
             <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
               <Editor

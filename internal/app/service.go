@@ -77,12 +77,17 @@ func (a *App) ListServiceRoles(database, schema, name string) (*snowflake.QueryR
 }
 
 // ListServiceRoleGrants returns the grantees of one service role via
-// SHOW GRANTS OF SERVICE ROLE <svc>!<role> (columns include granted_to and
-// grantee_name). Accounts without this SHOW variant return an error, which the
-// panel surfaces as "grantees unavailable" while keeping the grant form usable.
-func (a *App) ListServiceRoleGrants(database, schema, name, role string) (*snowflake.QueryResult, error) {
-	return a.execObjectSQL("SHOW GRANTS OF SERVICE ROLE " +
+// SHOW GRANTS OF SERVICE ROLE <svc>!<role>, parsed into ServiceRoleGrant rows
+// (parent/grantee already split, ready to pass back to RevokeServiceRole).
+// Accounts without this SHOW variant return an error, which the panel surfaces
+// as "grantees unavailable" while keeping the grant form usable.
+func (a *App) ListServiceRoleGrants(database, schema, name, role string) ([]service.ServiceRoleGrant, error) {
+	res, err := a.execObjectSQL("SHOW GRANTS OF SERVICE ROLE " +
 		snowflake.Qualify(database, schema, name) + "!" + snowflake.QuoteIdent(role))
+	if err != nil {
+		return nil, err
+	}
+	return service.ParseServiceRoleGrants(res, role), nil
 }
 
 // GrantServiceRole runs GRANT SERVICE ROLE <svc>!<role> TO <grantee>.

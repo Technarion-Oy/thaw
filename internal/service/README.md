@@ -35,7 +35,8 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
 | `TemplateVar` | A single `name => value` binding for the `USING` clause of a templated spec |
 | `BuildAlterServiceSpecClause(cfg)` | Redeploy clause (`FROM SPECIFICATION $$…$$` / `FROM @<stage> SPECIFICATION_FILE = '…'`, TEMPLATE/USING variants) for `App.RedeployService` → `App.AlterService`; reuses `specClause` but errors on an empty source or an inline spec containing `$$` |
 | `ServiceRoleGrant` | Service role + grantee kind (`ROLE` / `DATABASE ROLE` / `APPLICATION ROLE`) + optional parent (database / application) + grantee |
-| `BuildGrantServiceRoleSql` / `BuildRevokeServiceRoleSql` | `GRANT SERVICE ROLE "db"."sc"."svc"!"role" TO <kind> <grantee>;` / `REVOKE … FROM …`; every identifier is `QuoteIdent`-quoted, so names containing `!` or `.` survive |
+| `ParseServiceRoleGrants(res, role)` | `SHOW GRANTS OF SERVICE ROLE` → `[]ServiceRoleGrant`; `grantee_name` split with the quote-aware `snowflake.SplitQualifiedName` (`"MY.DB".DR` → parent `MY.DB`) |
+| `BuildGrantServiceRoleSql` / `BuildRevokeServiceRoleSql` | `GRANT SERVICE ROLE "db"."sc"."svc"!"role" TO <kind> <grantee>;` / `REVOKE … FROM …`; every identifier is `QuoteIdent`-quoted, so names containing `!` or `.` survive; a DATABASE/APPLICATION ROLE grantee without a parent is rejected |
 | `SpecSourceInline` / `SpecSourceStage` | `SpecSource` values selecting inline vs. staged specification |
 
 ## Patterns & integration
