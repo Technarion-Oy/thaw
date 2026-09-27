@@ -290,6 +290,22 @@ func TestParseShowComputePools(t *testing.T) {
 	)
 }
 
+func TestParseShowNodesInComputePool(t *testing.T) {
+	assertValid(t, (*Validator).ParseShowNodesInComputePool,
+		`SHOW NODES IN COMPUTE POOL cp`,
+		`SHOW NODES IN COMPUTE POOL db.sc.cp LIKE 'n%'`,
+		`SHOW NODES IN COMPUTE POOL cp LIKE 'n%' LIMIT 10`,
+		`SHOW NODES IN COMPUTE POOL cp LIMIT 5`,
+	)
+	assertInvalid(t, (*Validator).ParseShowNodesInComputePool,
+		``,
+		`SHOW NODES`,
+		`SHOW NODES IN COMPUTE POOL`, // missing name
+		`SHOW NODES IN COMPUTE POOL cp LIMIT 5 FROM 'a'`, // no FROM variant here
+		`SHOW NODES IN COMPUTE POOL cp STARTS WITH 'a'`,
+	)
+}
+
 func TestParseShowConfigurations(t *testing.T) {
 	assertValid(t, (*Validator).ParseShowConfigurations,
 		`SHOW CONFIGURATIONS`,
