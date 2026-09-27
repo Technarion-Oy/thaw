@@ -804,6 +804,8 @@ export function GitUnstageFile(arg1:string,arg2:string):Promise<void>;
 
 export function GitUpdateRemoteURL(arg1:string,arg2:string):Promise<void>;
 
+export function GrantServiceRole(arg1:string,arg2:string,arg3:string,arg4:service.ServiceRoleGrant):Promise<void>;
+
 export function HybridIndexColumnOptions(arg1:Array<hybridtable.IndexColumn>):Promise<hybridtable.IndexColumnOptions>;
 
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
@@ -867,6 +869,8 @@ export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<b
 export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
 export function ListComputePools():Promise<Array<string>>;
+
+export function ListDatabaseRoles(arg1:string):Promise<Array<string>>;
 
 export function ListDatabases():Promise<Array<string>>;
 
@@ -939,6 +943,14 @@ export function ListSemanticFacts(arg1:string,arg2:string,arg3:string):Promise<s
 export function ListSemanticMetrics(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListServiceEndpoints(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListServiceInstances(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListServiceRoleGrants(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
+
+export function ListServiceRoles(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListServiceVolumes(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
@@ -1044,6 +1056,8 @@ export function ReconcileAllExclusiveList(arg1:Array<string>):Promise<Array<stri
 
 export function ReconcileSecondaryRoles(arg1:Array<string>):Promise<Array<string>>;
 
+export function RedeployService(arg1:string,arg2:string,arg3:string,arg4:service.ServiceConfig):Promise<void>;
+
 export function RemoveEditorTab(arg1:string):Promise<void>;
 
 export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
@@ -1071,6 +1085,8 @@ export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promi
 export function RevealInFinder(arg1:string):Promise<void>;
 
 export function RevealLogFile():Promise<void>;
+
+export function RevokeServiceRole(arg1:string,arg2:string,arg3:string,arg4:service.ServiceRoleGrant):Promise<void>;
 
 export function RunExplain(arg1:string,arg2:string):Promise<queryprofile.ExplainResult>;
 

@@ -7,14 +7,17 @@
 | File | Purpose |
 |---|---|
 | `CreateServiceModal.tsx` | Create form with a live `CREATE SERVICE` SQL preview. Fields: name, IF NOT EXISTS (no OR REPLACE — Snowflake doesn't support it), compute pool (picker from `ListComputePools`), specification (inline YAML textarea **or** staged file via the shared `components/shared/StageFilePicker`), a **Template** toggle that switches to `SPECIFICATION_TEMPLATE[_FILE]` and reveals a **Template variables** (`USING`) key/value editor, min/max instances, auto resume, query warehouse (picker), external access integrations, and a comment. The staged-spec picker passes `label="Browse internal stage — select the specification file"`. |
-| `ServicePropertiesModal.tsx` | `SHOW SERVICES` + `DESCRIBE SERVICE` metadata: a **Status** tag, inline-editable **Settings** (comment, min/max instances, auto resume, query warehouse via `ALTER SERVICE SET/UNSET`), a read-only **Specification** (YAML), lazily-loaded **Endpoints** (`SHOW ENDPOINTS IN SERVICE`), **Containers** (`SHOW SERVICE CONTAINERS IN SERVICE`), and **Logs** (`SYSTEM$GET_SERVICE_LOGS`, with container/instance/lines inputs), plus the generic property rows. |
+| `ServicePropertiesModal.tsx` | `SHOW SERVICES` + `DESCRIBE SERVICE` metadata: a **Status** tag, inline-editable **Settings** (comment, min/max instances, auto resume, query warehouse via `ALTER SERVICE SET/UNSET`), an editable **Specification** (Monaco YAML, or a staged file via `shared/StageFilePicker`) with a **Redeploy** button (`RedeployService` → `ALTER SERVICE … FROM SPECIFICATION`, confirm first), lazily-loaded `LazyTable` sections for **Endpoints** (`SHOW ENDPOINTS IN SERVICE`), **Instances** (`SHOW SERVICE INSTANCES IN SERVICE`), **Containers** (`SHOW SERVICE CONTAINERS IN SERVICE`) and **Volumes** (`SHOW SERVICE VOLUMES IN SERVICE`), **Service roles** (`SHOW ROLES IN SERVICE`; per role a `ServiceRoleGrants` chip editor modelled on `UserPropertiesModal`'s `PolicyManager` — grantee chips from `SHOW GRANTS OF SERVICE ROLE`, × revokes, add row picks Role / Database role / Application role), and **Logs** (`SYSTEM$GET_SERVICE_LOGS`, with container/instance/lines inputs), plus the generic property rows. |
 
 ## Integration
 
 - Create delegates to `BuildCreateServiceSql` / `ExecDDL` and reads
   `ListComputePools` / `ListWarehouses` for the pickers.
 - Properties delegates to `GetObjectProperties` (SHOW + DESCRIBE), `AlterService`
-  (lifecycle/edit clauses), `ListServiceEndpoints`, `GetServiceContainers`, and
+  (lifecycle/edit clauses), `RedeployService`, `ListServiceEndpoints`,
+  `ListServiceInstances`, `GetServiceContainers`, `ListServiceVolumes`,
+  `ListServiceRoles`, `ListServiceRoleGrants`, `GrantServiceRole` /
+  `RevokeServiceRole`, `ListRoles` / `ListDatabaseRoles` (grantee pickers), and
   `GetServiceLogs`.
 - `AlterService(db, schema, name, clause)` runs free-form `ALTER SERVICE …
   <clause>` for SUSPEND/RESUME (from the sidebar) and SET/UNSET of the mutable
@@ -38,5 +41,9 @@
   SERVICES` + `DESCRIBE SERVICE`.
 - **`SHOW SERVICES` omits the spec** — the YAML specification is fetched via
   `DESCRIBE SERVICE` (the `spec` column) and merged into the properties.
+- **Grantees may be unlistable** — if `SHOW GRANTS OF SERVICE ROLE` fails, the
+  role row shows a note instead of chips and keeps only the grant form.
+  Database/application-role grantees come back as `PARENT.ROLE` and are split on
+  the first `.`.
 - **Suspend deletes containers** — suspending a service shuts down and removes its
   containers; resuming reconstructs them from the spec.

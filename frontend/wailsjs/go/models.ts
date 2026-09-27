@@ -4383,6 +4383,24 @@ export namespace service {
 		    return a;
 		}
 	}
+	export class ServiceRoleGrant {
+	    role: string;
+	    granteeKind: string;
+	    parent: string;
+	    grantee: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServiceRoleGrant(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.role = source["role"];
+	        this.granteeKind = source["granteeKind"];
+	        this.parent = source["parent"];
+	        this.grantee = source["grantee"];
+	    }
+	}
 
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"thaw/internal/apperrors"
+	"thaw/internal/service"
 	"thaw/internal/snowflake"
 )
 
@@ -26,12 +27,23 @@ func (a *App) AlterService(database, schema, name, clause string) error {
 // (typically name, port, protocol, ingress_enabled, ingress_url) without the
 // backend pinning a fixed shape.
 func (a *App) ListServiceEndpoints(database, schema, name string) (*snowflake.QueryResult, error) {
+	return a.showInService("SHOW ENDPOINTS IN SERVICE", database, schema, name)
+}
+
+// showInService runs `<show> <fqn>` for a service-scoped SHOW command and
+// returns the raw QueryResult, so the properties panel renders every column
+// the Snowflake edition reports without the backend pinning a fixed shape.
+func (a *App) showInService(show, database, schema, name string) (*snowflake.QueryResult, error) {
+	return a.execObjectSQL(show + " " + snowflake.Qualify(database, schema, name))
+}
+
+// execObjectSQL runs one statement on the current connection under the
+// object-editor feature context.
+func (a *App) execObjectSQL(sql string) (*snowflake.QueryResult, error) {
 	client := a.currentClient()
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	sql := fmt.Sprintf("SHOW ENDPOINTS IN SERVICE %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
 
@@ -41,13 +53,84 @@ func (a *App) ListServiceEndpoints(database, schema, name string) (*snowflake.Qu
 // the properties panel can render every column the Snowflake edition reports
 // (typically instance_id, container_name, status, message, image_name).
 func (a *App) GetServiceContainers(database, schema, name string) (*snowflake.QueryResult, error) {
-	client := a.currentClient()
-	if client == nil {
-		return nil, apperrors.ErrNotConnected
+	return a.showInService("SHOW SERVICE CONTAINERS IN SERVICE", database, schema, name)
+}
+
+// ListServiceInstances returns the per-instance status of the given service via
+// SHOW SERVICE INSTANCES IN SERVICE (typically instance_id, status,
+// spec_digest, creation_time, start_time).
+func (a *App) ListServiceInstances(database, schema, name string) (*snowflake.QueryResult, error) {
+	return a.showInService("SHOW SERVICE INSTANCES IN SERVICE", database, schema, name)
+}
+
+// ListServiceVolumes returns the volumes mounted by the given service's
+// containers via SHOW SERVICE VOLUMES IN SERVICE (typically volume_name,
+// instance_id, container_name, volume_type, size, iops, throughput).
+func (a *App) ListServiceVolumes(database, schema, name string) (*snowflake.QueryResult, error) {
+	return a.showInService("SHOW SERVICE VOLUMES IN SERVICE", database, schema, name)
+}
+
+// ListServiceRoles returns the service roles declared in the given service's
+// specification via SHOW ROLES IN SERVICE.
+func (a *App) ListServiceRoles(database, schema, name string) (*snowflake.QueryResult, error) {
+	return a.showInService("SHOW ROLES IN SERVICE", database, schema, name)
+}
+
+// ListServiceRoleGrants returns the grantees of one service role via
+// SHOW GRANTS OF SERVICE ROLE <svc>!<role> (columns include granted_to and
+// grantee_name). Accounts without this SHOW variant return an error, which the
+// panel surfaces as "grantees unavailable" while keeping the grant form usable.
+func (a *App) ListServiceRoleGrants(database, schema, name, role string) (*snowflake.QueryResult, error) {
+	return a.execObjectSQL("SHOW GRANTS OF SERVICE ROLE " +
+		snowflake.Qualify(database, schema, name) + "!" + snowflake.QuoteIdent(role))
+}
+
+// GrantServiceRole runs GRANT SERVICE ROLE <svc>!<role> TO <grantee>.
+func (a *App) GrantServiceRole(database, schema, name string, g service.ServiceRoleGrant) error {
+	sql, err := service.BuildGrantServiceRoleSql(database, schema, name, g)
+	if err != nil {
+		return err
 	}
-	sql := fmt.Sprintf("SHOW SERVICE CONTAINERS IN SERVICE %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	return client.Execute(a.fctx(FeatureObjectEditor), sql)
+	_, err = a.execObjectSQL(sql)
+	return err
+}
+
+// RevokeServiceRole runs REVOKE SERVICE ROLE <svc>!<role> FROM <grantee>.
+func (a *App) RevokeServiceRole(database, schema, name string, g service.ServiceRoleGrant) error {
+	sql, err := service.BuildRevokeServiceRoleSql(database, schema, name, g)
+	if err != nil {
+		return err
+	}
+	_, err = a.execObjectSQL(sql)
+	return err
+}
+
+// RedeployService runs ALTER SERVICE <fqn> FROM SPECIFICATION … (inline or
+// staged, per cfg.SpecSource); Snowflake restarts the service instances with
+// the new spec. Only the spec-source fields of cfg are used.
+func (a *App) RedeployService(database, schema, name string, cfg service.ServiceConfig) error {
+	clause, err := service.BuildAlterServiceSpecClause(cfg)
+	if err != nil {
+		return err
+	}
+	return a.AlterService(database, schema, name, clause)
+}
+
+// ListDatabaseRoles returns the names of the database roles in the given
+// database (SHOW DATABASE ROLES IN DATABASE), for grantee pickers.
+func (a *App) ListDatabaseRoles(database string) ([]string, error) {
+	res, err := a.execObjectSQL("SHOW DATABASE ROLES IN DATABASE " + snowflake.QuoteIdent(database))
+	if err != nil {
+		return nil, err
+	}
+	idx := snowflake.ColIdx(res.Columns, "name")
+	names := make([]string, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		if n := snowflake.Cell(row, idx); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names, nil
 }
 
 // GetServiceLogs returns the container logs for a single service instance via
