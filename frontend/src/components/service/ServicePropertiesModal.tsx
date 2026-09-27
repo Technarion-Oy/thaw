@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  App as AntApp, Modal, Spin, Button, Input, InputNumber, Space, Typography, Alert, Tooltip, Table, Tag, Select,
+  App as AntApp, Modal, Spin, Button, Input, InputNumber, Space, Typography, Alert, Tooltip, Tag, Select,
   AutoComplete, Radio, message,
 } from "antd";
 import {
@@ -18,6 +18,7 @@ import {
   GrantServiceRole, RevokeServiceRole, RedeployService, ListRoles, ListDatabaseRoles,
 } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
+import LazyResultTable from "../shared/LazyResultTable";
 import StageFilePicker from "../shared/StageFilePicker";
 import { useObjectTags } from "../shared/useObjectTags";
 import { useThemeStore } from "../../store/themeStore";
@@ -157,83 +158,10 @@ function EditRow({ label, value, numeric, options, canUnset, onSave, onUnset }: 
   );
 }
 
-// Build antd Table columns/data from a raw QueryResult shape.
-function tableFromResult(res: snowflake.QueryResult | null) {
-  const columns = (res?.columns ?? []).map((col, idx) => ({
-    title: col,
-    dataIndex: String(idx),
-    key: String(idx),
-    ellipsis: true,
-    render: (v: unknown) => (
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{v == null ? "" : String(v)}</span>
-    ),
-  }));
-  const data = (res?.rows ?? []).map((row, ri) => {
-    const obj: Record<string, unknown> = { key: ri };
-    row.forEach((cell, ci) => { obj[String(ci)] = cell; });
-    return obj;
-  });
-  return { columns, data };
-}
-
 // Read one named column (case-insensitive) from every row of a QueryResult.
 function column(res: snowflake.QueryResult | null, name: string): string[] {
   const idx = (res?.columns ?? []).findIndex((c) => c.toLowerCase() === name);
   return idx < 0 ? [] : (res?.rows ?? []).map((r) => String(r[idx] ?? ""));
-}
-
-// ─── LazyTable (SHOW … IN SERVICE sections) ──────────────────────────────────
-
-/**
- * A lazily loaded section rendering a raw QueryResult as an antd table: a
- * "Load <noun>s" button until first load, then a count + Refresh. Backs the
- * Endpoints / Instances / Containers / Volumes sections.
- */
-function LazyTable({ title, noun, load }: {
-  title: string;
-  noun: string;
-  load: () => Promise<snowflake.QueryResult>;
-}) {
-  const [res, setRes] = useState<snowflake.QueryResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setRes(await load() ?? null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const t = tableFromResult(res);
-  return (
-    <>
-      <div style={SECTION_HEAD}>{title}</div>
-      {error && (
-        <Alert type="error" message={`Failed to load ${noun}s`} description={error} showIcon style={{ marginBottom: 8 }} />
-      )}
-      {res ? (
-        <>
-          <Space style={{ marginBottom: 8 }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {t.data.length === 0 ? `No ${noun}s.` : `${t.data.length} ${noun}${t.data.length === 1 ? "" : "s"}.`}
-            </Text>
-            <Button size="small" icon={<ReloadOutlined />} onClick={run} loading={loading}>Refresh</Button>
-          </Space>
-          {t.data.length > 0 && (
-            <Table size="small" columns={t.columns} dataSource={t.data} pagination={false} scroll={{ x: true }} />
-          )}
-        </>
-      ) : (
-        <Button size="small" icon={<ReloadOutlined />} onClick={run} loading={loading}>Load {noun}s</Button>
-      )}
-    </>
-  );
 }
 
 // ─── ServiceRoleGrants (per service role chip editor) ────────────────────────
@@ -650,10 +578,10 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
             Redeploy runs ALTER SERVICE … FROM SPECIFICATION; Snowflake restarts the service instances with the new spec.
           </Text>
 
-          <LazyTable title="Endpoints" noun="endpoint" load={() => ListServiceEndpoints(db, schema, name)} />
-          <LazyTable title="Instances" noun="instance" load={() => ListServiceInstances(db, schema, name)} />
-          <LazyTable title="Containers" noun="container" load={() => GetServiceContainers(db, schema, name)} />
-          <LazyTable title="Volumes" noun="volume" load={() => ListServiceVolumes(db, schema, name)} />
+          <LazyResultTable title="Endpoints" noun="endpoint" load={() => ListServiceEndpoints(db, schema, name)} />
+          <LazyResultTable title="Instances" noun="instance" load={() => ListServiceInstances(db, schema, name)} />
+          <LazyResultTable title="Containers" noun="container" load={() => GetServiceContainers(db, schema, name)} />
+          <LazyResultTable title="Volumes" noun="volume" load={() => ListServiceVolumes(db, schema, name)} />
 
           <div style={SECTION_HEAD}>Service roles</div>
           {rolesError && (

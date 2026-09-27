@@ -8,6 +8,7 @@ import (
 	"thaw/internal/alert"
 	"thaw/internal/authenticationpolicy"
 	"thaw/internal/column"
+	"thaw/internal/computepool"
 	"thaw/internal/contact"
 	"thaw/internal/cortexsearchservice"
 	"thaw/internal/datametricfunction"
@@ -348,6 +349,12 @@ func (a *App) BuildAddSemanticViewMaterializationSql(database, schema, name stri
 // CORTEX SEARCH SERVICE.
 func (a *App) BuildCreateCortexSearchServiceSql(database, schema string, cfg cortexsearchservice.CortexSearchServiceConfig) (string, error) {
 	return cortexsearchservice.BuildCreateCortexSearchServiceSql(database, schema, cfg)
+}
+
+// BuildCreateComputePoolSql returns the SQL for creating a Snowflake COMPUTE
+// POOL (SPCS).
+func (a *App) BuildCreateComputePoolSql(cfg computepool.ComputePoolConfig) (string, error) {
+	return computepool.BuildCreateComputePoolSql(cfg)
 }
 
 // BuildCreateServiceSql returns the SQL for creating a Snowflake SERVICE (SPCS).

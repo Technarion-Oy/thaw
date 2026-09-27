@@ -4,6 +4,7 @@
 import { Alert, Button, Modal, Space, Tabs } from "antd";
 import { CloudServerOutlined } from "@ant-design/icons";
 import ContainerTabLayout from "./ContainerTabLayout";
+import ComputePoolsTab from "./ComputePoolsTab";
 import {
   CONTAINER_TABS,
   useContainerServicesStore,
@@ -19,7 +20,7 @@ interface Props {
 // columns, its loader and its row menu. `issue` is the child issue that fills it
 // in; when every tab has landed these placeholders (and the field) go away.
 const TABS: Record<ContainerTab, { label: string; objectLabel: string; newLabel: string; issue: number }> = {
-  pools:     { label: "Compute pools",      objectLabel: "compute pools",      newLabel: "New pool…",     issue: 941 },
+  pools:     { label: "Compute pools",      objectLabel: "compute pools",      newLabel: "New pool…",     issue: 941 }, // landed: ComputePoolsTab
   services:  { label: "Services",           objectLabel: "services",           newLabel: "New service…",  issue: 944 },
   jobs:      { label: "Jobs",               objectLabel: "job services",       newLabel: "Run job…",      issue: 942 },
   images:    { label: "Images",             objectLabel: "image repositories", newLabel: "New repo…",     issue: 943 },
@@ -59,7 +60,7 @@ export default function ContainerServicesModal({ onClose }: Props) {
           return {
             key,
             label: t.label,
-            children: (
+            children: key === "pools" ? <ComputePoolsTab /> : (
               <ContainerTabLayout
                 objectLabel={t.objectLabel}
                 rowKey="name"
