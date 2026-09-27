@@ -23,7 +23,7 @@
 ## Tools & visualization
 - [`er/`](er/README.md) — ER diagrams · [`lineage/`](lineage/README.md) — dependency tree · [`migration/`](migration/README.md) — schema migration wizard
 - [`export/`](export/README.md) — DDL/data export+import · [`files/`](files/README.md) — file browser · [`snippets/`](snippets/README.md) — snippet browser · [`snowpark/`](snowpark/README.md) — Snowpark setup
-- [`containerservices/`](containerservices/README.md) — account-wide Snowpark Container Services control centre (pools, services, jobs, images, snapshots, gateways)
+- [`containerservices/`](containerservices/README.md) — account-wide Snowpark Container Services control center (pools, services, jobs, images, snapshots, gateways)
 
 ## Connection, settings & shared
 - [`connection/`](connection/README.md) — ConnectModal + profile management

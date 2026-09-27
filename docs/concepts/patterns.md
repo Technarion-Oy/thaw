@@ -97,8 +97,8 @@ Admins can lock flags per platform — macOS managed plist (`Disable<Feature> = 
 
 A dialog reachable from more than one place — a native menu item, a sidebar
 context menu, a toolbar button — does not own its own `open` state. It is mounted
-**once** (in `App.tsx`, next to the other global modals) and its visibility lives
-in a tiny Zustand store: `tagManagementStore` (`openView`/`closeView`) is the
+**once** (in `QueryPage.tsx`, next to the other globally-reachable modals) and its
+visibility lives in a tiny Zustand store: `tagManagementStore` (`openView`/`closeView`) is the
 minimal shape, `containerServicesStore` the shape to copy when the entry points
 must also choose *where* in the dialog to land (`openView(tab)` carries the tab,
 `closeView()` keeps it so reopening returns to it).

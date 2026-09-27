@@ -37,12 +37,9 @@
 - `TagManagementModal` delegates to `ListAccountTags`, `GetAllTagReferences`,
   `SetObjectTag`, and `UnsetObjectTag`. Its visibility lives in
   `store/tagManagementStore.ts` (`open` / `openView` / `closeView`) so it can be
-  opened from the **Tools → Tag Management…** menu and from the **Tags** group
-  context menu in `components/layout/Sidebar.tsx` (**Manage Tags…**). The
-  `menu:tag-management` listener and the single mount both live in `App.tsx`,
-  next to the other globally-reachable modals — not in `QueryPage`, which is
-  where this note used to point while neither existed and the menu item did
-  nothing.
+  opened from the **Tools → Tag Management…** menu (listened for in `QueryPage`,
+  which renders the modal) and from the **Tags** group context menu in
+  `components/layout/Sidebar.tsx` (**Manage Tags…**).
 - Wired into the object tree from `components/layout/Sidebar.tsx` under the
   **Tags** group (kind `"TAG"`). Tags are not queryable tables, so there is no
   **Select Top 1000 Rows**; `ALTER TAG` supports `RENAME TO`, so **Rename** is

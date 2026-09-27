@@ -438,7 +438,7 @@ func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig {
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
 // Current version: 19 (added ContainerServices — the Snowpark Container
-// Services control centre; see issue #939).
+// Services control center; see issue #939).
 const flagsVersion = 19
 
 type FeatureFlags struct {
@@ -474,7 +474,7 @@ type FeatureFlags struct {
 
 	// Developer Environments
 	SnowparkNotebooks bool `json:"snowparkNotebooks"`
-	ContainerServices bool `json:"containerServices"` // Snowpark Container Services control centre
+	ContainerServices bool `json:"containerServices"` // Snowpark Container Services control center
 	EmbeddedTerminal  bool `json:"embeddedTerminal"`
 	GitIntegration    bool `json:"gitIntegration"`
 

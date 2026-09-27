@@ -269,7 +269,7 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
           <FlagRow
             label="Container Services"
-            description="Account-wide control centre for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, and gateways."
+            description="Account-wide control center for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, and gateways."
             checked={flags.containerServices}
             locked={locked.containerServices}
             onChange={(v) => set("containerServices", v)}

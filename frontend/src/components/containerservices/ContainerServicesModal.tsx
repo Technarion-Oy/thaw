@@ -28,7 +28,7 @@ const TABS: Record<ContainerTab, { label: string; objectLabel: string; newLabel:
 };
 
 /**
- * Account-wide Snowpark Container Services control centre (issue #939): one wide
+ * Account-wide Snowpark Container Services control center (issue #939): one wide
  * modal, one tab per Snowflake SPCS command group, all six sharing
  * `ContainerTabLayout`. This is the shell — each tab's data, columns and
  * lifecycle actions arrive with its own child issue.

@@ -3,6 +3,8 @@
 package app
 
 import (
+	"sync"
+
 	"thaw/internal/config"
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -27,6 +29,12 @@ func buildMenu(app *App) *menu.Menu {
 	// start optimistically enabled-by-flag (mirroring featureFlagsStore) and are
 	// corrected by setMenuFeatureFlags as soon as the real flags are read.
 	var containerItems []*menu.MenuItem
+
+	// The two inputs below are written by two independently-triggered IPC paths
+	// (Connect/Disconnect vs. startup/SaveFeatureFlags), so they and the item
+	// mutation in refresh are guarded — same shape as the mutex-held state in
+	// app.go.
+	var menuMu sync.Mutex
 	containerEnabled := true
 	connected := false
 
@@ -261,8 +269,9 @@ func buildMenu(app *App) *menu.Menu {
 	})
 
 	// Recompute every gated item from the two inputs (connection + feature
-	// flags) and push the menu to the OS. The ctx guard keeps buildMenu usable
-	// from tests, which construct an App without a Wails runtime.
+	// flags) and push the menu to the OS. Callers hold menuMu. The ctx guard
+	// keeps buildMenu usable from tests, which construct an App without a Wails
+	// runtime.
 	refresh := func() {
 		for _, item := range connectionItems {
 			item.Disabled = !connected
@@ -278,12 +287,16 @@ func buildMenu(app *App) *menu.Menu {
 
 	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only items.
 	app.setMenuConnected = func(c bool) {
+		menuMu.Lock()
+		defer menuMu.Unlock()
 		connected = c
 		refresh()
 	}
 
 	// Called at startup and after the user saves feature flags.
 	app.setMenuFeatureFlags = func(f config.FeatureFlags) {
+		menuMu.Lock()
+		defer menuMu.Unlock()
 		containerEnabled = f.ContainerServices
 		refresh()
 	}

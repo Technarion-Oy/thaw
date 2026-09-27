@@ -1103,7 +1103,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ### Container Services
 
-Snowpark Container Services (SPCS) has an account-wide control centre — **Snowpark → Container Services ▸** — alongside the schema-node context menus. The submenu has one item per Snowflake SPCS command group; each opens the same dialog on its own tab:
+Snowpark Container Services (SPCS) has an account-wide control center — **Snowpark → Container Services ▸** — alongside the schema-node context menus. The submenu has one item per Snowflake SPCS command group; each opens the same dialog on its own tab:
 
 | Menu item | Tab |
 |---|---|
@@ -1237,7 +1237,7 @@ The following features have an individual switch in **View → Enabled Features�
 
 **Developer Environments**
 - **Snowpark & Notebooks** (Embedded Python kernel and environment manager)
-- **Container Services** (Account-wide control centre for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, gateways)
+- **Container Services** (Account-wide control center for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, gateways)
 - **Embedded Terminal** (xterm.js OS shell panel)
 - **Git Integration** (Git status, commit, and push/pull UI)
 
