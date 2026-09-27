@@ -1565,12 +1565,14 @@ func (v *Validator) ParseAlterCatalogIntegration() bool {
 //	                                            [ AUTO_SUSPEND_SECS = <num> ]
 //	                                            [ PLACEMENT_GROUP = '<placement_group_name>' ]
 //	                                            [ INSTANCE_FAMILY = <instance_family_name> ]
+//	                                            [ BACKUP_INSTANCE_FAMILIES = ( '<instance_family_name>' [ , ... ] ) ]
 //	                                            [ TAG <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ]
 //	                                            [ COMMENT = '<string_literal>' ]
 //
-//	ALTER COMPUTE POOL [ IF EXISTS ] <name> UNSET { AUTO_SUSPEND_SECS |
-//	                                                AUTO_RESUME       |
-//	                                                PLACEMENT_GROUP   |
+//	ALTER COMPUTE POOL [ IF EXISTS ] <name> UNSET { AUTO_SUSPEND_SECS        |
+//	                                                AUTO_RESUME              |
+//	                                                PLACEMENT_GROUP          |
+//	                                                BACKUP_INSTANCE_FAMILIES |
 //	                                                COMMENT
 //	                                              }
 //	                                              [ , ... ]
@@ -1595,6 +1597,7 @@ func (v *Validator) ParseAlterComputePool() bool {
 			v.option("AUTO_SUSPEND_SECS", num),
 			v.option("PLACEMENT_GROUP", v.parseString),
 			v.option("INSTANCE_FAMILY", v.parseIdentPath),
+			v.option("BACKUP_INSTANCE_FAMILIES", func() bool { return v.parseParenList(v.parseString) }),
 			func() bool { return v.Sequence(func() bool { return v.MatchWord("TAG") }, commaList(tagAssign)) },
 			v.commentOption(),
 		)
@@ -1624,7 +1627,8 @@ func (v *Validator) ParseAlterComputePool() bool {
 				func() bool {
 					return v.Sequence(
 						func() bool { return v.MatchWord("UNSET") },
-						commaList(v.wordsValue("AUTO_SUSPEND_SECS", "AUTO_RESUME", "PLACEMENT_GROUP", "COMMENT")),
+						commaList(v.wordsValue("AUTO_SUSPEND_SECS", "AUTO_RESUME", "PLACEMENT_GROUP",
+							"BACKUP_INSTANCE_FAMILIES", "COMMENT")),
 					)
 				},
 			)

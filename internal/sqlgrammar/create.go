@@ -1203,8 +1203,23 @@ func (v *Validator) ParseCreateObjClone() bool {
 //	  [ [ WITH ] TAG ( <tag_name> = '<tag_value>' [ , <tag_name> = '<tag_value>' , ... ] ) ]
 //	  [ COMMENT = '<string_literal>' ]
 //	  [ PLACEMENT_GROUP = '<placement_group_name>' ]
+//	  [ BACKUP_INSTANCE_FAMILIES = ( '<instance_family_name>' [ , '<instance_family_name>' ... ] ) ]
 func (v *Validator) ParseCreateComputePool() bool {
 	num := func() bool { return v.Match(sqltok.NumberLit) }
+	famList := func() bool { return v.parseParenList(v.parseString) }
+	// MIN_NODES / MAX_NODES / INSTANCE_FAMILY are required by the doc but
+	// order-independent, so they sit in the unordered block and `required` counts
+	// how many of the three appeared; the block is rejected unless all three did.
+	got := 0
+	required := func(r Rule) Rule {
+		return func() bool {
+			if !r() {
+				return false
+			}
+			got++
+			return true
+		}
+	}
 	return v.Sequence(
 		func() bool { return v.MatchKeyword("CREATE") },
 		func() bool { return v.MatchWord("COMPUTE") },
@@ -1221,20 +1236,20 @@ func (v *Validator) ParseCreateComputePool() bool {
 				)
 			})
 		},
-		// The remaining options may appear in any order (MIN_NODES / MAX_NODES /
-		// INSTANCE_FAMILY are required but order-independent in practice).
+		// The remaining options may appear in any order.
 		func() bool {
 			return v.unorderedOnce(
-				v.option("MIN_NODES", num),
-				v.option("MAX_NODES", num),
-				v.option("INSTANCE_FAMILY", v.parseIdentPath),
+				required(v.option("MIN_NODES", num)),
+				required(v.option("MAX_NODES", num)),
+				required(v.option("INSTANCE_FAMILY", v.parseIdentPath)),
 				v.option("AUTO_RESUME", v.parseBool),
 				v.option("INITIALLY_SUSPENDED", v.parseBool),
 				v.option("AUTO_SUSPEND_SECS", num),
 				v.option("PLACEMENT_GROUP", v.parseString),
+				v.option("BACKUP_INSTANCE_FAMILIES", famList),
 				v.tagClause,
 				v.commentOption(),
-			)
+			) && got == 3
 		},
 	)
 }

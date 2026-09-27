@@ -1811,6 +1811,34 @@ func (v *Validator) ParseShowNetworkRules() bool {
 	)
 }
 
+// ParseShowNodesInComputePool validates the Snowflake `SHOW NODES IN COMPUTE POOL` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show-nodes-compute-pool
+//
+// Syntax:
+//
+//	SHOW NODES IN COMPUTE POOL <name>
+//	             [ LIKE '<pattern>' ]
+//	             [ LIMIT <rows> ]
+//
+// Unlike most SHOW commands the LIMIT here has no `FROM '<name>'` variant and the
+// `IN` clause is a fixed `IN COMPUTE POOL <name>`, so showTrailers is too loose.
+func (v *Validator) ParseShowNodesInComputePool() bool {
+	return v.Sequence(
+		func() bool { return v.MatchWord("SHOW") },
+		func() bool { return v.phrase("NODES", "IN", "COMPUTE", "POOL") },
+		v.parseIdentPath,
+		func() bool { return v.Optional(v.likeClause) },
+		func() bool {
+			return v.Optional(func() bool {
+				return v.Sequence(
+					func() bool { return v.MatchWord("LIMIT") },
+					func() bool { return v.Match(sqltok.NumberLit) },
+				)
+			})
+		},
+	)
+}
+
 // ParseShowNotebookProjects validates the Snowflake `SHOW NOTEBOOK PROJECTS` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/show-notebook-projects
 //
