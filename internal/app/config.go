@@ -120,7 +120,17 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 		return err
 	}
 	a.applyFeatureFlagExclusions()
+	a.syncMenuFeatureFlags()
 	return nil
+}
+
+// syncMenuFeatureFlags pushes the effective feature flags into the native menu
+// so flag-gated items (Snowpark → Container Services) grey out when their
+// feature is off. Called from startup and after SaveFeatureFlags.
+func (a *App) syncMenuFeatureFlags() {
+	if a.setMenuFeatureFlags != nil {
+		a.setMenuFeatureFlags(a.GetFeatureFlags())
+	}
 }
 
 // applyFeatureFlagExclusions updates the Snowflake client's excluded extended

@@ -26,7 +26,7 @@ import (
 //	  "governanceAdministration": { "userRoleManagement": false },
 //	  "ai":                       { "aiInlineCompletions": false },
 //	  "advancedTools":            { "schemaMigration": false },
-//	  "developerEnvironments":    { "snowparkNotebooks": false },
+//	  "developerEnvironments":    { "snowparkNotebooks": false, "containerServices": false },
 //	  "performanceDiagnostics":   { "explainSql": false },
 //	  "connection":               { "snowflakeCLIProfileManager": false },
 //	  "fileBrowser":              { "fileWatcher": false },
@@ -88,6 +88,7 @@ type adminAdvancedTools struct {
 // adminDevEnv is the "developerEnvironments" category.
 type adminDevEnv struct {
 	SnowparkNotebooks ptrBool `json:"snowparkNotebooks,omitempty"`
+	ContainerServices ptrBool `json:"containerServices,omitempty"`
 	EmbeddedTerminal  ptrBool `json:"embeddedTerminal,omitempty"`
 	GitIntegration    ptrBool `json:"gitIntegration,omitempty"`
 }
@@ -252,6 +253,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 
 	// Developer Environments
 	apply(&effective.SnowparkNotebooks, &locked.SnowparkNotebooks, cfg.DeveloperEnvironments.SnowparkNotebooks)
+	apply(&effective.ContainerServices, &locked.ContainerServices, cfg.DeveloperEnvironments.ContainerServices)
 	apply(&effective.EmbeddedTerminal, &locked.EmbeddedTerminal, cfg.DeveloperEnvironments.EmbeddedTerminal)
 	apply(&effective.GitIntegration, &locked.GitIntegration, cfg.DeveloperEnvironments.GitIntegration)
 

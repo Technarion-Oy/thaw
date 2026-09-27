@@ -437,11 +437,9 @@ func CollapseDefaultExcludeGlobs(fw FileWatchConfig) FileWatchConfig {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 18 (removed the PutCommand, GetCommand, RemoveCommand,
-// CrossTabSearch, and FileFormatBuilder toggles — those features are now always
-// on; the fields were deleted entirely because they were never admin-lockable.
-// See issue #567).
-const flagsVersion = 18
+// Current version: 19 (added ContainerServices — the Snowpark Container
+// Services control centre; see issue #939).
+const flagsVersion = 19
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -476,6 +474,7 @@ type FeatureFlags struct {
 
 	// Developer Environments
 	SnowparkNotebooks bool `json:"snowparkNotebooks"`
+	ContainerServices bool `json:"containerServices"` // Snowpark Container Services control centre
 	EmbeddedTerminal  bool `json:"embeddedTerminal"`
 	GitIntegration    bool `json:"gitIntegration"`
 
@@ -532,6 +531,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		InsertRow:                  true,
 		CodeSnippets:               true,
 		SnowparkNotebooks:          true,
+		ContainerServices:          true,
 		EmbeddedTerminal:           true,
 		GitIntegration:             true,
 		QueryProfile:               true,
@@ -622,6 +622,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	// and FileFormatBuilder fields were deleted — those features are now always
 	// on and were never admin-lockable. Unknown JSON keys in an older config are
 	// simply ignored on unmarshal, so no field-level migration is needed here.
+	// Version 18 → 19: ContainerServices added; defaults to true.
+	setIfZero(&f.ContainerServices, defaults.ContainerServices)
 	f.Version = flagsVersion
 	return f
 }

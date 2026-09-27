@@ -678,6 +678,7 @@ export namespace config {
 	    insertRow: boolean;
 	    codeSnippets: boolean;
 	    snowparkNotebooks: boolean;
+	    containerServices: boolean;
 	    embeddedTerminal: boolean;
 	    gitIntegration: boolean;
 	    queryProfile: boolean;
@@ -722,6 +723,7 @@ export namespace config {
 	        this.insertRow = source["insertRow"];
 	        this.codeSnippets = source["codeSnippets"];
 	        this.snowparkNotebooks = source["snowparkNotebooks"];
+	        this.containerServices = source["containerServices"];
 	        this.embeddedTerminal = source["embeddedTerminal"];
 	        this.gitIntegration = source["gitIntegration"];
 	        this.queryProfile = source["queryProfile"];

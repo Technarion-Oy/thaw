@@ -43,7 +43,9 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 Every item lives in `buildMenu` (`internal/app/menu.go`) and only emits a `menu:*` event — the frontend listener (usually in `QueryPage.tsx`) does the work.
 
-**If the item's feature needs a live Snowflake connection**, add it with the local `addConnectionItem(menu, label, accelerator, event)` helper instead of `AddText`. That starts the item `Disabled` (the app always launches disconnected) and enrolls it in the `app.setMenuConnected` callback, which `Connect`/`Disconnect` (`internal/app/app.go`) call to grey it out or restore it. Offline-capable items (local files, preferences, git, terminal, help) keep plain `AddText`.
+**If the item's feature needs a live Snowflake connection**, add it with the local `addConnectionItem(menu, label, accelerator, event, data...)` helper instead of `AddText`. That starts the item `Disabled` (the app always launches disconnected) and enrolls it in the `app.setMenuConnected` callback, which `Connect`/`Disconnect` (`internal/app/app.go`) call to grey it out or restore it. Offline-capable items (local files, preferences, git, terminal, help) keep plain `AddText`.
+
+**Several items opening the same dialog** share one event and pass their difference as the trailing `data` payload (the Container Services submenu emits `menu:container-services` with `"pools"`, `"services"`, …), so the frontend needs a single listener. `addConnectionItem` returns the item, so callers that also need to gate it on something else (a feature flag) can collect it.
 
 Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `wailsruntime.MenuUpdateApplicationMenu(app.ctx)`. Call sites must nil-guard the field — tests construct `App` without a menu.
 
@@ -72,8 +74,9 @@ Flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **Vie
 2. **`wails generate module`** — regenerates `frontend/wailsjs/go/models.ts`.
 3. **`FeatureFlagsModal.tsx`** — add a `<FlagRow>` (with `locked={locked.myNewFeature}`) in the right category.
 4. **In the gated component** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your UI. When a flag is `false`, the feature must be HIDDEN or DISABLED.
+5. **If the feature has a native menu item** — gate it there too. `buildMenu` keeps flag-gated items in their own slice and recomputes `Disabled` from *both* the connection and the flags in one `refresh()` closure; `App.setMenuFeatureFlags` (assigned by `buildMenu`, like `setMenuConnected`) is pushed by `App.syncMenuFeatureFlags` from `startup` and from `SaveFeatureFlags`. Flag-gated items start optimistically enabled, mirroring `featureFlagsStore`'s optimistic defaults. `containerServices` (Snowpark → Container Services ▸) is the template.
 
-Also update `FEATURES.md` (and its "User-Toggleable Features" list if toggleable).
+Also update `FEATURES.md` (and its "User-Toggleable Features" list if toggleable), plus `internal/config/adminconfig.go` (+ its `_darwin.go` / `_windows.go` policy-key tables) when the flag should be admin-lockable.
 
 **Reserve a user toggle for real user choices.** Basic functionality — standard SQL commands, core editor search, everyday data workflows — should ship always-on rather than behind a switch (issue #567 removed a batch of these). A flag earns a user-facing row only when it hides an admin surface, declutters the UI for a whole optional workflow, lets credit-conscious users stop background Snowflake/AI queries, or is genuinely experimental/opt-in.
 
@@ -89,6 +92,22 @@ Admins can lock flags per platform — macOS managed plist (`Disable<Feature> = 
 ## Unified Toolbar
 
 `<Toolbar />` (`frontend/src/components/toolbar/Toolbar.tsx`) renders execution controls, action buttons, session selectors (role/warehouse/database/schema), and connection info. Context additions go through the `contextSlot` prop; the notebook adds kernel status via `NotebookToolbarSlot` and Deploy via `primaryAction`. The Toolbar reads session state directly from `connectionStore`/`sessionStore` — no prop drilling.
+
+## Modals opened from anywhere (store-held visibility)
+
+A dialog reachable from more than one place — a native menu item, a sidebar
+context menu, a toolbar button — does not own its own `open` state. It is mounted
+**once** (in `App.tsx`, next to the other global modals) and its visibility lives
+in a tiny Zustand store: `tagManagementStore` (`openView`/`closeView`) is the
+minimal shape, `containerServicesStore` the shape to copy when the entry points
+must also choose *where* in the dialog to land (`openView(tab)` carries the tab,
+`closeView()` keeps it so reopening returns to it).
+
+When several native menu items open the same dialog, they emit **one** event and
+carry their difference as the payload — `addConnectionItem(m, label, nil,
+"menu:container-services", "pools")` — so the frontend has a single `EventsOn`
+listener. Menu payloads are untrusted input from the OS menu layer: narrow them
+(`toContainerTab`) rather than casting.
 
 ## Sidebar tree node-key formats
 

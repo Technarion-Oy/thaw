@@ -46,6 +46,7 @@ var registryFeatureEntries = []registryFeatureEntry{
 	{"DisableCodeSnippets", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.CodeSnippets = &p }},
 
 	{"DisableSnowparkNotebooks", func(c *adminConfigJSON, v bool) { p := !v; c.DeveloperEnvironments.SnowparkNotebooks = &p }},
+	{"DisableContainerServices", func(c *adminConfigJSON, v bool) { p := !v; c.DeveloperEnvironments.ContainerServices = &p }},
 	{"DisableEmbeddedTerminal", func(c *adminConfigJSON, v bool) { p := !v; c.DeveloperEnvironments.EmbeddedTerminal = &p }},
 	{"DisableGitIntegration", func(c *adminConfigJSON, v bool) { p := !v; c.DeveloperEnvironments.GitIntegration = &p }},
 

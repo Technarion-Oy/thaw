@@ -9,6 +9,8 @@ import LayoutSettingsModal from "./components/settings/LayoutSettingsModal";
 import AISettingsModal from "./components/settings/AISettingsModal";
 import SnowparkCheckModal from "./components/snowpark/SnowparkCheckModal";
 import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
+import ContainerServicesModal from "./components/containerservices/ContainerServicesModal";
+import TagManagementModal from "./components/tag/TagManagementModal";
 import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import LoggingPreferencesModal from "./components/settings/LoggingPreferencesModal";
@@ -26,6 +28,8 @@ import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
 import { useNotebookPrefsStore } from "./store/notebookPrefsStore";
+import { useContainerServicesStore, toContainerTab } from "./store/containerServicesStore";
+import { useTagManagementStore } from "./store/tagManagementStore";
 
 export default function App() {
   const monaco = useMonaco();
@@ -52,6 +56,12 @@ export default function App() {
   // First-launch license gate: null = still checking, false = must accept
   // (gate shown, workspace withheld), true = accepted (workspace revealed).
   const [licenseAccepted, setLicenseAccepted]           = useState<boolean | null>(null);
+  const containerServicesOpen  = useContainerServicesStore((s) => s.open);
+  const openContainerServices  = useContainerServicesStore((s) => s.openView);
+  const closeContainerServices = useContainerServicesStore((s) => s.closeView);
+  const tagManagementOpen  = useTagManagementStore((s) => s.open);
+  const openTagManagement  = useTagManagementStore((s) => s.openView);
+  const closeTagManagement = useTagManagementStore((s) => s.closeView);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -230,6 +240,22 @@ export default function App() {
     const offSetup = EventsOn("menu:snowpark-setup", () => setSnowparkSetupOpen(true));
     return () => { (offCheck as () => void)(); (offSetup as () => void)(); };
   }, []);
+
+  // Listen for "Tag Management…" (Tools menu). The sidebar's Tags group opens
+  // the same store, so both entry points land on the one mounted modal.
+  useEffect(() => {
+    const off = EventsOn("menu:tag-management", () => openTagManagement());
+    return () => off();
+  }, [openTagManagement]);
+
+  // Listen for the six Snowpark → Container Services menu items. They all emit
+  // the same event; the payload names the tab to land on.
+  useEffect(() => {
+    const off = EventsOn("menu:container-services", (tab: unknown) => {
+      openContainerServices(toContainerTab(tab));
+    });
+    return () => off();
+  }, [openContainerServices]);
 
   // Listen for "Feature Flags…" menu event and in-app requests to open it.
   useEffect(() => {
@@ -509,6 +535,10 @@ export default function App() {
         )}
         {mcpSessionsOpen && (
           <MCPSessionsModal onClose={() => setMcpSessionsOpen(false)} />
+        )}
+        {tagManagementOpen && <TagManagementModal onClose={closeTagManagement} />}
+        {containerServicesOpen && (
+          <ContainerServicesModal onClose={closeContainerServices} />
         )}
         {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
         <UpdateNotification />

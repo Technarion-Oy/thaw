@@ -147,6 +147,11 @@ type App struct {
 	// construct App without a menu.
 	setMenuConnected func(bool)
 
+	// setMenuFeatureFlags is set by buildMenu; it enables/disables the native
+	// menu items that also sit behind a feature flag (the Snowpark → Container
+	// Services submenu). Called from startup and SaveFeatureFlags. Nil in tests.
+	setMenuFeatureFlags func(config.FeatureFlags)
+
 	// Effective file-logging preferences (with IT-admin policy applied),
 	// consulted by the OnQuery hook to decide whether to write SQL to thaw.log.
 	logPrefsMu sync.RWMutex
@@ -224,6 +229,8 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 	a.logCleanup = logger.Init()
+	// Grey out flag-gated native menu items whose feature is switched off.
+	a.syncMenuFeatureFlags()
 	// Apply persisted logging preferences (runtime log level, SQL-logging
 	// switches) with any IT-admin policy on top of the build default level.
 	a.applyLogPrefs(a.loadEffectiveLogPrefs())

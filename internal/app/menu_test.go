@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 
+	"thaw/internal/config"
+
 	"github.com/wailsapp/wails/v2/pkg/menu"
 )
 
@@ -14,13 +16,26 @@ import (
 // resurrects the bug in #876 (clickable item → dialog that errors with
 // ErrNotConnected), so this list is pinned exactly.
 var connectionGatedLabels = []string{
+	"Compute Pools…",
 	"Create dbt Project…",
 	"Export Database DDL…",
+	"Gateways…",
+	"Image Repositories…",
 	"MCP Sessions…",
 	"New Notebook…",
 	"Open Notebook…",
+	"Run Job…",
 	"Schema Migration…",
+	"Services…",
+	"Snapshots…",
 	"Tag Management…",
+}
+
+// containerServiceLabels are the Snowpark → Container Services items, which are
+// gated on the containerServices feature flag on top of the connection.
+var containerServiceLabels = []string{
+	"Compute Pools…", "Services…", "Run Job…",
+	"Image Repositories…", "Snapshots…", "Gateways…",
 }
 
 // collectDisabled walks the menu tree and returns the labels of every text item,
@@ -115,5 +130,29 @@ func TestOfflineItemsAlwaysEnabled(t *testing.T) {
 		if slices.Contains(disabled, label) {
 			t.Errorf("%q is disabled while disconnected, but works offline", label)
 		}
+	}
+}
+
+// The Container Services submenu stays greyed out while its feature flag is off,
+// even when connected — and only those six items are affected.
+func TestContainerServicesItemsFollowFeatureFlag(t *testing.T) {
+	app := &App{}
+	m := buildMenu(app)
+	if app.setMenuFeatureFlags == nil {
+		t.Fatal("buildMenu did not wire setMenuFeatureFlags")
+	}
+	app.setMenuConnected(true)
+
+	app.setMenuFeatureFlags(config.FeatureFlags{ContainerServices: false})
+	disabled, _ := collectDisabled(m)
+	want := slices.Clone(containerServiceLabels)
+	slices.Sort(want)
+	if !slices.Equal(disabled, want) {
+		t.Errorf("flag off: disabled = %v, want %v", disabled, want)
+	}
+
+	app.setMenuFeatureFlags(config.FeatureFlags{ContainerServices: true})
+	if disabled, _ = collectDisabled(m); len(disabled) != 0 {
+		t.Errorf("flag on + connected: still disabled %v", disabled)
 	}
 }

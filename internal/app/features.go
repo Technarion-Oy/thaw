@@ -29,6 +29,8 @@ const (
 	FeatureTags          = "Tags"           // object tagging
 	FeatureDbtProjects   = "dbt Projects"   // dbt project objects
 	FeatureNotebooks     = "Notebooks"      // native Snowflake notebooks
+
+	FeatureContainerServices = "Container Services" // Snowpark Container Services (pools, services, jobs, images, snapshots, gateways)
 )
 
 // fctx returns the app-wide context annotated with the Thaw feature that issued
