@@ -4,16 +4,10 @@ package computepool
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"thaw/internal/snowflake"
 )
-
-// reWord matches an instance family or workload type name (CPU_X64_XS,
-// GPU_NV_S, USER_SERVICE, …). Both are emitted unquoted, so anything else is
-// rejected rather than interpolated.
-var reWord = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ComputePoolConfig holds the parameters for CREATE COMPUTE POOL. MinNodes,
 // MaxNodes and InstanceFamily are required by Snowflake; every string field is
@@ -34,9 +28,12 @@ type ComputePoolConfig struct {
 	BackupInstanceFamilies []string            `json:"backupInstanceFamilies"`
 }
 
+// word validates an instance family or workload type name (CPU_X64_XS,
+// GPU_NV_S, …). Both are emitted unquoted, so anything that isn't a bare
+// identifier is rejected rather than interpolated.
 func word(what, v string) (string, error) {
 	v = strings.ToUpper(strings.TrimSpace(v))
-	if !reWord.MatchString(v) {
+	if v == "" || snowflake.NeedsQuoting(v) {
 		return "", fmt.Errorf("invalid %s %q", what, v)
 	}
 	return v, nil
@@ -112,7 +109,7 @@ func BuildCreateComputePoolSql(cfg ComputePoolConfig) (string, error) {
 	}
 	sb.WriteString(snowflake.CommentClause(cfg.Comment))
 	if pg := strings.TrimSpace(cfg.PlacementGroup); pg != "" {
-		sb.WriteString("\n  PLACEMENT_GROUP = " + snowflake.QuoteStringLit(pg))
+		sb.WriteString("\n  PLACEMENT_GROUP = " + snowflake.QuoteTextLit(pg))
 	}
 	if len(snowflake.CleanList(cfg.BackupInstanceFamilies)) > 0 {
 		l, err := familyList(cfg.BackupInstanceFamilies)
@@ -162,7 +159,7 @@ func BuildAlterComputePoolPropertySql(name, property, value string) (string, err
 		if blank {
 			return unset("PLACEMENT_GROUP")
 		}
-		return set("PLACEMENT_GROUP", snowflake.QuoteStringLit(strings.TrimSpace(value)), nil)
+		return set("PLACEMENT_GROUP", snowflake.QuoteTextLit(strings.TrimSpace(value)), nil)
 	case "instanceFamily":
 		v, err := word("instance family", value)
 		return set("INSTANCE_FAMILY", v, err)

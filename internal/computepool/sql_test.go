@@ -51,7 +51,7 @@ func TestBuildAlterComputePoolPropertySql(t *testing.T) {
 		{"autoResume", "false", `ALTER COMPUTE POOL "P" SET AUTO_RESUME = FALSE`},
 		{"autoResume", "", `ALTER COMPUTE POOL "P" UNSET AUTO_RESUME`},
 		{"autoSuspendSecs", "", `ALTER COMPUTE POOL "P" UNSET AUTO_SUSPEND_SECS`},
-		{"placementGroup", "g'1", `ALTER COMPUTE POOL "P" SET PLACEMENT_GROUP = 'g''1'`},
+		{"placementGroup", `g'1\`, `ALTER COMPUTE POOL "P" SET PLACEMENT_GROUP = 'g''1\\'`},
 		{"instanceFamily", "cpu_x64_m", `ALTER COMPUTE POOL "P" SET INSTANCE_FAMILY = CPU_X64_M`},
 		{"backupInstanceFamilies", "A, B", `ALTER COMPUTE POOL "P" SET BACKUP_INSTANCE_FAMILIES = ('A', 'B')`},
 		{"backupInstanceFamilies", " ", `ALTER COMPUTE POOL "P" UNSET BACKUP_INSTANCE_FAMILIES`},

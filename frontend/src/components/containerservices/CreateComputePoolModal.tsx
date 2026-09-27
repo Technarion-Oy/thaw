@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Checkbox, Form, Input, InputNumber, Select } from "antd";
 import { ClusterOutlined } from "@ant-design/icons";
 import { BuildCreateComputePoolSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { computepool } from "../../../wailsjs/go/models";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import TagInput, { type TagItem } from "../shared/TagInput";
@@ -34,7 +35,7 @@ export default function CreateComputePoolModal({ families, familiesLoading, onSh
   const set = <K extends keyof typeof cfg>(k: K, v: (typeof cfg)[K]) => setCfg((p) => ({ ...p, [k]: v }));
 
   const preview = useSqlPreview(
-    () => BuildCreateComputePoolSql({ ...cfg, tags } as never),
+    () => BuildCreateComputePoolSql(computepool.ComputePoolConfig.createFrom({ ...cfg, tags })),
     [cfg, tags],
     { blankOnError: true },
   );
@@ -64,7 +65,11 @@ export default function CreateComputePoolModal({ families, familiesLoading, onSh
           extra={<Button type="link" size="small" style={{ padding: 0 }} onClick={onShowFamilies}>Compare instance families…</Button>}
         >
           <Select
-            showSearch value={cfg.instanceFamily || undefined} onChange={(v) => set("instanceFamily", v ?? "")}
+            showSearch value={cfg.instanceFamily || undefined} onChange={(v) => setCfg((p) => ({
+              ...p, instanceFamily: v ?? "",
+              // A family can't be its own backup — drop it from the backup list.
+              backupInstanceFamilies: p.backupInstanceFamilies.filter((b) => b !== v),
+            }))}
             options={opts} loading={familiesLoading} placeholder="Select an instance family"
             notFoundContent={familiesLoading ? "Loading…" : "No instance families visible"}
           />

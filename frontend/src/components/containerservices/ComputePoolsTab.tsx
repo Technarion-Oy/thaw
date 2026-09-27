@@ -187,7 +187,8 @@ export default function ComputePoolsTab() {
       )}
       {props && (
         <ComputePoolPropertiesModal
-          name={props.name} showRow={props} families={families}
+          // Live row, so an edit's refreshed SHOW columns reach the modal.
+          name={props.name} showRow={rows.find((r) => r.name === props.name) ?? props} families={families}
           onClose={() => setProps(null)} onChanged={load}
         />
       )}

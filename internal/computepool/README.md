@@ -22,8 +22,8 @@ are one-liners in `internal/app/computepool.go`.
 ## Gotchas
 
 - Instance family and workload type names are emitted **unquoted** (Snowflake
-  treats them as keywords, not identifiers), so they are validated against
-  `^[A-Za-z_][A-Za-z0-9_]*$` and upper-cased. Backup families are string
+  treats them as keywords, not identifiers), so they must be bare identifiers
+  (`snowflake.NeedsQuoting` is false) and are upper-cased. Backup families are string
   literals in the grammar (`('GPU_NV_S')`) but go through the same check.
 - A new pool's name uses `QuoteOrBare`, so `my_pool` becomes `MY_POOL`, as it
   would in a worksheet.
