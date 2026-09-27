@@ -29,6 +29,7 @@ Persistence is handled per-store via Zustand's `persist` middleware.
 | `aiPrefsStore.ts` | Whether inline completions may send schema context (#924), cached from `GetAISchemaContextEnabled` so the editor can skip building it per keystroke. Fails closed: `false` until the backend answers. `ensureLoaded()` on the completion path, `load()` after `AISettingsModal` saves. |
 | `logPrefsStore.ts` | File-logging preferences (`logLevel`, `includeQuerySQL`, `includeInternalQueries`) plus the admin-lock mask. Optimistic defaults (info level, no SQL to disk, nothing locked) until `load()` fetches `GetLogPrefs`/`GetLogPrefsLocked`. Reloaded after `UpdateLogPrefs` in `LoggingPreferencesModal`. |
 | `insertMappingStore.ts` | Transient state for the Insert Mapping feature: target table, source tables, and modal-open flag. No persistence. |
+| `containerServicesStore.ts` | Open/close state for the account-wide **Container Services** dialog (`components/containerservices/ContainerServicesModal`), which is mounted once in `QueryPage.tsx` but reachable from any of the six Snowpark → Container Services menu items. `openView(tab)` carries the tab to land on; `toContainerTab` narrows an untrusted menu-event payload to a known tab (falling back to `pools`). `closeView()` keeps the last tab so reopening returns to it. No persistence. |
 | `mcpStore.ts` | Snapshot of running MCP sessions (`SessionInfo[]`). `refresh()` calls `ListMCPSessions` IPC; the Toolbar `MCPIndicator` and `MCPSessionsModal` subscribe. No persistence. |
 
 ## Patterns & integration

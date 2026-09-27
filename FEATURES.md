@@ -1101,6 +1101,27 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - `Y` / `M` / `S` — change the selected cell's type to Code / Markdown / SQL
 - Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
 
+### Container Services
+
+Snowpark Container Services (SPCS) has an account-wide control center — **Snowpark → Container Services ▸** — alongside the schema-node context menus. The submenu has one item per Snowflake SPCS command group; each opens the same dialog on its own tab:
+
+| Menu item | Tab |
+|---|---|
+| **Compute Pools…** | Compute pools |
+| **Services…** | Services |
+| **Run Job…** | Jobs |
+| **Image Repositories…** | Images |
+| **Snapshots…** | Snapshots |
+| **Gateways…** | Gateways |
+
+- **One dialog, six tabs** — every list is a `SHOW … IN ACCOUNT`, so the dialog is the cross-schema view the object tree cannot give
+- **Same shape on every tab**, so the six read as one system: a toolbar (free-text filter → facet selects → **Refresh** → one primary **New …** action), a dense table, and a detail panel for the selected row
+- **Empty states name the role and the fix** — *"No compute pools are visible to ROLE. Create one or switch role."* — because an empty SPCS list almost always means the active role cannot see them
+- **Per-object forms are the existing ones** — the tabs reuse the Service, Image Repository and Gateway create/properties dialogs (each with its live SQL preview) rather than duplicating them
+- Menu items are greyed out while disconnected and while the **Container Services** feature flag is off
+
+*In progress:* the dialog shell, menu and flag are in place; each tab's listing and lifecycle actions (suspend/resume, stop all services, redeploy, drop) land per tab.
+
 ---
 
 ## MCP Server
@@ -1184,7 +1205,7 @@ Enterprise deployments can enforce feature policies without user interaction. Th
   "governanceAdministration": { "userRoleManagement": false },
   "ai":                       { "aiInlineCompletions": false },
   "advancedTools":            { "schemaMigration": false },
-  "developerEnvironments":    { "snowparkNotebooks": false },
+  "developerEnvironments":    { "snowparkNotebooks": false, "containerServices": false },
   "performanceDiagnostics":   { "explainSql": false }
 }
 ```
@@ -1216,6 +1237,7 @@ The following features have an individual switch in **View → Enabled Features�
 
 **Developer Environments**
 - **Snowpark & Notebooks** (Embedded Python kernel and environment manager)
+- **Container Services** (Account-wide control center for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, gateways)
 - **Embedded Terminal** (xterm.js OS shell panel)
 - **Git Integration** (Git status, commit, and push/pull UI)
 

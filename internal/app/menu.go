@@ -3,6 +3,10 @@
 package app
 
 import (
+	"sync"
+
+	"thaw/internal/config"
+
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -20,13 +24,30 @@ func buildMenu(app *App) *menu.Menu {
 	// Connect/Disconnect. Everything else works offline and stays enabled.
 	var connectionItems []*menu.MenuItem
 
+	// Container Services items are gated on the connection *and* on the
+	// containerServices feature flag, which the user can flip at runtime. They
+	// start optimistically enabled-by-flag (mirroring featureFlagsStore) and are
+	// corrected by setMenuFeatureFlags as soon as the real flags are read.
+	var containerItems []*menu.MenuItem
+
+	// The two inputs below are written by two independently-triggered IPC paths
+	// (Connect/Disconnect vs. startup/SaveFeatureFlags), so they and the item
+	// mutation in refresh are guarded — same shape as the mutex-held state in
+	// app.go.
+	var menuMu sync.Mutex
+	containerEnabled := true
+	connected := false
+
 	// addConnectionItem adds a text item that is greyed out while disconnected.
-	addConnectionItem := func(m *menu.Menu, label string, accelerator *keys.Accelerator, event string) {
+	// Any extra args are emitted as the event payload (the frontend uses this to
+	// tell six otherwise identical Container Services items apart).
+	addConnectionItem := func(m *menu.Menu, label string, accelerator *keys.Accelerator, event string, data ...interface{}) *menu.MenuItem {
 		item := m.AddText(label, accelerator, func(_ *menu.CallbackData) {
-			wailsruntime.EventsEmit(app.ctx, event)
+			wailsruntime.EventsEmit(app.ctx, event, data...)
 		})
 		item.Disabled = true
 		connectionItems = append(connectionItems, item)
+		return item
 	}
 
 	// Standard macOS application menu (About, Services, Hide, Quit, …).
@@ -207,6 +228,22 @@ func buildMenu(app *App) *menu.Menu {
 	snowparkMenu.AddText("Notebook Preferences…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:notebook-preferences")
 	})
+	snowparkMenu.AddSeparator()
+
+	// One item per Snowflake SPCS command group. All six open the same
+	// ContainerServicesModal on the tab named by the payload. See issue #939.
+	containerMenu := snowparkMenu.AddSubmenu("Container Services")
+	for _, it := range []struct{ label, tab string }{
+		{"Compute Pools…", "pools"},
+		{"Services…", "services"},
+		{"Run Job…", "jobs"},
+		{"Image Repositories…", "images"},
+		{"Snapshots…", "snapshots"},
+		{"Gateways…", "gateways"},
+	} {
+		containerItems = append(containerItems,
+			addConnectionItem(containerMenu, it.label, nil, "menu:container-services", it.tab))
+	}
 
 	// ── Help ──────────────────────────────────────────────────────────────────
 	helpMenu := appMenu.AddSubmenu("Help")
@@ -231,16 +268,37 @@ func buildMenu(app *App) *menu.Menu {
 		}
 	})
 
-	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only
-	// items. The ctx guard keeps buildMenu usable from tests, which construct an
-	// App without a Wails runtime.
-	app.setMenuConnected = func(connected bool) {
+	// Recompute every gated item from the two inputs (connection + feature
+	// flags) and push the menu to the OS. Callers hold menuMu. The ctx guard
+	// keeps buildMenu usable from tests, which construct an App without a Wails
+	// runtime.
+	refresh := func() {
 		for _, item := range connectionItems {
 			item.Disabled = !connected
+		}
+		// Runs after the loop above, which also covers the container items.
+		for _, item := range containerItems {
+			item.Disabled = !connected || !containerEnabled
 		}
 		if app.ctx != nil {
 			wailsruntime.MenuUpdateApplicationMenu(app.ctx)
 		}
+	}
+
+	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only items.
+	app.setMenuConnected = func(c bool) {
+		menuMu.Lock()
+		defer menuMu.Unlock()
+		connected = c
+		refresh()
+	}
+
+	// Called at startup and after the user saves feature flags.
+	app.setMenuFeatureFlags = func(f config.FeatureFlags) {
+		menuMu.Lock()
+		defer menuMu.Unlock()
+		containerEnabled = f.ContainerServices
+		refresh()
 	}
 
 	return appMenu

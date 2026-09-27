@@ -71,6 +71,7 @@ const MigrationModal         = lazy(() => import("../components/migration/Migrat
 const DbtProjectModal        = lazy(() => import("../components/dbt/DbtProjectModal"));
 const FunctionCatalogModal   = lazy(() => import("../components/fnmeta/FunctionCatalogModal"));
 const TagManagementModal     = lazy(() => import("../components/tag/TagManagementModal"));
+const ContainerServicesModal = lazy(() => import("../components/containerservices/ContainerServicesModal"));
 const KeyboardShortcutsModal = lazy(() => import("../components/help/KeyboardShortcutsModal"));
 const AboutModal             = lazy(() => import("../components/help/AboutModal"));
 const CrossTabSearch         = lazy(() => import("../components/editor/CrossTabSearch"));
@@ -86,6 +87,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { useGitStore } from "../store/gitStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useTagManagementStore } from "../store/tagManagementStore";
+import { useContainerServicesStore, toContainerTab } from "../store/containerServicesStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
@@ -171,6 +173,9 @@ export default function QueryPage() {
   const tagMgmtOpen = useTagManagementStore((s) => s.open);
   const openTagMgmt = useTagManagementStore((s) => s.openView);
   const closeTagMgmt = useTagManagementStore((s) => s.closeView);
+  const containerSvcOpen = useContainerServicesStore((s) => s.open);
+  const openContainerSvc = useContainerServicesStore((s) => s.openView);
+  const closeContainerSvc = useContainerServicesStore((s) => s.closeView);
 
   // Sync editor state to the MCP EditorContextStore so external AI clients
   // can read the active SQL and query results.
@@ -1167,6 +1172,15 @@ export default function QueryPage() {
     return () => off();
   }, [openTagMgmt]);
 
+  // All six Snowpark → Container Services items emit this one event; the payload
+  // names the tab to open.
+  useEffect(() => {
+    const off = EventsOn("menu:container-services", (tab: unknown) => {
+      openContainerSvc(toContainerTab(tab));
+    });
+    return () => off();
+  }, [openContainerSvc]);
+
   useEffect(() => {
     const off = EventsOn("menu:keyboard-shortcuts", () => setKbShortcutsOpen(true));
     return () => off();
@@ -1859,6 +1873,7 @@ export default function QueryPage() {
         {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
         {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
         {tagMgmtOpen && <TagManagementModal onClose={closeTagMgmt} />}
+        {containerSvcOpen && <ContainerServicesModal onClose={closeContainerSvc} />}
         {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
         {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
 

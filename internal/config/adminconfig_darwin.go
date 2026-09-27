@@ -24,8 +24,8 @@ var macOSPlistPaths = []string{
 //
 // Key naming convention: "Disable" + PascalCase feature name.
 type plistFeatureKey struct {
-	key      string
-	apply    func(cfg *adminConfigJSON, disabled bool)
+	key   string
+	apply func(cfg *adminConfigJSON, disabled bool)
 }
 
 var plistFeatureKeys = []plistFeatureKey{
@@ -52,6 +52,7 @@ var plistFeatureKeys = []plistFeatureKey{
 	{"DisableCodeSnippets", func(c *adminConfigJSON, v bool) { c.AdvancedTools.CodeSnippets = boolPtr(!v) }},
 
 	{"DisableSnowparkNotebooks", func(c *adminConfigJSON, v bool) { c.DeveloperEnvironments.SnowparkNotebooks = boolPtr(!v) }},
+	{"DisableContainerServices", func(c *adminConfigJSON, v bool) { c.DeveloperEnvironments.ContainerServices = boolPtr(!v) }},
 	{"DisableEmbeddedTerminal", func(c *adminConfigJSON, v bool) { c.DeveloperEnvironments.EmbeddedTerminal = boolPtr(!v) }},
 	{"DisableGitIntegration", func(c *adminConfigJSON, v bool) { c.DeveloperEnvironments.GitIntegration = boolPtr(!v) }},
 

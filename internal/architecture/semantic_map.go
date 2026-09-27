@@ -307,10 +307,13 @@ func GetCodebaseSemanticMap() string {
         "internal/streamlittemplate/"
       ],
       "frontend_paths": [
+        "frontend/src/components/containerservices/ContainerServicesModal.tsx",
+        "frontend/src/components/containerservices/ContainerTabLayout.tsx",
         "frontend/src/components/notebook/NotebookTab.tsx",
         "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
         "frontend/src/components/streamlit/NewStreamlitFromTemplateModal.tsx",
         "frontend/src/components/streamlit/StreamlitPreviewControl.tsx",
+        "frontend/src/store/containerServicesStore.ts",
         "frontend/src/store/notebookPrefsStore.ts",
         "frontend/src/store/notebookToolbarStore.ts"
       ],

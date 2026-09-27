@@ -268,6 +268,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("snowparkNotebooks", v)}
           />
           <FlagRow
+            label="Container Services"
+            description="Account-wide control center for Snowpark Container Services: compute pools, services, jobs, image repositories, snapshots, and gateways."
+            checked={flags.containerServices}
+            locked={locked.containerServices}
+            onChange={(v) => set("containerServices", v)}
+          />
+          <FlagRow
             label="Embedded Terminal"
             description="xterm.js OS shell panel in the results area."
             checked={flags.embeddedTerminal}
