@@ -49,6 +49,9 @@ func familyList(fams []string) (string, error) {
 		}
 		parts = append(parts, "'"+w+"'")
 	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("no instance families given")
+	}
 	return "(" + strings.Join(parts, ", ") + ")", nil
 }
 
@@ -151,6 +154,10 @@ func BuildAlterComputePoolPropertySql(name, property, value string) (string, err
 	p, ok := settable[property]
 	if !ok {
 		return "", fmt.Errorf("unknown compute pool property: %s", property)
+	}
+	if property == "BACKUP_INSTANCE_FAMILIES" {
+		// A list of only commas/blanks ("," from a half-cleared field) means UNSET.
+		value = strings.Join(snowflake.CleanList(strings.Split(value, ",")), ",")
 	}
 	prefix := "ALTER COMPUTE POOL " + snowflake.QuoteIdent(name) + " "
 	if p.unsettable && strings.TrimSpace(value) == "" {
