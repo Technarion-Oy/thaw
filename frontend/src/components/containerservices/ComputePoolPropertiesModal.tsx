@@ -48,6 +48,7 @@ export default function ComputePoolPropertiesModal({ name, showRow, loadFamilies
 
   const load = useCallback(async () => {
     try {
+      setError(null);
       setRow({ ...showRow, ...(rowsOf(await DescribeComputePool(name))[0] ?? {}) });
     } catch (e) {
       // DESCRIBE failing still leaves the SHOW row to show and edit.

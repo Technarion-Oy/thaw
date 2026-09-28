@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: Snowpark & Developer Workflows
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App as AntApp, Button, Descriptions, Dropdown, Input, Select, Space } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined, TableOutlined } from "@ant-design/icons";
@@ -44,7 +44,7 @@ export default function ComputePoolsTab() {
     return famPromise.current;
   }, []);
   const needFamilies = () => { loadFamilies().catch(() => {}); };
-  const families = rowsOf(famRes);
+  const families = useMemo(() => rowsOf(famRes), [famRes]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,7 +64,7 @@ export default function ComputePoolsTab() {
       await fn();
     } catch (e) {
       message.error(friendlyError(e));
-      return;
+      throw e; // keeps the confirm (and anything typed into it) open
     }
     message.success(what);
     load();

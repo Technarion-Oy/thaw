@@ -28,12 +28,12 @@ export function familyLabel(f: ResultRow): string {
 export const familyOptions = (fams: ResultRow[]) =>
   fams.map((f) => ({ value: f.name, label: familyLabel(f) }));
 
-/** DESCRIBE shows backup families as `["A","B"]` or `A,B`; normalize to `A, B`. */
+/** SHOW COMPUTE POOLS shows backup families as `["A","B"]` or `A,B`; normalize to `A, B`. */
 export const familyListText = (v: string | undefined) =>
   (v ?? "").replace(/[[\]"']/g, "").split(",").map((s) => s.trim()).filter(Boolean).join(", ");
 
-export function stateColor(state: string): string {
-  switch (state.toUpperCase()) {
+export function stateColor(state: string | undefined): string {
+  switch ((state ?? "").toUpperCase()) {
     case "ACTIVE": case "IDLE": return "var(--success)";
     case "SUSPENDED": return "var(--text-faint)";
     case "STARTING": case "RESIZING": return "var(--link)";

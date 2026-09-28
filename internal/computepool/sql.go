@@ -47,12 +47,12 @@ func familyList(fams []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		parts = append(parts, "'"+w+"'")
+		parts = append(parts, w)
 	}
 	if len(parts) == 0 {
 		return "", fmt.Errorf("no instance families given")
 	}
-	return "(" + strings.Join(parts, ", ") + ")", nil
+	return snowflake.FormatStringLitList(parts), nil
 }
 
 // BuildCreateComputePoolSql constructs a CREATE COMPUTE POOL statement. A blank
