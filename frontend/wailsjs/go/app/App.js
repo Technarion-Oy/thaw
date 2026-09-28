@@ -46,6 +46,14 @@ export function AlterBackupSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterBackupSet'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterComputePool(arg1, arg2) {
+  return window['go']['app']['App']['AlterComputePool'](arg1, arg2);
+}
+
+export function AlterComputePoolProperty(arg1, arg2, arg3) {
+  return window['go']['app']['App']['AlterComputePoolProperty'](arg1, arg2, arg3);
+}
+
 export function AlterContact(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterContact'](arg1, arg2, arg3, arg4);
 }
@@ -316,6 +324,10 @@ export function BuildCreateAlertSql(arg1, arg2, arg3) {
 
 export function BuildCreateAuthenticationPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateAuthenticationPolicySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateComputePoolSql(arg1) {
+  return window['go']['app']['App']['BuildCreateComputePoolSql'](arg1);
 }
 
 export function BuildCreateContactSql(arg1, arg2, arg3) {
@@ -750,6 +762,10 @@ export function DescribeAuthenticationPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeAuthenticationPolicy'](arg1, arg2, arg3);
 }
 
+export function DescribeComputePool(arg1) {
+  return window['go']['app']['App']['DescribeComputePool'](arg1);
+}
+
 export function DescribeDataMetricFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DescribeDataMetricFunction'](arg1, arg2, arg3, arg4);
 }
@@ -800,6 +816,10 @@ export function DropBackupPolicy(arg1) {
 
 export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropBackupSet'](arg1, arg2, arg3);
+}
+
+export function DropComputePool(arg1) {
+  return window['go']['app']['App']['DropComputePool'](arg1);
 }
 
 export function DropDatabase(arg1, arg2) {
@@ -1586,8 +1606,20 @@ export function ListBasicObjects(arg1, arg2) {
   return window['go']['app']['App']['ListBasicObjects'](arg1, arg2);
 }
 
+export function ListComputePoolInstanceFamilies() {
+  return window['go']['app']['App']['ListComputePoolInstanceFamilies']();
+}
+
+export function ListComputePoolNodes(arg1) {
+  return window['go']['app']['App']['ListComputePoolNodes'](arg1);
+}
+
 export function ListComputePools() {
   return window['go']['app']['App']['ListComputePools']();
+}
+
+export function ListComputePoolsDetailed() {
+  return window['go']['app']['App']['ListComputePoolsDetailed']();
 }
 
 export function ListDatabaseRoles(arg1) {
@@ -2204,6 +2236,10 @@ export function StartShell(arg1, arg2) {
 
 export function StartStreamlitPreview(arg1, arg2) {
   return window['go']['app']['App']['StartStreamlitPreview'](arg1, arg2);
+}
+
+export function StopAllComputePoolServices(arg1, arg2) {
+  return window['go']['app']['App']['StopAllComputePoolServices'](arg1, arg2);
 }
 
 export function StopDapProxy() {

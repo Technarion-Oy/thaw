@@ -11,6 +11,7 @@ import {procedure} from '../models';
 import {agent} from '../models';
 import {aggregationpolicy} from '../models';
 import {alert} from '../models';
+import {computepool} from '../models';
 import {contact} from '../models';
 import {cortexsearchservice} from '../models';
 import {datametricfunction} from '../models';
@@ -97,6 +98,10 @@ export function AlterAuthenticationPolicy(arg1:string,arg2:string,arg3:string,ar
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterComputePool(arg1:string,arg2:string):Promise<void>;
+
+export function AlterComputePoolProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AlterContact(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -233,6 +238,8 @@ export function BuildCreateAggregationPolicySql(arg1:string,arg2:string,arg3:agg
 export function BuildCreateAlertSql(arg1:string,arg2:string,arg3:alert.AlertConfig):Promise<string>;
 
 export function BuildCreateAuthenticationPolicySql(arg1:string,arg2:string,arg3:authenticationpolicy.AuthenticationPolicyConfig):Promise<string>;
+
+export function BuildCreateComputePoolSql(arg1:computepool.ComputePoolConfig):Promise<string>;
 
 export function BuildCreateContactSql(arg1:string,arg2:string,arg3:contact.ContactConfig):Promise<string>;
 
@@ -450,6 +457,8 @@ export function DescribeAgent(arg1:string,arg2:string,arg3:string):Promise<snowf
 
 export function DescribeAuthenticationPolicy(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
 
+export function DescribeComputePool(arg1:string):Promise<snowflake.QueryResult>;
+
 export function DescribeDataMetricFunction(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.QueryResult>;
 
 export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.PropertyPair>>;
@@ -475,6 +484,8 @@ export function DownloadFileFromStage(arg1:string,arg2:string,arg3:number,arg4:s
 export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DropComputePool(arg1:string):Promise<void>;
 
 export function DropDatabase(arg1:string,arg2:string):Promise<void>;
 
@@ -868,7 +879,13 @@ export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<b
 
 export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
+export function ListComputePoolInstanceFamilies():Promise<snowflake.QueryResult>;
+
+export function ListComputePoolNodes(arg1:string):Promise<snowflake.QueryResult>;
+
 export function ListComputePools():Promise<Array<string>>;
+
+export function ListComputePoolsDetailed():Promise<snowflake.QueryResult>;
 
 export function ListDatabaseRoles(arg1:string):Promise<Array<string>>;
 
@@ -1177,6 +1194,8 @@ export function StartQuery(arg1:string,arg2:string):Promise<string>;
 export function StartShell(arg1:string,arg2:string):Promise<void>;
 
 export function StartStreamlitPreview(arg1:string,arg2:string):Promise<snowpark.StreamlitPreviewResult>;
+
+export function StopAllComputePoolServices(arg1:string,arg2:Array<string>):Promise<void>;
 
 export function StopDapProxy():Promise<void>;
 

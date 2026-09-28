@@ -1120,7 +1120,15 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
 - **Per-object forms are the existing ones** — the tabs reuse the Service, Image Repository and Gateway create/properties dialogs (each with its live SQL preview) rather than duplicating them
 - Menu items are greyed out while disconnected and while the **Container Services** feature flag is off
 
-*In progress:* the dialog shell, menu and flag are in place; each tab's listing and lifecycle actions (suspend/resume, stop all services, redeploy, drop) land per tab.
+#### Compute pools
+
+- **Table** from `SHOW COMPUTE POOLS`: state dot + word, nodes as `active (min–max)`, instance family, auto-resume, auto-suspend, owner, application, comment; a **State** facet; the detail panel lists every column of the selected pool
+- **Row ⋯ menu** — **Properties…**, **Suspend / Resume** (`ALTER COMPUTE POOL … SUSPEND | RESUME`), **Stop all services…** (`STOP ALL [OF TYPE …]`, with optional workload types) and **Drop**; Stop all and Drop are confirm-guarded and say that the pool's services are terminated
+- **New compute pool…** — form with live SQL preview: name, IF NOT EXISTS, FOR APPLICATION, min/max nodes, an **instance family picker** that shows vCPU / memory / GPU count and GPU memory / current node usage per family, backup families (multi-select from the same list), auto resume, initially suspended, auto suspend secs, placement group, comment and tags
+- **Properties** — `DESCRIBE COMPUTE POOL` merged with the SHOW row; inline-editable min/max nodes, instance family, backup families, auto resume, auto suspend secs, placement group and comment (`ALTER COMPUTE POOL … SET / UNSET`), a **Tags** row, the remaining columns read-only, and a lazily loaded **Nodes** table (`SHOW NODES IN COMPUTE POOL`)
+- **Instance families…** — read-only `SHOW COMPUTE POOL INSTANCE FAMILIES` reference (also reachable from the picker), fetched once per dialog open; its `current_node_usage` column shows how many nodes of each family the account uses
+
+*In progress:* the Services, Jobs, Images, Snapshots and Gateways tabs land per tab.
 
 ---
 

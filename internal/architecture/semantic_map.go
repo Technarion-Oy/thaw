@@ -241,6 +241,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/sessionpolicy/SessionPolicyPropertiesModal.tsx",
         "frontend/src/components/shared/CreateModalShell.tsx",
         "frontend/src/components/shared/DataTypeAutoComplete.tsx",
+        "frontend/src/components/shared/LazyResultTable.tsx",
         "frontend/src/components/shared/MonacoSqlField.tsx",
         "frontend/src/components/shared/NameWithReplaceOptions.tsx",
         "frontend/src/components/shared/PropertyRows.tsx",
@@ -302,13 +303,19 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Snowpark \u0026 Developer Workflows",
       "backend_paths": [
+        "internal/computepool/",
         "internal/dbt/",
         "internal/snowpark/",
         "internal/streamlittemplate/"
       ],
       "frontend_paths": [
+        "frontend/src/components/containerservices/ComputePoolPropertiesModal.tsx",
+        "frontend/src/components/containerservices/ComputePoolsTab.tsx",
         "frontend/src/components/containerservices/ContainerServicesModal.tsx",
         "frontend/src/components/containerservices/ContainerTabLayout.tsx",
+        "frontend/src/components/containerservices/CreateComputePoolModal.tsx",
+        "frontend/src/components/containerservices/InstanceFamiliesModal.tsx",
+        "frontend/src/components/containerservices/computePools.ts",
         "frontend/src/components/notebook/NotebookTab.tsx",
         "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
         "frontend/src/components/streamlit/NewStreamlitFromTemplateModal.tsx",
