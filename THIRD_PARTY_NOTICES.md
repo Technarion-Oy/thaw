@@ -9440,7 +9440,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `wmf` | 1.0.2 | Apache-2.0 |
 | `word` | 0.3.0 | Apache-2.0 |
 | `xlsx` | 0.18.5 | Apache-2.0 |
-| `yaml` | 2.8.2 | ISC |
+| `yaml` | 2.9.1 | ISC |
 | `zustand` | 4.5.7 | MIT |
 | `zustand` | 5.0.15 | MIT |
 
@@ -16326,7 +16326,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### yaml
 
-- **Version:** 2.8.2
+- **Version:** 2.9.1
 - **License:** ISC
 
 ```
