@@ -57,8 +57,9 @@ type ServiceConfig struct {
 // ($$ … $$) so multi-line YAML needs no escaping; staged specs reference a stage
 // and a file path. The TEMPLATE variants are emitted when cfg.Template is set.
 // When the chosen source is empty the builder emits an obvious placeholder so
-// the preview stays a completable template.
-func specClause(cfg ServiceConfig) string {
+// the preview stays a completable template. An inline spec containing $$ would
+// end the dollar-quoted block early, so it is rejected.
+func specClause(cfg ServiceConfig) (string, error) {
 	var sb strings.Builder
 
 	switch cfg.SpecSource {
@@ -78,6 +79,9 @@ func specClause(cfg ServiceConfig) string {
 		}
 		fmt.Fprintf(&sb, "FROM @%s\n  %s = '%s'", stage, keyword, snowflake.EscapeStringLit(file))
 	default: // inline
+		if strings.Contains(cfg.SpecInline, "$$") {
+			return "", fmt.Errorf("inline specification cannot contain $$")
+		}
 		spec := strings.TrimRight(strings.TrimSpace(cfg.SpecInline), "\n")
 		if spec == "" {
 			spec = "spec:\n  containers:\n  - name: main\n    image: /db/schema/repo/image:latest"
@@ -96,7 +100,7 @@ func specClause(cfg ServiceConfig) string {
 		}
 	}
 
-	return sb.String()
+	return sb.String(), nil
 }
 
 // usingClause renders the USING ( key => value, … ) binding list for a templated
@@ -166,18 +170,11 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 	fmt.Fprintf(&sb, "%s %s", createClause,
 		snowflake.QualifyOrBare(db, schema, name, cfg.CaseSensitive))
 
-	pool := strings.TrimSpace(cfg.ComputePool)
-	if pool == "" {
-		fmt.Fprintf(&sb, "\n  IN COMPUTE POOL <compute_pool>")
-	} else {
-		fmt.Fprintf(&sb, "\n  IN COMPUTE POOL %s", snowflake.QuoteIdent(pool))
+	spec, err := specClause(cfg)
+	if err != nil {
+		return "", err
 	}
-
-	fmt.Fprintf(&sb, "\n  %s", specClause(cfg))
-
-	if eai := snowflake.SplitIdentList(cfg.ExternalAccessIntegrations, true); len(eai) > 0 {
-		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(eai, ", "))
-	}
+	sb.WriteString(poolLine(cfg.ComputePool) + "\n  " + spec + eaiClause(cfg.ExternalAccessIntegrations))
 	if ar := strings.TrimSpace(cfg.AutoResume); ar != "" {
 		fmt.Fprintf(&sb, "\n  AUTO_RESUME = %s", strings.ToUpper(ar))
 	}
@@ -187,10 +184,7 @@ func BuildCreateServiceSql(db, schema string, cfg ServiceConfig) (string, error)
 	if ma := strings.TrimSpace(cfg.MaxInstances); ma != "" {
 		fmt.Fprintf(&sb, "\n  MAX_INSTANCES = %s", ma)
 	}
-	if qw := strings.TrimSpace(cfg.QueryWarehouse); qw != "" {
-		fmt.Fprintf(&sb, "\n  QUERY_WAREHOUSE = %s", snowflake.QuoteIdent(qw))
-	}
-	sb.WriteString(snowflake.CommentClause(cfg.Comment))
+	sb.WriteString(warehouseClause(cfg.QueryWarehouse) + snowflake.CommentClause(cfg.Comment))
 
 	return sb.String() + ";", nil
 }
@@ -214,11 +208,8 @@ func BuildAlterServiceSpecClause(cfg ServiceConfig) (string, error) {
 		if strings.TrimSpace(cfg.SpecInline) == "" {
 			return "", fmt.Errorf("specification cannot be empty")
 		}
-		if strings.Contains(cfg.SpecInline, "$$") {
-			return "", fmt.Errorf("inline specification cannot contain $$")
-		}
 	}
-	return specClause(cfg), nil
+	return specClause(cfg)
 }
 
 // Grantee kinds a service role can be granted to.
@@ -312,19 +303,28 @@ func BuildRevokeServiceRoleSql(db, schema, svc string, g ServiceRoleGrant) (stri
 	return fmt.Sprintf("REVOKE SERVICE ROLE %s FROM %s %s;", ref, kind, grantee), nil
 }
 
-// optionClauses renders the trailing options EXECUTE JOB SERVICE shares with
-// CREATE SERVICE: QUERY_WAREHOUSE, COMMENT and EXTERNAL_ACCESS_INTEGRATIONS, in
-// the job order (CREATE emits EAI first, so it renders its own).
-func optionClauses(queryWarehouse, comment, eai string) string {
-	var sb strings.Builder
-	if qw := strings.TrimSpace(queryWarehouse); qw != "" {
-		fmt.Fprintf(&sb, "\n  QUERY_WAREHOUSE = %s", snowflake.QuoteIdent(qw))
+// poolLine, eaiClause and warehouseClause render clauses shared by CREATE
+// SERVICE and EXECUTE [INFERENCE] JOB SERVICE (each emits them in its own
+// documented order). A blank pool becomes a placeholder; blank options are "".
+func poolLine(pool string) string {
+	if p := strings.TrimSpace(pool); p != "" {
+		return "\n  IN COMPUTE POOL " + snowflake.QuoteIdent(p)
 	}
-	sb.WriteString(snowflake.CommentClause(comment))
+	return "\n  IN COMPUTE POOL <compute_pool>"
+}
+
+func eaiClause(eai string) string {
 	if list := snowflake.SplitIdentList(eai, true); len(list) > 0 {
-		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(list, ", "))
+		return fmt.Sprintf("\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(list, ", "))
 	}
-	return sb.String()
+	return ""
+}
+
+func warehouseClause(wh string) string {
+	if w := strings.TrimSpace(wh); w != "" {
+		return "\n  QUERY_WAREHOUSE = " + snowflake.QuoteIdent(w)
+	}
+	return ""
 }
 
 // qualifiedRef re-renders a typed [db.[schema.]]name reference: quoted parts
@@ -346,16 +346,8 @@ func qualifiedRef(what, s string) (string, error) {
 	return strings.Join(out, "."), nil
 }
 
-// poolLine and jobOptions render the shared head and tail of both EXECUTE … JOB
-// SERVICE variants: the IN COMPUTE POOL line, and the NAME / ASYNC / REPLICAS
-// options.
-func poolLine(pool string) string {
-	if p := strings.TrimSpace(pool); p != "" {
-		return "\n  IN COMPUTE POOL " + snowflake.QuoteIdent(p)
-	}
-	return "\n  IN COMPUTE POOL <compute_pool>"
-}
-
+// jobOptions renders the NAME / ASYNC / REPLICAS options shared by both
+// EXECUTE … JOB SERVICE variants.
 func jobOptions(name string, async bool, replicas string) (string, error) {
 	var sb strings.Builder
 	if strings.TrimSpace(name) != "" {
@@ -411,12 +403,16 @@ func BuildExecuteJobServiceSql(cfg JobServiceConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	spec := specClause(ServiceConfig{
+	spec, err := specClause(ServiceConfig{
 		SpecSource: cfg.SpecSource, Template: cfg.Template, SpecInline: cfg.SpecInline,
 		SpecStage: cfg.SpecStage, SpecFile: cfg.SpecFile, TemplateVars: cfg.TemplateVars,
 	})
+	if err != nil {
+		return "", err
+	}
 	return "EXECUTE JOB SERVICE" + poolLine(cfg.ComputePool) + "\n  " + spec + opts +
-		optionClauses(cfg.QueryWarehouse, cfg.Comment, cfg.ExternalAccessIntegrations) + ";", nil
+		warehouseClause(cfg.QueryWarehouse) + snowflake.CommentClause(cfg.Comment) +
+		eaiClause(cfg.ExternalAccessIntegrations) + ";", nil
 }
 
 // Input source modes for InferenceJobConfig.InputSource.
@@ -475,7 +471,8 @@ func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) 
 		if q == "" {
 			q = "SELECT * FROM <table>"
 		}
-		fmt.Fprintf(&sb, "\n  FROM ( %s )", q)
+		// ")" on its own line: a trailing "-- comment" in q would swallow it.
+		fmt.Fprintf(&sb, "\n  FROM (\n%s\n  )", q)
 	}
 
 	if strings.TrimSpace(cfg.Model) == "" {
@@ -491,7 +488,7 @@ func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) 
 		fmt.Fprintf(&sb, "\n  VERSION = %s", snowflake.QuoteOrBare(v, false))
 	}
 	if f := strings.TrimSpace(cfg.Function); f != "" {
-		fmt.Fprintf(&sb, "\n  FUNCTION = '%s'", snowflake.EscapeStringLit(f))
+		fmt.Fprintf(&sb, "\n  FUNCTION = %s", snowflake.QuoteTextLit(f))
 	}
 
 	opts, err := jobOptions(cfg.Name, cfg.Async, cfg.Replicas)

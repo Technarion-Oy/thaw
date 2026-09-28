@@ -309,6 +309,12 @@ func TestBuildExecuteJobServiceSql(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 
+	if _, err := BuildExecuteJobServiceSql(JobServiceConfig{SpecInline: "x: $$"}); err == nil {
+		t.Error("$$ in an inline job spec should be rejected")
+	}
+	if _, err := BuildCreateServiceSql("D", "S", ServiceConfig{SpecInline: "x: $$"}); err == nil {
+		t.Error("$$ in an inline service spec should be rejected")
+	}
 	if _, err := BuildExecuteJobServiceSql(JobServiceConfig{Replicas: "0"}); err == nil {
 		t.Error("REPLICAS = 0 should be rejected")
 	}
@@ -335,7 +341,9 @@ func TestBuildExecuteInferenceJobServiceSql(t *testing.T) {
   WITH SPECIFICATION $$
 output: x
 $$
-  FROM ( SELECT id FROM t )
+  FROM (
+SELECT id FROM t
+  )
   MODEL = "DB"."SC"."m"
   VERSION = v1
   FUNCTION = 'pre''dict'
@@ -350,5 +358,14 @@ $$
 	}
 	if _, err := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Spec: "a $$ b"}); err == nil {
 		t.Error("$$ in spec should be rejected")
+	}
+	// A trailing line comment must not swallow the closing paren.
+	cm, _ := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Query: "SELECT * FROM t -- filter TBD"})
+	if !strings.Contains(cm, "-- filter TBD\n  )") {
+		t.Errorf("comment swallowed the paren: %s", cm)
+	}
+	bs, _ := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Function: `a\b`})
+	if !strings.Contains(bs, `FUNCTION = 'a\\b'`) {
+		t.Errorf("backslash in function not preserved: %s", bs)
 	}
 }

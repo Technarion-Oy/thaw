@@ -62,6 +62,7 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
   const preview = useSqlPreview(
     () => BuildCreateServiceSql(db, schema, cfg as any),
     [db, schema, cfg],
+    { blankOnError: true }, // e.g. $$ in the spec: never submit the stale SQL
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
@@ -87,7 +88,7 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const canSubmit =
-    cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady(cfg);
+    preview !== "" && cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady(cfg);
 
   const handleRun = () => {
     if (!canSubmit) return;
