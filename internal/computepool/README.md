@@ -27,4 +27,4 @@ are one-liners in `internal/app/computepool.go`.
   literals in the grammar (`('GPU_NV_S')`) but go through the same check.
 - A new pool's name uses `QuoteOrBare`, so `my_pool` becomes `MY_POOL`, as it
   would in a worksheet.
-- `MIN_NODES` / `MAX_NODES` have no UNSET. CREATE rejects `MAX_NODES < MIN_NODES`; a single-property ALTER can't see the other value, so the Properties modal checks it against the pool's current one.
+- `MIN_NODES` / `MAX_NODES` have no UNSET and must be ≥ 1 (both builders reject 0). CREATE rejects `MAX_NODES < MIN_NODES`; a single-property ALTER can't see the other value, so the Properties modal checks it against the pool's current one.

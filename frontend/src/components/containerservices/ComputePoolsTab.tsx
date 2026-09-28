@@ -201,7 +201,7 @@ export default function ComputePoolsTab() {
 
       {creating && (
         <CreateComputePoolModal
-          families={families} familiesLoading={!famRes && !famError}
+          families={families} familiesLoading={!famRes && !famError} familiesError={famError}
           onShowFamilies={() => setShowFamilies(true)}
           onClose={() => setCreating(false)} onSuccess={load}
         />

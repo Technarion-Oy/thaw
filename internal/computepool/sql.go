@@ -74,8 +74,8 @@ func BuildCreateComputePoolSql(cfg ComputePoolConfig) (string, error) {
 	if app := strings.TrimSpace(cfg.ForApplication); app != "" {
 		sb.WriteString("\n  FOR APPLICATION " + snowflake.QuoteOrBare(app, false))
 	}
-	if cfg.MinNodes < 0 || cfg.MaxNodes < 0 {
-		return "", fmt.Errorf("node counts must be non-negative")
+	if cfg.MinNodes < 1 || cfg.MaxNodes < 1 {
+		return "", fmt.Errorf("node counts must be at least 1")
 	}
 	if cfg.MaxNodes < cfg.MinNodes {
 		return "", fmt.Errorf("MAX_NODES (%d) must be >= MIN_NODES (%d)", cfg.MaxNodes, cfg.MinNodes)
@@ -135,14 +135,23 @@ var settable = map[string]struct {
 	unsettable bool
 	render     func(what, v string) (string, error)
 }{
-	"MIN_NODES":                {false, snowflake.ValidateNonNegativeInt},
-	"MAX_NODES":                {false, snowflake.ValidateNonNegativeInt},
+	"MIN_NODES":                {false, nodeCount},
+	"MAX_NODES":                {false, nodeCount},
 	"INSTANCE_FAMILY":          {false, func(_, v string) (string, error) { return word("instance family", v) }},
 	"AUTO_RESUME":              {true, func(what, v string) (string, error) { return snowflake.ValidateEnumValue(what, v, "TRUE", "FALSE") }},
 	"AUTO_SUSPEND_SECS":        {true, snowflake.ValidateNonNegativeInt},
 	"PLACEMENT_GROUP":          {true, func(_, v string) (string, error) { return snowflake.QuoteTextLit(strings.TrimSpace(v)), nil }},
 	"BACKUP_INSTANCE_FAMILIES": {true, func(_, v string) (string, error) { return familyList(strings.Split(v, ",")) }},
 	"COMMENT":                  {true, func(_, v string) (string, error) { return snowflake.QuoteTextLit(v), nil }},
+}
+
+// nodeCount validates a MIN_NODES / MAX_NODES value: Snowflake requires >= 1.
+func nodeCount(what, v string) (string, error) {
+	n, err := snowflake.ValidateNonNegativeInt(what, v)
+	if err != nil || n == "0" {
+		return "", fmt.Errorf("invalid node count %q for %s (must be >= 1)", v, what)
+	}
+	return n, nil
 }
 
 // BuildAlterComputePoolPropertySql builds ALTER COMPUTE POOL <name> SET

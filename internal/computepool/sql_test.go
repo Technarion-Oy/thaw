@@ -40,6 +40,9 @@ func TestBuildCreateComputePoolSql(t *testing.T) {
 	if got != "CREATE COMPUTE POOL pool_name\n  MIN_NODES = 1\n  MAX_NODES = 1\n  INSTANCE_FAMILY = <instance_family>;" {
 		t.Errorf("placeholder: %s", got)
 	}
+	if _, err := BuildCreateComputePoolSql(ComputePoolConfig{MinNodes: 0, MaxNodes: 1}); err == nil {
+		t.Error("expected MIN_NODES = 0 to be rejected")
+	}
 	if _, err := BuildCreateComputePoolSql(ComputePoolConfig{MinNodes: 3, MaxNodes: 1}); err == nil {
 		t.Error("expected MAX_NODES < MIN_NODES to be rejected")
 	}
@@ -67,7 +70,7 @@ func TestBuildAlterComputePoolPropertySql(t *testing.T) {
 			t.Errorf("%s=%q: got %q (%v), want %q", c.prop, c.val, got, err, c.want)
 		}
 	}
-	for _, bad := range [][2]string{{"MIN_NODES", "-1"}, {"MAX_NODES", ""}, {"INSTANCE_FAMILY", "a b"}, {"nope", "x"}, {"MIN_NODES", ""}} {
+	for _, bad := range [][2]string{{"MIN_NODES", "-1"}, {"MIN_NODES", "0"}, {"MAX_NODES", "0"}, {"MAX_NODES", ""}, {"INSTANCE_FAMILY", "a b"}, {"nope", "x"}, {"MIN_NODES", ""}} {
 		if _, err := BuildAlterComputePoolPropertySql("P", bad[0], bad[1]); err == nil {
 			t.Errorf("%s=%q: expected error", bad[0], bad[1])
 		}

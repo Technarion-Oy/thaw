@@ -15,6 +15,7 @@ import { familyOptions, type ResultRow } from "./computePools";
 interface Props {
   families: ResultRow[];
   familiesLoading: boolean;
+  familiesError: string | null;
   onShowFamilies: () => void;
   onClose: () => void;
   onSuccess: () => void;
@@ -24,7 +25,7 @@ const BOOL_OPTS = [{ value: "TRUE", label: "TRUE" }, { value: "FALSE", label: "F
 const grid2: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" };
 const item: React.CSSProperties = { marginBottom: 12 };
 
-export default function CreateComputePoolModal({ families, familiesLoading, onShowFamilies, onClose, onSuccess }: Props) {
+export default function CreateComputePoolModal({ families, familiesLoading, familiesError, onShowFamilies, onClose, onSuccess }: Props) {
   const [cfg, setCfg] = useState({
     name: "", ifNotExists: false, forApplication: "",
     minNodes: 1, maxNodes: 1, instanceFamily: "",
@@ -71,7 +72,7 @@ export default function CreateComputePoolModal({ families, familiesLoading, onSh
               backupInstanceFamilies: p.backupInstanceFamilies.filter((b) => b !== v),
             }))}
             options={opts} loading={familiesLoading} placeholder="Select an instance family"
-            notFoundContent={familiesLoading ? "Loading…" : "No instance families visible"}
+            notFoundContent={familiesLoading ? "Loading…" : familiesError ? `Couldn't load instance families: ${familiesError}` : "No instance families visible"}
           />
         </Form.Item>
 
