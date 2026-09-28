@@ -9357,7 +9357,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@xyflow/react` | 12.10.1 | MIT |
 | `@xyflow/system` | 0.0.75 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
-| `antd` | 6.6.4 | MIT |
+| `antd` | 6.6.5 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
 | `big-integer` | 1.6.52 | Unlicense |
 | `cfb` | 1.2.2 | Apache-2.0 |
@@ -11938,7 +11938,7 @@ SOFTWARE.
 
 ### antd
 
-- **Version:** 6.6.4
+- **Version:** 6.6.5
 - **License:** MIT
 
 ```
