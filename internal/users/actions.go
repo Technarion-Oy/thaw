@@ -26,28 +26,6 @@ type TagPair struct {
 	Value string `json:"value"`
 }
 
-// renderQualifiedName renders a free-hand, possibly-qualified identifier (a tag
-// or policy name typed in the UI) for interpolation into SQL. It splits
-// quote-aware via snowflake.SplitQualifiedName (so `"MY.TAG"` stays one part),
-// then renders each part: explicitly-quoted parts keep their exact case
-// (QuoteIdent), bare parts stay bare (QuoteOrBare) so Snowflake's identifier
-// folding resolves them — the same rule DEFAULT_NAMESPACE and NETWORK_POLICY use.
-func renderQualifiedName(what, v string, maxParts int) (string, error) {
-	parts, err := snowflake.SplitQualifiedName(v, maxParts)
-	if err != nil || len(parts) == 0 {
-		return "", fmt.Errorf("invalid %s %q", what, v)
-	}
-	rendered := make([]string, len(parts))
-	for i, p := range parts {
-		if p.Quoted {
-			rendered[i] = snowflake.QuoteIdent(p.Text)
-		} else {
-			rendered[i] = snowflake.QuoteOrBare(p.Text, false)
-		}
-	}
-	return strings.Join(rendered, "."), nil
-}
-
 // BuildResetPasswordSQL builds `ALTER USER <name> RESET PASSWORD`, which
 // generates a fresh single-use password reset URL for the user (it does not take
 // a new password — use BuildAlterUserPropertySQL(name, "password", …) for that).
@@ -68,7 +46,7 @@ func BuildRenameUserSQL(name, newName string) (string, error) {
 	if strings.TrimSpace(newName) == "" {
 		return "", fmt.Errorf("new user name is required")
 	}
-	target, err := renderQualifiedName("user name", newName, 1)
+	target, err := snowflake.RenderQualifiedName("user name", newName, 1)
 	if err != nil {
 		return "", err
 	}
@@ -121,7 +99,7 @@ func BuildSetPolicySQL(name, kind, policyName string, force bool) (string, error
 	if strings.TrimSpace(policyName) == "" {
 		return "", fmt.Errorf("policy name is required")
 	}
-	policy, err := renderQualifiedName("policy name", policyName, 3)
+	policy, err := snowflake.RenderQualifiedName("policy name", policyName, 3)
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +139,7 @@ func BuildSetTagsSQL(name string, tags []TagPair) (string, error) {
 		if strings.TrimSpace(t.Name) == "" {
 			return "", fmt.Errorf("tag name is required")
 		}
-		tagName, err := renderQualifiedName("tag name", t.Name, 3)
+		tagName, err := snowflake.RenderQualifiedName("tag name", t.Name, 3)
 		if err != nil {
 			return "", err
 		}
@@ -184,7 +162,7 @@ func BuildUnsetTagsSQL(name string, tagNames []string) (string, error) {
 		if strings.TrimSpace(n) == "" {
 			return "", fmt.Errorf("tag name is required")
 		}
-		tagName, err := renderQualifiedName("tag name", n, 3)
+		tagName, err := snowflake.RenderQualifiedName("tag name", n, 3)
 		if err != nil {
 			return "", err
 		}

@@ -407,8 +407,21 @@ func (v *Validator) ParseExecuteJobService() bool {
 		func() bool { return v.MatchWord("COMPUTE") },
 		func() bool { return v.MatchWord("POOL") },
 		v.parseIdentPath,
-		// the FROM specification + options block is free-form; require at least the
-		// FROM keyword then accept the remainder.
+		// The docs' usage notes and examples put the options before the spec,
+		// the syntax block after it; accept options here, then FROM and the
+		// free-form rest (spec, USING and any trailing options).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("NAME", v.parseIdentPath),
+					v.option("ASYNC", v.parseScalar),
+					v.option("REPLICAS", v.parseScalar),
+					v.option("QUERY_WAREHOUSE", v.parseIdentPath),
+					v.option("COMMENT", v.parseString),
+					v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+				)
+			})
+		},
 		func() bool { return v.MatchWord("FROM") },
 		v.consumeRest,
 	)

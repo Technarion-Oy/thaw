@@ -296,15 +296,15 @@ func TestBuildExecuteJobServiceSql(t *testing.T) {
 	}
 	want := `EXECUTE JOB SERVICE
   IN COMPUTE POOL "POOL"
-  FROM @st
-  SPECIFICATION_TEMPLATE_FILE = 'job.yaml'
-  USING (n => 3)
   NAME = db.sc.my_job
   ASYNC = TRUE
   REPLICAS = 2
   QUERY_WAREHOUSE = "WH"
   COMMENT = 'c'
-  EXTERNAL_ACCESS_INTEGRATIONS = ("E1");`
+  EXTERNAL_ACCESS_INTEGRATIONS = ("E1")
+  FROM @st
+  SPECIFICATION_TEMPLATE_FILE = 'job.yaml'
+  USING (n => 3);`
 	if got != want {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}

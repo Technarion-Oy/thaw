@@ -152,6 +152,26 @@ func SplitQualifiedName(s string, maxParts int) ([]IdentPart, error) {
 	return parts, nil
 }
 
+// RenderQualifiedName parses a typed reference with SplitQualifiedName (up to
+// maxParts parts) and re-renders it for SQL: explicitly-quoted parts keep their
+// exact case (QuoteIdent), bare parts stay bare (QuoteOrBare) so Snowflake's
+// identifier folding resolves them. what names the value in the error.
+func RenderQualifiedName(what, v string, maxParts int) (string, error) {
+	parts, err := SplitQualifiedName(v, maxParts)
+	if err != nil || len(parts) == 0 {
+		return "", fmt.Errorf("invalid %s %q", what, v)
+	}
+	rendered := make([]string, len(parts))
+	for i, p := range parts {
+		if p.Quoted {
+			rendered[i] = QuoteIdent(p.Text)
+		} else {
+			rendered[i] = QuoteOrBare(p.Text, false)
+		}
+	}
+	return strings.Join(rendered, "."), nil
+}
+
 // IdentEqual reports whether the raw identifier text raw — as it appears in a
 // SQL or metadata string, possibly double-quoted — refers to the same object as
 // the logical (already unquoted) name. It applies Snowflake's identifier

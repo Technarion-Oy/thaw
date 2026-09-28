@@ -79,8 +79,8 @@ func specClause(cfg ServiceConfig) (string, error) {
 		}
 		fmt.Fprintf(&sb, "FROM @%s\n  %s = '%s'", stage, keyword, snowflake.EscapeStringLit(file))
 	default: // inline
-		if strings.Contains(cfg.SpecInline, "$$") {
-			return "", fmt.Errorf("inline specification cannot contain $$")
+		if err := checkDollarSpec(cfg.SpecInline); err != nil {
+			return "", err
 		}
 		spec := strings.TrimRight(strings.TrimSpace(cfg.SpecInline), "\n")
 		if spec == "" {
@@ -101,6 +101,15 @@ func specClause(cfg ServiceConfig) (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+// checkDollarSpec rejects an inline spec containing $$, which would end the
+// $$ … $$ block it is wrapped in.
+func checkDollarSpec(spec string) error {
+	if strings.Contains(spec, "$$") {
+		return fmt.Errorf("inline specification cannot contain $$")
+	}
+	return nil
 }
 
 // usingClause renders the USING ( key => value, … ) binding list for a templated
@@ -327,31 +336,12 @@ func warehouseClause(wh string) string {
 	return ""
 }
 
-// qualifiedRef re-renders a typed [db.[schema.]]name reference: quoted parts
-// stay quoted (QuoteIdent), bare parts go through QuoteOrBare so Snowflake
-// uppercases them as usual. An unparseable reference is an error.
-func qualifiedRef(what, s string) (string, error) {
-	parts, err := snowflake.SplitQualifiedName(strings.TrimSpace(s), 3)
-	if err != nil {
-		return "", fmt.Errorf("invalid %s %q: %w", what, s, err)
-	}
-	out := make([]string, len(parts))
-	for i, p := range parts {
-		if p.Quoted {
-			out[i] = snowflake.QuoteIdent(p.Text)
-		} else {
-			out[i] = snowflake.QuoteOrBare(p.Text, false)
-		}
-	}
-	return strings.Join(out, "."), nil
-}
-
 // jobOptions renders the NAME / ASYNC / REPLICAS options shared by both
 // EXECUTE … JOB SERVICE variants.
 func jobOptions(name string, async bool, replicas string) (string, error) {
 	var sb strings.Builder
 	if strings.TrimSpace(name) != "" {
-		ref, err := qualifiedRef("job name", name)
+		ref, err := snowflake.RenderQualifiedName("job name", name, 3)
 		if err != nil {
 			return "", err
 		}
@@ -391,13 +381,16 @@ type JobServiceConfig struct {
 
 // BuildExecuteJobServiceSql constructs an EXECUTE JOB SERVICE statement. Like
 // BuildCreateServiceSql it emits placeholders for a missing pool / spec so the
-// preview stays a completable template.
+// preview stays a completable template. The options come before the spec: the
+// docs' usage notes ("compute pool, followed by other properties, and finally
+// the service specification") and every example use that order, even though
+// the syntax block lists the spec first.
 //
 //	EXECUTE JOB SERVICE
 //	  IN COMPUTE POOL <pool>
-//	  <spec clause, as CREATE SERVICE>
 //	  [NAME = [<db>.<schema>.]<name>] [ASYNC = TRUE] [REPLICAS = <n>]
-//	  [QUERY_WAREHOUSE = <wh>] [COMMENT = '…'] [EXTERNAL_ACCESS_INTEGRATIONS = ( … )];
+//	  [QUERY_WAREHOUSE = <wh>] [COMMENT = '…'] [EXTERNAL_ACCESS_INTEGRATIONS = ( … )]
+//	  <spec clause, as CREATE SERVICE>;
 func BuildExecuteJobServiceSql(cfg JobServiceConfig) (string, error) {
 	opts, err := jobOptions(cfg.Name, cfg.Async, cfg.Replicas)
 	if err != nil {
@@ -410,9 +403,9 @@ func BuildExecuteJobServiceSql(cfg JobServiceConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "EXECUTE JOB SERVICE" + poolLine(cfg.ComputePool) + "\n  " + spec + opts +
+	return "EXECUTE JOB SERVICE" + poolLine(cfg.ComputePool) + opts +
 		warehouseClause(cfg.QueryWarehouse) + snowflake.CommentClause(cfg.Comment) +
-		eaiClause(cfg.ExternalAccessIntegrations) + ";", nil
+		eaiClause(cfg.ExternalAccessIntegrations) + "\n  " + spec + ";", nil
 }
 
 // Input source modes for InferenceJobConfig.InputSource.
@@ -452,8 +445,8 @@ func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) 
 	sb.WriteString("EXECUTE INFERENCE JOB SERVICE" + poolLine(cfg.ComputePool))
 
 	spec := strings.TrimSpace(cfg.Spec)
-	if strings.Contains(spec, "$$") {
-		return "", fmt.Errorf("inline specification cannot contain $$")
+	if err := checkDollarSpec(spec); err != nil {
+		return "", err
 	}
 	if spec == "" {
 		spec = "output:\n  stage_location: \"@db.schema.stage/results/\""
@@ -478,7 +471,7 @@ func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) 
 	if strings.TrimSpace(cfg.Model) == "" {
 		sb.WriteString("\n  MODEL = <model>")
 	} else {
-		ref, err := qualifiedRef("model", cfg.Model)
+		ref, err := snowflake.RenderQualifiedName("model", cfg.Model, 3)
 		if err != nil {
 			return "", err
 		}
