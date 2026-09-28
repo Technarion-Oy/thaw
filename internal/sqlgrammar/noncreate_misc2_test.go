@@ -201,6 +201,15 @@ func TestParseExecuteImmediateFrom(t *testing.T) {
 	)
 }
 
+func TestParseExecuteInferenceJobService(t *testing.T) {
+	assertValid(t, (*Validator).ParseExecuteInferenceJobService,
+		"EXECUTE INFERENCE JOB SERVICE IN COMPUTE POOL p WITH SPECIFICATION $$x$$ FROM ( SELECT 1 ) MODEL = m FUNCTION = 'predict'",
+	)
+	assertInvalid(t, (*Validator).ParseExecuteInferenceJobService,
+		`EXECUTE INFERENCE JOB SERVICE IN COMPUTE POOL p`, // missing WITH SPECIFICATION
+	)
+}
+
 func TestParseExecuteJobService(t *testing.T) {
 	assertValid(t, (*Validator).ParseExecuteJobService,
 		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool FROM SPECIFICATION 'spec'`,

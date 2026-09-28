@@ -311,3 +311,192 @@ func BuildRevokeServiceRoleSql(db, schema, svc string, g ServiceRoleGrant) (stri
 	}
 	return fmt.Sprintf("REVOKE SERVICE ROLE %s FROM %s %s;", ref, kind, grantee), nil
 }
+
+// optionClauses renders the trailing options EXECUTE JOB SERVICE shares with
+// CREATE SERVICE: QUERY_WAREHOUSE, COMMENT and EXTERNAL_ACCESS_INTEGRATIONS, in
+// the job order (CREATE emits EAI first, so it renders its own).
+func optionClauses(queryWarehouse, comment, eai string) string {
+	var sb strings.Builder
+	if qw := strings.TrimSpace(queryWarehouse); qw != "" {
+		fmt.Fprintf(&sb, "\n  QUERY_WAREHOUSE = %s", snowflake.QuoteIdent(qw))
+	}
+	sb.WriteString(snowflake.CommentClause(comment))
+	if list := snowflake.SplitIdentList(eai, true); len(list) > 0 {
+		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(list, ", "))
+	}
+	return sb.String()
+}
+
+// qualifiedRef re-renders a typed [db.[schema.]]name reference: quoted parts
+// stay quoted (QuoteIdent), bare parts go through QuoteOrBare so Snowflake
+// uppercases them as usual. An unparseable reference is an error.
+func qualifiedRef(what, s string) (string, error) {
+	parts, err := snowflake.SplitQualifiedName(strings.TrimSpace(s), 3)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s %q: %w", what, s, err)
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		if p.Quoted {
+			out[i] = snowflake.QuoteIdent(p.Text)
+		} else {
+			out[i] = snowflake.QuoteOrBare(p.Text, false)
+		}
+	}
+	return strings.Join(out, "."), nil
+}
+
+// poolLine and jobOptions render the shared head and tail of both EXECUTE … JOB
+// SERVICE variants: the IN COMPUTE POOL line, and the NAME / ASYNC / REPLICAS
+// options.
+func poolLine(pool string) string {
+	if p := strings.TrimSpace(pool); p != "" {
+		return "\n  IN COMPUTE POOL " + snowflake.QuoteIdent(p)
+	}
+	return "\n  IN COMPUTE POOL <compute_pool>"
+}
+
+func jobOptions(name string, async bool, replicas string) (string, error) {
+	var sb strings.Builder
+	if strings.TrimSpace(name) != "" {
+		ref, err := qualifiedRef("job name", name)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&sb, "\n  NAME = %s", ref)
+	}
+	if async {
+		sb.WriteString("\n  ASYNC = TRUE")
+	}
+	if r := strings.TrimSpace(replicas); r != "" {
+		if n, err := strconv.Atoi(r); err != nil || n < 1 {
+			return "", fmt.Errorf("replicas must be a positive integer")
+		}
+		fmt.Fprintf(&sb, "\n  REPLICAS = %s", r)
+	}
+	return sb.String(), nil
+}
+
+// JobServiceConfig holds the parameters for EXECUTE JOB SERVICE. The spec
+// fields mirror ServiceConfig's (same JSON names), so the frontend spec form is
+// shared with CREATE SERVICE. Name is optional ([db.schema.]name; Snowflake
+// generates JOB_<uuid> when blank).
+type JobServiceConfig struct {
+	Name                       string        `json:"name"`
+	ComputePool                string        `json:"computePool"`
+	SpecSource                 string        `json:"specSource"`
+	Template                   bool          `json:"template"`
+	SpecInline                 string        `json:"specInline"`
+	SpecStage                  string        `json:"specStage"`
+	SpecFile                   string        `json:"specFile"`
+	TemplateVars               []TemplateVar `json:"templateVars"`
+	Async                      bool          `json:"async"`
+	Replicas                   string        `json:"replicas"` // integer string or ""
+	QueryWarehouse             string        `json:"queryWarehouse"`
+	ExternalAccessIntegrations string        `json:"externalAccessIntegrations"`
+	Comment                    string        `json:"comment"`
+}
+
+// BuildExecuteJobServiceSql constructs an EXECUTE JOB SERVICE statement. Like
+// BuildCreateServiceSql it emits placeholders for a missing pool / spec so the
+// preview stays a completable template.
+//
+//	EXECUTE JOB SERVICE
+//	  IN COMPUTE POOL <pool>
+//	  <spec clause, as CREATE SERVICE>
+//	  [NAME = [<db>.<schema>.]<name>] [ASYNC = TRUE] [REPLICAS = <n>]
+//	  [QUERY_WAREHOUSE = <wh>] [COMMENT = '…'] [EXTERNAL_ACCESS_INTEGRATIONS = ( … )];
+func BuildExecuteJobServiceSql(cfg JobServiceConfig) (string, error) {
+	opts, err := jobOptions(cfg.Name, cfg.Async, cfg.Replicas)
+	if err != nil {
+		return "", err
+	}
+	spec := specClause(ServiceConfig{
+		SpecSource: cfg.SpecSource, Template: cfg.Template, SpecInline: cfg.SpecInline,
+		SpecStage: cfg.SpecStage, SpecFile: cfg.SpecFile, TemplateVars: cfg.TemplateVars,
+	})
+	return "EXECUTE JOB SERVICE" + poolLine(cfg.ComputePool) + "\n  " + spec + opts +
+		optionClauses(cfg.QueryWarehouse, cfg.Comment, cfg.ExternalAccessIntegrations) + ";", nil
+}
+
+// Input source modes for InferenceJobConfig.InputSource.
+const (
+	InputSourceQuery = "query" // FROM ( <subquery> )
+	InputSourceStage = "stage" // FROM @stage[/path]
+)
+
+// InferenceJobConfig holds the parameters for EXECUTE INFERENCE JOB SERVICE.
+// Model is [db.schema.]model (a quoted FQN from ListModels round-trips).
+type InferenceJobConfig struct {
+	Name        string `json:"name"`
+	ComputePool string `json:"computePool"`
+	Spec        string `json:"spec"`        // inline YAML, dollar-quoted
+	InputSource string `json:"inputSource"` // "query" | "stage"
+	Query       string `json:"query"`
+	StagePath   string `json:"stagePath"` // @stage[/path], leading @ optional
+	Model       string `json:"model"`
+	Version     string `json:"version"`
+	Function    string `json:"function"`
+	Async       bool   `json:"async"`
+	Replicas    string `json:"replicas"`
+}
+
+// BuildExecuteInferenceJobServiceSql constructs an EXECUTE INFERENCE JOB SERVICE
+// statement. The subquery is wrapped in parentheses and the function name is a
+// quoted string literal; missing required parts become placeholders.
+//
+//	EXECUTE INFERENCE JOB SERVICE
+//	  IN COMPUTE POOL <pool>
+//	  WITH SPECIFICATION $$ … $$
+//	  FROM { ( <subquery> ) | @stage[/path] }
+//	  MODEL = [<db>.<schema>.]<model> [VERSION = <v>] [FUNCTION = '<fn>']
+//	  [NAME = …] [ASYNC = TRUE] [REPLICAS = <n>];
+func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("EXECUTE INFERENCE JOB SERVICE" + poolLine(cfg.ComputePool))
+
+	spec := strings.TrimSpace(cfg.Spec)
+	if strings.Contains(spec, "$$") {
+		return "", fmt.Errorf("inline specification cannot contain $$")
+	}
+	if spec == "" {
+		spec = "output:\n  stage_location: \"@db.schema.stage/results/\""
+	}
+	fmt.Fprintf(&sb, "\n  WITH SPECIFICATION $$\n%s\n$$", spec)
+
+	if cfg.InputSource == InputSourceStage {
+		p := strings.TrimPrefix(strings.TrimSpace(cfg.StagePath), "@")
+		if p == "" {
+			p = "<stage>/<path>"
+		}
+		fmt.Fprintf(&sb, "\n  FROM @%s", p)
+	} else {
+		q := strings.TrimRight(strings.TrimSpace(cfg.Query), "; \n\t")
+		if q == "" {
+			q = "SELECT * FROM <table>"
+		}
+		fmt.Fprintf(&sb, "\n  FROM ( %s )", q)
+	}
+
+	if strings.TrimSpace(cfg.Model) == "" {
+		sb.WriteString("\n  MODEL = <model>")
+	} else {
+		ref, err := qualifiedRef("model", cfg.Model)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&sb, "\n  MODEL = %s", ref)
+	}
+	if v := strings.TrimSpace(cfg.Version); v != "" {
+		fmt.Fprintf(&sb, "\n  VERSION = %s", snowflake.QuoteOrBare(v, false))
+	}
+	if f := strings.TrimSpace(cfg.Function); f != "" {
+		fmt.Fprintf(&sb, "\n  FUNCTION = '%s'", snowflake.EscapeStringLit(f))
+	}
+
+	opts, err := jobOptions(cfg.Name, cfg.Async, cfg.Replicas)
+	if err != nil {
+		return "", err
+	}
+	return sb.String() + opts + ";", nil
+}

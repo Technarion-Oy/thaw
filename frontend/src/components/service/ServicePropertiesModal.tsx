@@ -300,6 +300,80 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
   );
 }
 
+// ─── Logs ────────────────────────────────────────────────────────────────────
+
+/**
+ * On-demand SYSTEM$GET_SERVICE_LOGS viewer for one service (or job service)
+ * instance/container. Also used by the Container Services Jobs tab.
+ */
+export function ServiceLogs({ db, schema, name }: { db: string; schema: string; name: string }) {
+  const [logContainer, setLogContainer] = useState("");
+  const [logInstance, setLogInstance] = useState(0);
+  const [logLines, setLogLines] = useState(100);
+  const [logs, setLogs] = useState<string | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setLogsError(null);
+    try {
+      const text = await GetServiceLogs(db, schema, name, logContainer.trim(), logInstance, logLines);
+      setLogs(text ?? "");
+    } catch (e) {
+      setLogsError(String(e));
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [db, schema, name, logContainer, logInstance, logLines]);
+
+  return (
+    <>
+      <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+        Fetch container logs via SYSTEM$GET_SERVICE_LOGS. The container name comes from the service spec.
+      </Text>
+      {logsError && (
+        <Alert type="error" message="Failed to load logs" description={logsError} showIcon style={{ marginBottom: 8 }} />
+      )}
+      <Space wrap style={{ marginBottom: 8 }}>
+        <Input
+          size="small"
+          addonBefore="Container"
+          value={logContainer}
+          onChange={(e) => setLogContainer(e.target.value)}
+          placeholder="main"
+          style={{ width: 220 }}
+        />
+        <Space size={4}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Instance</Text>
+          <InputNumber size="small" min={0} value={logInstance} onChange={(v) => setLogInstance(Number(v ?? 0))} style={{ width: 70 }} />
+        </Space>
+        <Space size={4}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Lines</Text>
+          <InputNumber size="small" min={1} value={logLines} onChange={(v) => setLogLines(Number(v ?? 100))} style={{ width: 90 }} />
+        </Space>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={loadLogs}
+          loading={logsLoading}
+          disabled={logContainer.trim() === ""}
+        >
+          Fetch logs
+        </Button>
+      </Space>
+      {logs !== null && (
+        <Input.TextArea
+          value={logs || "(no log output)"}
+          readOnly
+          autoSize={{ minRows: 4, maxRows: 20 }}
+          style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+        />
+      )}
+    </>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface Props {
@@ -329,14 +403,6 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
   const [accountRoles, setAccountRoles] = useState<string[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
-
-  // Lazily-loaded logs (SYSTEM$GET_SERVICE_LOGS).
-  const [logContainer, setLogContainer] = useState("");
-  const [logInstance, setLogInstance] = useState(0);
-  const [logLines, setLogLines] = useState(100);
-  const [logs, setLogs] = useState<string | null>(null);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setRows(null);
@@ -419,19 +485,6 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
       },
     });
   };
-
-  const loadLogs = useCallback(async () => {
-    setLogsLoading(true);
-    setLogsError(null);
-    try {
-      const text = await GetServiceLogs(db, schema, name, logContainer.trim(), logInstance, logLines);
-      setLogs(text ?? "");
-    } catch (e) {
-      setLogsError(String(e));
-    } finally {
-      setLogsLoading(false);
-    }
-  }, [db, schema, name, logContainer, logInstance, logLines]);
 
   const status = find("status");
   const spec = find("spec");
@@ -602,47 +655,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
           )}
 
           <div style={SECTION_HEAD}>Logs</div>
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
-            Fetch container logs via SYSTEM$GET_SERVICE_LOGS. The container name comes from the service spec.
-          </Text>
-          {logsError && (
-            <Alert type="error" message="Failed to load logs" description={logsError} showIcon style={{ marginBottom: 8 }} />
-          )}
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Input
-              size="small"
-              addonBefore="Container"
-              value={logContainer}
-              onChange={(e) => setLogContainer(e.target.value)}
-              placeholder="main"
-              style={{ width: 220 }}
-            />
-            <Space size={4}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Instance</Text>
-              <InputNumber size="small" min={0} value={logInstance} onChange={(v) => setLogInstance(Number(v ?? 0))} style={{ width: 70 }} />
-            </Space>
-            <Space size={4}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Lines</Text>
-              <InputNumber size="small" min={1} value={logLines} onChange={(v) => setLogLines(Number(v ?? 100))} style={{ width: 90 }} />
-            </Space>
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              onClick={loadLogs}
-              loading={logsLoading}
-              disabled={logContainer.trim() === ""}
-            >
-              Fetch logs
-            </Button>
-          </Space>
-          {logs !== null && (
-            <Input.TextArea
-              value={logs || "(no log output)"}
-              readOnly
-              autoSize={{ minRows: 4, maxRows: 20 }}
-              style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
-            />
-          )}
+          <ServiceLogs db={db} schema={schema} name={name} />
 
           <div style={SECTION_HEAD}>Properties</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

@@ -12,7 +12,7 @@ import StageFilePicker from "../shared/StageFilePicker";
 // the in-flight/resolved promise at module scope so the scan runs at most once
 // per session; consumers that need a fresh list can call invalidateModelsCache().
 let modelsCache: Promise<string[]> | null = null;
-function loadModelsCached(): Promise<string[]> {
+export function loadModelsCached(): Promise<string[]> {
   if (!modelsCache) {
     modelsCache = ListModels()
       .then((names) => names ?? [])

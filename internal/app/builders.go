@@ -362,6 +362,16 @@ func (a *App) BuildCreateServiceSql(database, schema string, cfg service.Service
 	return service.BuildCreateServiceSql(database, schema, cfg)
 }
 
+// BuildExecuteJobServiceSql returns the SQL for EXECUTE JOB SERVICE (SPCS).
+func (a *App) BuildExecuteJobServiceSql(cfg service.JobServiceConfig) (string, error) {
+	return service.BuildExecuteJobServiceSql(cfg)
+}
+
+// BuildExecuteInferenceJobServiceSql returns the SQL for EXECUTE INFERENCE JOB SERVICE.
+func (a *App) BuildExecuteInferenceJobServiceSql(cfg service.InferenceJobConfig) (string, error) {
+	return service.BuildExecuteInferenceJobServiceSql(cfg)
+}
+
 // BuildCreateStreamlitSql returns the SQL for creating a Snowflake STREAMLIT app.
 func (a *App) BuildCreateStreamlitSql(database, schema string, cfg streamlit.StreamlitConfig) (string, error) {
 	return streamlit.BuildCreateStreamlitSql(database, schema, cfg)

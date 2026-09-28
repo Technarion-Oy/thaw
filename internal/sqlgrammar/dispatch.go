@@ -115,7 +115,8 @@ func buildRegistry() map[string][]ruleFn {
 			(*Validator).ParseExecuteImmediate, (*Validator).ParseExecuteImmediateFrom,
 			(*Validator).ParseExecuteTask, (*Validator).ParseExecuteAlert,
 			(*Validator).ParseExecuteDbtProject, (*Validator).ParseExecuteDcmProject,
-			(*Validator).ParseExecuteJobService, (*Validator).ParseExecuteNotebook,
+			(*Validator).ParseExecuteJobService, (*Validator).ParseExecuteInferenceJobService,
+			(*Validator).ParseExecuteNotebook,
 			(*Validator).ParseExecuteNotebookProject,
 		},
 		"USE": {

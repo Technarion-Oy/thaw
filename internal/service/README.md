@@ -22,7 +22,7 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
 
 | File | Purpose |
 |---|---|
-| `sql.go` | `ServiceConfig`, `BuildCreateServiceSql`, `BuildAlterServiceSpecClause`, `ServiceRoleGrant` + grant/revoke builders, spec-source & grantee-kind constants |
+| `sql.go` | `ServiceConfig`, `BuildCreateServiceSql`, `BuildAlterServiceSpecClause`, `JobServiceConfig` / `BuildExecuteJobServiceSql`, `InferenceJobConfig` / `BuildExecuteInferenceJobServiceSql`, `ServiceRoleGrant` + grant/revoke builders, spec-source & grantee-kind constants |
 | `sql_test.go` | Unit tests for the SQL builder |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
@@ -37,6 +37,8 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
 | `ServiceRoleGrant` | Service role + grantee kind (`ROLE` / `DATABASE ROLE` / `APPLICATION ROLE`) + optional parent (database / application) + grantee |
 | `ParseServiceRoleGrants(res, role)` | `SHOW GRANTS OF SERVICE ROLE` → `[]ServiceRoleGrant`; `grantee_name` split with the quote-aware `snowflake.SplitQualifiedName` (`"MY.DB".DR` → parent `MY.DB`) |
 | `BuildGrantServiceRoleSql` / `BuildRevokeServiceRoleSql` | `GRANT SERVICE ROLE "db"."sc"."svc"!"role" TO <kind> <grantee>;` / `REVOKE … FROM …`; every identifier is `QuoteIdent`-quoted, so names containing `!` or `.` survive; a DATABASE/APPLICATION ROLE grantee without a parent is rejected |
+| `JobServiceConfig` / `BuildExecuteJobServiceSql(cfg)` | `EXECUTE JOB SERVICE IN COMPUTE POOL … <spec clause> [NAME = …] [ASYNC = TRUE] [REPLICAS = n] [QUERY_WAREHOUSE] [COMMENT] [EXTERNAL_ACCESS_INTEGRATIONS];`. The spec fields carry the same JSON names as `ServiceConfig`'s and render through the same `specClause`, so the frontend spec form (`ServiceSpecFields`) is shared |
+| `InferenceJobConfig` / `BuildExecuteInferenceJobServiceSql(cfg)` | `EXECUTE INFERENCE JOB SERVICE IN COMPUTE POOL … WITH SPECIFICATION $$…$$ FROM { ( <subquery> ) \| @stage/path } MODEL = … [VERSION] [FUNCTION = '…'] [NAME] [ASYNC] [REPLICAS];` — the subquery is parenthesised (trailing `;` stripped), the function is a string literal, an inline spec containing `$$` is rejected |
 | `SpecSourceInline` / `SpecSourceStage` | `SpecSource` values selecting inline vs. staged specification |
 
 ## Patterns & integration
@@ -62,6 +64,11 @@ are issued as free-form `ALTER SERVICE <fqn> <clause>` statements directly from
   dedupe pass is needed.
 - Properties panel: `internal/objects` runs `SHOW SERVICES LIKE …` for the
   `SERVICE` kind and enriches it with `DESCRIBE SERVICE` to surface the `spec`.
+
+- Job `NAME` and inference `MODEL` are typed `[db.[schema.]]name` references,
+  split with `snowflake.SplitQualifiedName` and re-rendered by `qualifiedRef`
+  (quoted parts stay quoted, bare ones go through `QuoteOrBare`), so a quoted
+  FQN from `ListModels` round-trips. `REPLICAS` must be a positive integer.
 
 ## Gotchas
 

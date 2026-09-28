@@ -173,3 +173,15 @@ func (a *App) GetServiceLogs(database, schema, name, containerName string, insta
 	}
 	return fmt.Sprintf("%v", res.Rows[0][0]), nil
 }
+
+// ListJobServices runs SHOW JOB SERVICES IN ACCOUNT for the Container Services
+// dialog's Jobs tab (running, completed and async job services; is_job = true).
+func (a *App) ListJobServices() (*snowflake.QueryResult, error) {
+	return a.execPoolSQL("SHOW JOB SERVICES IN ACCOUNT")
+}
+
+// DropJobService runs DROP SERVICE <fqn> for a job service.
+func (a *App) DropJobService(database, schema, name string) error {
+	_, err := a.execPoolSQL("DROP SERVICE " + snowflake.Qualify(database, schema, name))
+	return err
+}

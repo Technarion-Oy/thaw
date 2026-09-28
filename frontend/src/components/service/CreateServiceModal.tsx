@@ -3,8 +3,8 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useEffect, useState } from "react";
-import { Form, Input, Checkbox, Select, Radio, InputNumber, Button, Space, Typography } from "antd";
-import { DeploymentUnitOutlined, PlusOutlined, MinusCircleOutlined } from "@ant-design/icons";
+import { Form, Input, Checkbox, Select, InputNumber } from "antd";
+import { DeploymentUnitOutlined } from "@ant-design/icons";
 import {
   BuildCreateServiceSql, ExecDDL, ListComputePools, ListWarehouses,
 } from "../../../wailsjs/go/app/App";
@@ -12,10 +12,8 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import StageFilePicker from "../shared/StageFilePicker";
+import ServiceSpecFields, { specReady, type TemplateVar } from "./ServiceSpecFields";
 import type { service as svcModels } from "../../../wailsjs/go/models";
-
-const { Text } = Typography;
 
 interface Props {
   db: string;
@@ -30,7 +28,6 @@ interface Props {
 type ServiceCfg = Omit<svcModels.ServiceConfig, "convertValues" | "templateVars"> & {
   templateVars: TemplateVar[];
 };
-type TemplateVar = Omit<svcModels.TemplateVar, "convertValues">;
 
 const SPEC_PLACEHOLDER = `spec:
   containers:
@@ -89,22 +86,8 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
   const set = <K extends keyof ServiceCfg>(key: K, value: ServiceCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  // Template-variable (USING) editor helpers.
-  const addVar = () => setCfg((prev) => ({ ...prev, templateVars: [...prev.templateVars, { key: "", value: "" }] }));
-  const updateVar = (i: number, field: "key" | "value", val: string) =>
-    setCfg((prev) => ({
-      ...prev,
-      templateVars: prev.templateVars.map((v, idx) => (idx === i ? { ...v, [field]: val } : v)),
-    }));
-  const removeVar = (i: number) =>
-    setCfg((prev) => ({ ...prev, templateVars: prev.templateVars.filter((_, idx) => idx !== i) }));
-
-  const specReady =
-    cfg.specSource === "stage"
-      ? cfg.specStage.trim().length > 0 && cfg.specFile.trim().length > 0
-      : cfg.specInline.trim().length > 0;
   const canSubmit =
-    cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady;
+    cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady(cfg);
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -174,98 +157,14 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
           />
         </Form.Item>
 
-        <Form.Item label="Specification" style={{ marginBottom: 6 }}>
-          <Space size={16} wrap>
-            <Radio.Group
-              value={cfg.specSource}
-              onChange={(e) => set("specSource", e.target.value)}
-              optionType="button"
-              buttonStyle="solid"
-              size="small"
-            >
-              <Radio.Button value="inline">Inline YAML</Radio.Button>
-              <Radio.Button value="stage">From stage file</Radio.Button>
-            </Radio.Group>
-            <Checkbox checked={cfg.template} onChange={(e) => set("template", e.target.checked)}>
-              Template (with variables)
-            </Checkbox>
-          </Space>
-        </Form.Item>
-
-        {cfg.specSource === "stage" ? (
-          <>
-            <Form.Item style={{ marginBottom: 12 }}>
-              <StageFilePicker
-                db={db}
-                schema={schema}
-                label="Browse internal stage — select the specification file"
-                onPick={(stage, file) => setCfg((prev) => ({ ...prev, specStage: stage, specFile: file }))}
-              />
-            </Form.Item>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-              <Form.Item label="Stage" required style={itemStyle} help="Internal stage (browse above, or type @stage / db.schema.stage).">
-                <Input
-                  value={cfg.specStage}
-                  onChange={(e) => set("specStage", e.target.value)}
-                  placeholder="@my_stage"
-                />
-              </Form.Item>
-              <Form.Item label="Specification file" required style={itemStyle} help="Path to the YAML file within the stage.">
-                <Input
-                  value={cfg.specFile}
-                  onChange={(e) => set("specFile", e.target.value)}
-                  placeholder="service/spec.yaml"
-                />
-              </Form.Item>
-            </div>
-          </>
-        ) : (
-          <Form.Item
-            label={cfg.template ? "Service specification template (YAML, with {{ variables }})" : "Service specification (YAML)"}
-            required
-            style={itemStyle}
-          >
-            <Input.TextArea
-              value={cfg.specInline}
-              onChange={(e) => set("specInline", e.target.value)}
-              placeholder={SPEC_PLACEHOLDER}
-              autoSize={{ minRows: 8, maxRows: 18 }}
-              style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
-            />
-          </Form.Item>
-        )}
-
-        {cfg.template && (
-          <Form.Item
-            label="Template variables (USING)"
-            style={itemStyle}
-            help="Bound to the template's {{ variables }}. Numbers and TRUE/FALSE/NULL are emitted unquoted; everything else is a string literal."
-          >
-            <Space direction="vertical" style={{ width: "100%" }} size={6}>
-              {cfg.templateVars.map((v, i) => (
-                <Space key={i} style={{ width: "100%" }} align="center">
-                  <Input
-                    value={v.key}
-                    onChange={(e) => updateVar(i, "key", e.target.value)}
-                    placeholder="name"
-                    style={{ width: 200 }}
-                  />
-                  <Text type="secondary">=&gt;</Text>
-                  <Input
-                    value={v.value}
-                    onChange={(e) => updateVar(i, "value", e.target.value)}
-                    placeholder="value"
-                    style={{ width: 260 }}
-                  />
-                  <Button type="text" size="small" icon={<MinusCircleOutlined />} onClick={() => removeVar(i)} />
-                </Space>
-              ))}
-              <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={addVar}>
-                Add variable
-              </Button>
-            </Space>
-          </Form.Item>
-        )}
+        <ServiceSpecFields
+          db={db}
+          schema={schema}
+          value={cfg}
+          onChange={(patch) => setCfg((prev) => ({ ...prev, ...patch }))}
+          placeholder={SPEC_PLACEHOLDER}
+          noun="Service"
+        />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
           <Form.Item label="Min instances" style={itemStyle}>

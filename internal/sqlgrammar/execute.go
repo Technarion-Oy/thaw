@@ -414,6 +414,39 @@ func (v *Validator) ParseExecuteJobService() bool {
 	)
 }
 
+// ParseExecuteInferenceJobService validates the Snowflake
+// `EXECUTE INFERENCE JOB SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/execute-inference-job-service
+//
+// Syntax:
+//
+//	EXECUTE INFERENCE JOB SERVICE
+//	  IN COMPUTE POOL <compute_pool_name>
+//	  WITH SPECIFICATION <specification_text>
+//	  FROM { ( <subquery> ) | @[<namespace>.]<stage_name>[/<path>] }
+//	  MODEL = [<db>.<schema>.]<model_name>
+//	  [ VERSION = <version_or_alias> ]
+//	  [ FUNCTION = '<function_name>' ]
+//	  [ NAME = [<db>.<schema>.]<name> ]
+//	  [ ASYNC = { TRUE | FALSE } ]
+//	  [ REPLICAS = <num> ]
+func (v *Validator) ParseExecuteInferenceJobService() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("INFERENCE") },
+		func() bool { return v.MatchWord("JOB") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("COMPUTE") },
+		func() bool { return v.MatchWord("POOL") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("WITH") },
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		// spec text, FROM source, MODEL and options are free-form.
+		v.consumeRest,
+	)
+}
+
 // ParseExecuteNotebook validates the Snowflake `EXECUTE NOTEBOOK` command.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/execute-notebook
 //
