@@ -22,7 +22,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (99)
+- [Backend — Go modules](#backend--go-modules) (100)
 - [Frontend — npm packages](#frontend--npm-packages) (173)
 
 ## Backend — Go modules
@@ -60,7 +60,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/cloudflare/circl` | v1.6.3 | BSD-3-Clause |
 | `github.com/creack/pty` | v1.1.24 | MIT |
 | `github.com/cyphar/filepath-securejoin` | v0.6.1 | BSD-3-Clause |
-| `github.com/danieljoos/wincred` | v1.2.2 | MIT |
+| `github.com/danieljoos/wincred` | v1.2.3 | MIT |
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT |
 | `github.com/dvsekhvalnov/jose2go` | v1.7.0 | MIT |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
@@ -85,9 +85,9 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/leaanthony/slicer` | v1.6.0 | MIT |
 | `github.com/leaanthony/u` | v1.1.1 | MIT |
 | `github.com/mattn/go-ieproxy` | v0.0.12 | MIT |
-| `github.com/mattn/go-isatty` | v0.0.22 | MIT |
+| `github.com/mattn/go-isatty` | v0.0.24 | MIT |
 | `github.com/Microsoft/go-winio` | v0.6.2 | MIT |
-| `github.com/modelcontextprotocol/go-sdk` | v1.6.1 | Apache-2.0 |
+| `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | Apache-2.0 |
 | `github.com/mtibben/percent` | v0.2.1 | MIT |
 | `github.com/ncruces/go-strftime` | v1.0.0 | MIT |
 | `github.com/pierrec/lz4/v4` | v4.1.22 | BSD-3-Clause |
@@ -114,20 +114,21 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `go.opentelemetry.io/otel/trace` | v1.42.0 | Apache-2.0 |
 | `golang.org/x/crypto` | v0.56.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
-| `golang.org/x/mod` | v0.40.0 | BSD-3-Clause |
+| `golang.org/x/mod` | v0.41.0 | BSD-3-Clause |
 | `golang.org/x/net` | v0.58.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.35.0 | BSD-3-Clause |
-| `golang.org/x/sync` | v0.22.0 | BSD-3-Clause |
-| `golang.org/x/sys` | v0.47.0 | BSD-3-Clause |
+| `golang.org/x/sync` | v0.23.0 | BSD-3-Clause |
+| `golang.org/x/sys` | v0.48.0 | BSD-3-Clause |
 | `golang.org/x/term` | v0.45.0 | BSD-3-Clause |
 | `golang.org/x/text` | v0.41.0 | BSD-3-Clause |
+| `golang.org/x/time` | v0.15.0 | BSD-3-Clause |
 | `golang.org/x/xerrors` | v0.0.0-20240903120638-7835f813f4da | BSD-3-Clause |
 | `gopkg.in/lumberjack.v2` | v2.0.0 | MIT |
 | `gopkg.in/warnings.v0` | v0.1.2 | BSD-2-Clause |
-| `modernc.org/libc` | v1.70.0 | BSD-3-Clause |
+| `modernc.org/libc` | v1.75.7 | BSD-3-Clause |
 | `modernc.org/mathutil` | v1.7.1 | BSD-3-Clause |
-| `modernc.org/memory` | v1.11.0 | BSD-3-Clause |
-| `modernc.org/sqlite` | v1.47.0 | BSD-3-Clause |
+| `modernc.org/memory` | v1.12.1 | BSD-3-Clause |
+| `modernc.org/sqlite` | v1.59.0 | BSD-3-Clause |
 
 ### dario.cat/mergo
 
@@ -4755,7 +4756,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### github.com/danieljoos/wincred
 
-- **Version:** v1.2.2
+- **Version:** v1.2.3
 - **License:** MIT
 
 ```
@@ -6529,7 +6530,7 @@ SOFTWARE.
 
 ### github.com/mattn/go-isatty
 
-- **Version:** v0.0.22
+- **Version:** v0.0.24
 - **License:** MIT
 
 ```
@@ -6575,7 +6576,7 @@ SOFTWARE.
 
 ### github.com/modelcontextprotocol/go-sdk
 
-- **Version:** v1.6.1
+- **Version:** v1.8.0
 - **License:** Apache-2.0
 
 ```
@@ -8752,7 +8753,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/mod
 
-- **Version:** v0.40.0
+- **Version:** v0.41.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8857,7 +8858,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sync
 
-- **Version:** v0.22.0
+- **Version:** v0.23.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8892,7 +8893,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sys
 
-- **Version:** v0.47.0
+- **Version:** v0.48.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8963,6 +8964,41 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### golang.org/x/text
 
 - **Version:** v0.41.0
+- **License:** BSD-3-Clause
+
+```
+Copyright 2009 The Go Authors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### golang.org/x/time
+
+- **Version:** v0.15.0
 - **License:** BSD-3-Clause
 
 ```
@@ -9093,7 +9129,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### modernc.org/libc
 
-- **Version:** v1.70.0
+- **Version:** v1.75.7
 - **License:** BSD-3-Clause
 
 ```
@@ -9163,7 +9199,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### modernc.org/memory
 
-- **Version:** v1.11.0
+- **Version:** v1.12.1
 - **License:** BSD-3-Clause
 
 ```
@@ -9198,7 +9234,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### modernc.org/sqlite
 
-- **Version:** v1.47.0
+- **Version:** v1.59.0
 - **License:** BSD-3-Clause
 
 ```
