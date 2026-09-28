@@ -74,6 +74,9 @@ func BuildCreateComputePoolSql(cfg ComputePoolConfig) (string, error) {
 	if cfg.MinNodes < 0 || cfg.MaxNodes < 0 {
 		return "", fmt.Errorf("node counts must be non-negative")
 	}
+	if cfg.MaxNodes < cfg.MinNodes {
+		return "", fmt.Errorf("MAX_NODES (%d) must be >= MIN_NODES (%d)", cfg.MaxNodes, cfg.MinNodes)
+	}
 	fmt.Fprintf(&sb, "\n  MIN_NODES = %d\n  MAX_NODES = %d", cfg.MinNodes, cfg.MaxNodes)
 	fam := "<instance_family>"
 	if strings.TrimSpace(cfg.InstanceFamily) != "" {
@@ -121,62 +124,43 @@ func BuildCreateComputePoolSql(cfg ComputePoolConfig) (string, error) {
 	return sb.String() + ";", nil
 }
 
-// BuildAlterComputePoolPropertySql builds ALTER COMPUTE POOL <name> SET (or
-// UNSET, for a blank value on an unsettable property) for one property:
-// minNodes, maxNodes, autoResume, autoSuspendSecs, placementGroup,
-// instanceFamily, backupInstanceFamilies (comma-separated), comment.
+// settable lists the properties ALTER COMPUTE POOL … SET accepts, keyed by
+// their Snowflake keyword (the frontend's ComputePoolPropertiesModal uses the
+// same keys). unsettable ones UNSET on a blank value; render validates a
+// non-blank value into its SQL form.
+var settable = map[string]struct {
+	unsettable bool
+	render     func(what, v string) (string, error)
+}{
+	"MIN_NODES":                {false, snowflake.ValidateNonNegativeInt},
+	"MAX_NODES":                {false, snowflake.ValidateNonNegativeInt},
+	"INSTANCE_FAMILY":          {false, func(_, v string) (string, error) { return word("instance family", v) }},
+	"AUTO_RESUME":              {true, func(what, v string) (string, error) { return snowflake.ValidateEnumValue(what, v, "TRUE", "FALSE") }},
+	"AUTO_SUSPEND_SECS":        {true, snowflake.ValidateNonNegativeInt},
+	"PLACEMENT_GROUP":          {true, func(_, v string) (string, error) { return snowflake.QuoteTextLit(strings.TrimSpace(v)), nil }},
+	"BACKUP_INSTANCE_FAMILIES": {true, func(_, v string) (string, error) { return familyList(strings.Split(v, ",")) }},
+	"COMMENT":                  {true, func(_, v string) (string, error) { return snowflake.QuoteTextLit(v), nil }},
+}
+
+// BuildAlterComputePoolPropertySql builds ALTER COMPUTE POOL <name> SET
+// <property> = <value>, or UNSET <property> for a blank value where Snowflake
+// allows it. property is the Snowflake keyword (MIN_NODES, AUTO_RESUME, …; see
+// settable). It sees one property at a time, so MIN_NODES <= MAX_NODES is left
+// to the caller (which knows the pool's other value) and to Snowflake.
 func BuildAlterComputePoolPropertySql(name, property, value string) (string, error) {
-	prefix := "ALTER COMPUTE POOL " + snowflake.QuoteIdent(name) + " "
-	what := fmt.Sprintf("compute pool property %q", property)
-	blank := strings.TrimSpace(value) == ""
-	unset := func(kw string) (string, error) { return prefix + "UNSET " + kw, nil }
-	set := func(kw, v string, err error) (string, error) {
-		if err != nil {
-			return "", err
-		}
-		return prefix + "SET " + kw + " = " + v, nil
-	}
-	switch property {
-	case "minNodes":
-		v, err := snowflake.ValidateNonNegativeInt(what, value)
-		return set("MIN_NODES", v, err)
-	case "maxNodes":
-		v, err := snowflake.ValidateNonNegativeInt(what, value)
-		return set("MAX_NODES", v, err)
-	case "autoResume":
-		if blank {
-			return unset("AUTO_RESUME")
-		}
-		v, err := snowflake.ValidateEnumValue(what, value, "TRUE", "FALSE")
-		return set("AUTO_RESUME", v, err)
-	case "autoSuspendSecs":
-		if blank {
-			return unset("AUTO_SUSPEND_SECS")
-		}
-		v, err := snowflake.ValidateNonNegativeInt(what, value)
-		return set("AUTO_SUSPEND_SECS", v, err)
-	case "placementGroup":
-		if blank {
-			return unset("PLACEMENT_GROUP")
-		}
-		return set("PLACEMENT_GROUP", snowflake.QuoteTextLit(strings.TrimSpace(value)), nil)
-	case "instanceFamily":
-		v, err := word("instance family", value)
-		return set("INSTANCE_FAMILY", v, err)
-	case "backupInstanceFamilies":
-		if blank {
-			return unset("BACKUP_INSTANCE_FAMILIES")
-		}
-		v, err := familyList(strings.Split(value, ","))
-		return set("BACKUP_INSTANCE_FAMILIES", v, err)
-	case "comment":
-		if blank {
-			return unset("COMMENT")
-		}
-		return set("COMMENT", snowflake.QuoteTextLit(value), nil)
-	default:
+	p, ok := settable[property]
+	if !ok {
 		return "", fmt.Errorf("unknown compute pool property: %s", property)
 	}
+	prefix := "ALTER COMPUTE POOL " + snowflake.QuoteIdent(name) + " "
+	if p.unsettable && strings.TrimSpace(value) == "" {
+		return prefix + "UNSET " + property, nil
+	}
+	v, err := p.render(fmt.Sprintf("compute pool property %q", property), value)
+	if err != nil {
+		return "", err
+	}
+	return prefix + "SET " + property + " = " + v, nil
 }
 
 // BuildStopAllSql builds ALTER COMPUTE POOL <name> STOP ALL [OF TYPE t, …],

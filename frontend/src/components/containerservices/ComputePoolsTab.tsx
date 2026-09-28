@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: Snowpark & Developer Workflows
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { App as AntApp, Button, Descriptions, Dropdown, Input, Select, Space } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined, TableOutlined } from "@ant-design/icons";
@@ -30,14 +30,20 @@ export default function ComputePoolsTab() {
 
   // SHOW COMPUTE POOL INSTANCE FAMILIES: fetched once per dialog open, on first
   // need, and shared by the create picker, Properties and the reference table.
+  // A failed fetch clears the cached promise, so the next need retries.
   const [famRes, setFamRes] = useState<snowflake.QueryResult | null>(null);
   const [famError, setFamError] = useState<string | null>(null);
-  const [famRequested, setFamRequested] = useState(false);
-  const needFamilies = () => {
-    if (famRequested) return;
-    setFamRequested(true);
-    ListComputePoolInstanceFamilies().then(setFamRes).catch((e) => setFamError(friendlyError(e)));
-  };
+  const famPromise = useRef<Promise<ResultRow[]> | null>(null);
+  const loadFamilies = useCallback(() => {
+    if (!famPromise.current) {
+      setFamError(null);
+      famPromise.current = ListComputePoolInstanceFamilies()
+        .then((r) => { setFamRes(r); return rowsOf(r); })
+        .catch((e) => { famPromise.current = null; setFamError(friendlyError(e)); throw e; });
+    }
+    return famPromise.current;
+  }, []);
+  const needFamilies = () => { loadFamilies().catch(() => {}); };
   const families = rowsOf(famRes);
 
   const load = useCallback(async () => {
@@ -56,10 +62,11 @@ export default function ComputePoolsTab() {
   const run = async (what: string, fn: () => Promise<void>) => {
     try {
       await fn();
-      message.success(what);
     } catch (e) {
       message.error(friendlyError(e));
+      return;
     }
+    message.success(what);
     load();
   };
 
@@ -72,6 +79,8 @@ export default function ComputePoolsTab() {
     onOk: () => run(`${r.name} ${resume ? "resumed" : "suspended"}`, () => AlterComputePool(r.name, resume ? "RESUME" : "SUSPEND")),
   });
 
+  // Workload types go into the SQL unquoted, so the backend rejects anything but
+  // bare words; checking here keeps a typo from closing the confirm first.
   const confirmStopAll = (r: ResultRow) => {
     let types = "";
     modal.confirm({
@@ -79,12 +88,24 @@ export default function ComputePoolsTab() {
       content: (
         <Space direction="vertical" style={{ width: "100%" }}>
           <span>Every service and job running on the pool is terminated. The pool itself keeps running.</span>
-          <Input placeholder="Only these workload types (optional, comma-separated)" onChange={(e) => { types = e.target.value; }} />
+          <Input
+            placeholder="Only these workload types (optional, comma-separated)"
+            title="Snowflake workload type names — letters, digits and underscores"
+            onChange={(e) => { types = e.target.value; }}
+          />
         </Space>
       ),
       okText: "Stop all",
       okButtonProps: { danger: true },
-      onOk: () => run(`Stopped all services on ${r.name}`, () => StopAllComputePoolServices(r.name, types.split(","))),
+      onOk: () => {
+        const list = types.split(",").map((t) => t.trim()).filter(Boolean);
+        const bad = list.find((t) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
+        if (bad) {
+          message.error(`"${bad}" is not a workload type name (letters, digits, underscores).`);
+          return Promise.reject(); // keeps the confirm open
+        }
+        return run(`Stopped all services on ${r.name}`, () => StopAllComputePoolServices(r.name, list));
+      },
     });
   };
 
@@ -188,7 +209,7 @@ export default function ComputePoolsTab() {
       {props && (
         <ComputePoolPropertiesModal
           // Live row, so an edit's refreshed SHOW columns reach the modal.
-          name={props.name} showRow={rows.find((r) => r.name === props.name) ?? props} families={families}
+          name={props.name} showRow={rows.find((r) => r.name === props.name) ?? props} loadFamilies={loadFamilies}
           onClose={() => setProps(null)} onChanged={load}
         />
       )}

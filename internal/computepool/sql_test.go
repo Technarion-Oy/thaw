@@ -40,6 +40,9 @@ func TestBuildCreateComputePoolSql(t *testing.T) {
 	if got != "CREATE COMPUTE POOL pool_name\n  MIN_NODES = 1\n  MAX_NODES = 1\n  INSTANCE_FAMILY = <instance_family>;" {
 		t.Errorf("placeholder: %s", got)
 	}
+	if _, err := BuildCreateComputePoolSql(ComputePoolConfig{MinNodes: 3, MaxNodes: 1}); err == nil {
+		t.Error("expected MAX_NODES < MIN_NODES to be rejected")
+	}
 	if _, err := BuildCreateComputePoolSql(ComputePoolConfig{InstanceFamily: "X; DROP"}); err == nil {
 		t.Error("expected invalid instance family to be rejected")
 	}
@@ -47,15 +50,15 @@ func TestBuildCreateComputePoolSql(t *testing.T) {
 
 func TestBuildAlterComputePoolPropertySql(t *testing.T) {
 	cases := []struct{ prop, val, want string }{
-		{"minNodes", "2", `ALTER COMPUTE POOL "P" SET MIN_NODES = 2`},
-		{"autoResume", "false", `ALTER COMPUTE POOL "P" SET AUTO_RESUME = FALSE`},
-		{"autoResume", "", `ALTER COMPUTE POOL "P" UNSET AUTO_RESUME`},
-		{"autoSuspendSecs", "", `ALTER COMPUTE POOL "P" UNSET AUTO_SUSPEND_SECS`},
-		{"placementGroup", `g'1\`, `ALTER COMPUTE POOL "P" SET PLACEMENT_GROUP = 'g''1\\'`},
-		{"instanceFamily", "cpu_x64_m", `ALTER COMPUTE POOL "P" SET INSTANCE_FAMILY = CPU_X64_M`},
-		{"backupInstanceFamilies", "A, B", `ALTER COMPUTE POOL "P" SET BACKUP_INSTANCE_FAMILIES = ('A', 'B')`},
-		{"backupInstanceFamilies", " ", `ALTER COMPUTE POOL "P" UNSET BACKUP_INSTANCE_FAMILIES`},
-		{"comment", "", `ALTER COMPUTE POOL "P" UNSET COMMENT`},
+		{"MIN_NODES", "2", `ALTER COMPUTE POOL "P" SET MIN_NODES = 2`},
+		{"AUTO_RESUME", "false", `ALTER COMPUTE POOL "P" SET AUTO_RESUME = FALSE`},
+		{"AUTO_RESUME", "", `ALTER COMPUTE POOL "P" UNSET AUTO_RESUME`},
+		{"AUTO_SUSPEND_SECS", "", `ALTER COMPUTE POOL "P" UNSET AUTO_SUSPEND_SECS`},
+		{"PLACEMENT_GROUP", `g'1\`, `ALTER COMPUTE POOL "P" SET PLACEMENT_GROUP = 'g''1\\'`},
+		{"INSTANCE_FAMILY", "cpu_x64_m", `ALTER COMPUTE POOL "P" SET INSTANCE_FAMILY = CPU_X64_M`},
+		{"BACKUP_INSTANCE_FAMILIES", "A, B", `ALTER COMPUTE POOL "P" SET BACKUP_INSTANCE_FAMILIES = ('A', 'B')`},
+		{"BACKUP_INSTANCE_FAMILIES", " ", `ALTER COMPUTE POOL "P" UNSET BACKUP_INSTANCE_FAMILIES`},
+		{"COMMENT", "", `ALTER COMPUTE POOL "P" UNSET COMMENT`},
 	}
 	for _, c := range cases {
 		got, err := BuildAlterComputePoolPropertySql("P", c.prop, c.val)
@@ -63,7 +66,7 @@ func TestBuildAlterComputePoolPropertySql(t *testing.T) {
 			t.Errorf("%s=%q: got %q (%v), want %q", c.prop, c.val, got, err, c.want)
 		}
 	}
-	for _, bad := range [][2]string{{"minNodes", "-1"}, {"maxNodes", ""}, {"instanceFamily", "a b"}, {"nope", "x"}} {
+	for _, bad := range [][2]string{{"MIN_NODES", "-1"}, {"MAX_NODES", ""}, {"INSTANCE_FAMILY", "a b"}, {"nope", "x"}, {"MIN_NODES", ""}} {
 		if _, err := BuildAlterComputePoolPropertySql("P", bad[0], bad[1]); err == nil {
 			t.Errorf("%s=%q: expected error", bad[0], bad[1])
 		}

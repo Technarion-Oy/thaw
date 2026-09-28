@@ -18,7 +18,8 @@ interface Props {
    *  parent re-passes it after `onChanged`, since DESCRIBE omits some columns
    *  (e.g. backup_instance_families). */
   showRow: ResultRow;
-  families: ResultRow[];
+  /** The tab's cached SHOW COMPUTE POOL INSTANCE FAMILIES loader (retries after a failure). */
+  loadFamilies: () => Promise<ResultRow[]>;
   onClose: () => void;
   /** Refreshes the SHOW listing; resolves once `showRow` is fresh. */
   onChanged: () => Promise<void>;
@@ -26,22 +27,22 @@ interface Props {
 
 type EditExtra = Partial<React.ComponentProps<typeof EditRow>>;
 
-// The settable properties: SHOW/DESCRIBE column, ALTER keyword, and the property
-// key BuildAlterComputePoolPropertySql (internal/computepool) accepts. Columns
-// not listed here render read-only.
-const SETTABLE: { col: string; label: string; property: string; extra?: (fams: ResultRow[]) => EditExtra }[] = [
-  { col: "min_nodes", label: "MIN_NODES", property: "minNodes", extra: () => ({ type: "number", min: 1 }) },
-  { col: "max_nodes", label: "MAX_NODES", property: "maxNodes", extra: () => ({ type: "number", min: 1 }) },
-  { col: "instance_family", label: "INSTANCE_FAMILY", property: "instanceFamily", extra: (f) => ({ type: "select", options: familyOptions(f) }) },
-  { col: "backup_instance_families", label: "BACKUP_INSTANCE_FAMILIES", property: "backupInstanceFamilies", extra: () => ({ hint: "Comma-separated; blank unsets" }) },
-  { col: "auto_resume", label: "AUTO_RESUME", property: "autoResume", extra: () => ({ type: "boolean" }) },
-  { col: "auto_suspend_secs", label: "AUTO_SUSPEND_SECS", property: "autoSuspendSecs", extra: () => ({ type: "number", allowEmpty: true, hint: "Blank unsets" }) },
-  { col: "placement_group", label: "PLACEMENT_GROUP", property: "placementGroup", extra: () => ({ hint: "Blank unsets" }) },
-  { col: "comment", label: "COMMENT", property: "comment", extra: () => ({ hint: "Blank unsets" }) },
+// The settable properties, keyed by Snowflake keyword — the same keys as the
+// `settable` table behind BuildAlterComputePoolPropertySql (internal/computepool).
+// The SHOW/DESCRIBE column is the lower-cased keyword; other columns render read-only.
+const SETTABLE: [string, EditExtra][] = [
+  ["MIN_NODES", { type: "number", min: 1 }],
+  ["MAX_NODES", { type: "number", min: 1 }],
+  ["INSTANCE_FAMILY", { type: "select" }],
+  ["BACKUP_INSTANCE_FAMILIES", { hint: "Comma-separated; blank unsets" }],
+  ["AUTO_RESUME", { type: "boolean" }],
+  ["AUTO_SUSPEND_SECS", { type: "number", allowEmpty: true, hint: "Blank unsets" }],
+  ["PLACEMENT_GROUP", { hint: "Blank unsets" }],
+  ["COMMENT", { hint: "Blank unsets" }],
 ];
-const SETTABLE_COLS = new Set(SETTABLE.map((s) => s.col));
+const SETTABLE_COLS = new Set(SETTABLE.map(([kw]) => kw.toLowerCase()));
 
-export default function ComputePoolPropertiesModal({ name, showRow, families, onClose, onChanged }: Props) {
+export default function ComputePoolPropertiesModal({ name, showRow, loadFamilies, onClose, onChanged }: Props) {
   const [row, setRow] = useState<ResultRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,12 +62,12 @@ export default function ComputePoolPropertiesModal({ name, showRow, families, on
     alter: (clause) => AlterComputePool(name, clause),
   });
 
-  const save = (property: string, label: string) => async (value: string) => {
+  const save = (property: string) => async (value: string) => {
     const n = Number(value);
-    if (property === "minNodes" && n > Number(row?.max_nodes)) throw new Error("MIN_NODES must be ≤ MAX_NODES");
-    if (property === "maxNodes" && n < Number(row?.min_nodes)) throw new Error("MAX_NODES must be ≥ MIN_NODES");
+    if (property === "MIN_NODES" && n > Number(row?.max_nodes)) throw new Error("MIN_NODES must be ≤ MAX_NODES");
+    if (property === "MAX_NODES" && n < Number(row?.min_nodes)) throw new Error("MAX_NODES must be ≥ MIN_NODES");
     await AlterComputePoolProperty(name, property, value);
-    message.success(`${label} updated`);
+    message.success(`${property} updated`);
     await onChanged(); // new showRow → load() re-runs
   };
 
@@ -82,13 +83,21 @@ export default function ComputePoolPropertiesModal({ name, showRow, families, on
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              {SETTABLE.map((s) => (
-                <EditRow
-                  key={s.col} label={s.label} type="text" onSave={save(s.property, s.label)}
-                  value={s.col === "backup_instance_families" ? familyListText(row[s.col]) : row[s.col] ?? ""}
-                  {...s.extra?.(families)}
-                />
-              ))}
+              {SETTABLE.map(([kw, extra]) => {
+                const col = kw.toLowerCase();
+                const value = col === "backup_instance_families" ? familyListText(row[col]) : row[col] ?? "";
+                return (
+                  <EditRow
+                    key={kw} label={kw} type="text" value={value} onSave={save(kw)} {...extra}
+                    // Lazy, with a loading cue; the pool's current family stays
+                    // selectable even if the account list omits it.
+                    loadOptions={kw === "INSTANCE_FAMILY" ? () => loadFamilies().then((f) => {
+                      const opts = familyOptions(f);
+                      return !value || opts.some((o) => o.value === value) ? opts : [{ value, label: value }, ...opts];
+                    }) : undefined}
+                  />
+                );
+              })}
               <TagsRow tags={tags.tags} nameOptions={tags.nameOptions} onSetTag={tags.setTag} onUnsetTag={tags.unsetTag} />
             </tbody>
           </table>
