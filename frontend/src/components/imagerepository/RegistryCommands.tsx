@@ -2,7 +2,7 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState } from "react";
-import { Button, Segmented, Space, Typography } from "antd";
+import { App as AntApp, Button, Segmented, Space, Tooltip, Typography } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -25,11 +25,30 @@ const codeStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)", fontSize: 12, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", flex: 1,
 };
 
+/** Copy-to-clipboard icon button that confirms (or reports failure) with a toast. */
+export function CopyButton({ text, tip = "Copy" }: { text: string; tip?: string }) {
+  const { message } = AntApp.useApp();
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await ClipboardSetText(text);
+      message.success("Copied");
+    } catch {
+      message.error("Could not copy to the clipboard");
+    }
+  };
+  return (
+    <Tooltip title={tip}>
+      <Button size="small" type="text" icon={<CopyOutlined style={{ fontSize: 12 }} />} onClick={copy} />
+    </Tooltip>
+  );
+}
+
 function Snippet({ text }: { text: string }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 }}>
       <pre style={codeStyle}>{text}</pre>
-      <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => ClipboardSetText(text)} />
+      <CopyButton text={text} />
     </div>
   );
 }

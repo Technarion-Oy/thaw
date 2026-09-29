@@ -72,6 +72,7 @@ export default function GatewaysTab() {
     { title: "Ingress URL", dataIndex: "ingress_url", ellipsis: true },
     { title: "PrivateLink URL", dataIndex: "privatelink_ingress_url", ellipsis: true },
     { title: "Owner", dataIndex: "owner", width: 140, ellipsis: true },
+    { title: "Comment", dataIndex: "comment", ellipsis: true },
     {
       key: "menu", width: 40,
       render: (_, r) => (

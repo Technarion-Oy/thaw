@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, Form, Modal, Select } from "antd";
-import { ListDatabases, ListSchemas } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserSchemas } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
 
 interface Props {
@@ -29,7 +29,17 @@ export default function ScopedCreate({ title, onClose, children }: Props) {
   useEffect(() => { ListDatabases().then(setDbs).catch(() => setDbs([])); }, []);
   useEffect(() => {
     if (!db) return;
-    ListSchemas(db).then(setSchemas).catch(() => setSchemas([]));
+    let live = true;
+    setSchemas([]);
+    // ListUserSchemas omits INFORMATION_SCHEMA, which cannot host user objects.
+    ListUserSchemas(db)
+      .then((xs) => {
+        if (!live) return;
+        setSchemas(xs);
+        setSchema((cur) => (xs.includes(cur) ? cur : ""));
+      })
+      .catch(() => live && setSchemas([]));
+    return () => { live = false; };
   }, [db]);
 
   if (chosen) return <>{children(db, schema)}</>;

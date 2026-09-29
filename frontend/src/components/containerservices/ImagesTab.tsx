@@ -2,28 +2,20 @@
 // @thaw-domain: Snowpark & Developer Workflows
 
 import { useCallback, useEffect, useState } from "react";
-import { App as AntApp, Button, Dropdown, Table, Tooltip, Typography } from "antd";
+import { App as AntApp, Button, Dropdown, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CopyOutlined, MoreOutlined } from "@ant-design/icons";
+import { MoreOutlined } from "@ant-design/icons";
 import { DropImageRepository, ListImageRepositories, ListImagesInRepository } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { friendlyError } from "../common/errors";
 import CreateImageRepositoryModal from "../imagerepository/CreateImageRepositoryModal";
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
-import RegistryCommands from "../imagerepository/RegistryCommands";
+import RegistryCommands, { CopyButton } from "../imagerepository/RegistryCommands";
 import ContainerTabLayout from "./ContainerTabLayout";
 import ScopedCreate from "./ScopedCreate";
 import { rowsOf, type ResultRow } from "./computePools";
 
 const { Text } = Typography;
 const fqn = (r: ResultRow) => `${r.database_name}.${r.schema_name}.${r.name}`;
-
-const copyBtn = (text: string, tip: string) => (
-  <Tooltip title={tip}>
-    <Button size="small" type="text" icon={<CopyOutlined style={{ fontSize: 12 }} />}
-      onClick={(e) => { e.stopPropagation(); ClipboardSetText(text); }} />
-  </Tooltip>
-);
 
 /** Images of one repository, each with a copyable pull command, plus the registry commands. */
 function RepoDetail({ repo }: { repo: ResultRow }) {
@@ -50,7 +42,7 @@ function RepoDetail({ repo }: { repo: ResultRow }) {
     { title: "Created", dataIndex: "created_on", width: 180, ellipsis: true },
     {
       key: "pull", width: 40,
-      render: (_, r) => r.image_path && host ? copyBtn(`docker pull ${host}/${r.image_path}`, "Copy pull command") : null,
+      render: (_, r) => r.image_path && host ? <CopyButton text={`docker pull ${host}/${r.image_path}`} tip="Copy pull command" /> : null,
     },
   ];
   return (
@@ -107,7 +99,7 @@ export default function ImagesTab() {
     { title: "Name", dataIndex: "fqn", ellipsis: true },
     {
       title: "Repository URL", dataIndex: "repository_url", ellipsis: true,
-      render: (u: string) => u && <>{u}{copyBtn(u, "Copy URL")}</>,
+      render: (u: string) => u && <>{u}<CopyButton text={u} tip="Copy URL" /></>,
     },
     { title: "Owner", dataIndex: "owner", width: 140, ellipsis: true },
     { title: "Comment", dataIndex: "comment", ellipsis: true },
