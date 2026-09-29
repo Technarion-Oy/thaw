@@ -518,6 +518,14 @@ export function BuildExecuteDbtProjectSql(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['BuildExecuteDbtProjectSql'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildExecuteInferenceJobServiceSql(arg1) {
+  return window['go']['app']['App']['BuildExecuteInferenceJobServiceSql'](arg1);
+}
+
+export function BuildExecuteJobServiceSql(arg1) {
+  return window['go']['app']['App']['BuildExecuteJobServiceSql'](arg1);
+}
+
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -832,6 +840,10 @@ export function DropHybridTableIndex(arg1, arg2, arg3, arg4) {
 
 export function DropIntegration(arg1) {
   return window['go']['app']['App']['DropIntegration'](arg1);
+}
+
+export function DropJobService(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropJobService'](arg1, arg2, arg3);
 }
 
 export function DropSchema(arg1, arg2, arg3) {
@@ -1708,6 +1720,10 @@ export function ListImagesInRepository(arg1, arg2, arg3) {
 
 export function ListIntegrations(arg1) {
   return window['go']['app']['App']['ListIntegrations'](arg1);
+}
+
+export function ListJobServices() {
+  return window['go']['app']['App']['ListJobServices']();
 }
 
 export function ListMCPSessions() {

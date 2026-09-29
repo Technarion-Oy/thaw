@@ -335,6 +335,10 @@ export function BuildDropColumnSql(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function BuildExecuteDbtProjectSql(arg1:string,arg2:string,arg3:string,arg4:dbtproject.ExecuteConfig):Promise<string>;
 
+export function BuildExecuteInferenceJobServiceSql(arg1:service.InferenceJobConfig):Promise<string>;
+
+export function BuildExecuteJobServiceSql(arg1:service.JobServiceConfig):Promise<string>;
+
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
 
 export function BuildInsertRowsSql(arg1:string,arg2:string,arg3:string,arg4:table.InsertRowsConfig):Promise<string>;
@@ -492,6 +496,8 @@ export function DropDatabase(arg1:string,arg2:string):Promise<void>;
 export function DropHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function DropIntegration(arg1:string):Promise<void>;
+
+export function DropJobService(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -930,6 +936,8 @@ export function ListHybridTableIndexes(arg1:string,arg2:string,arg3:string):Prom
 export function ListImagesInRepository(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
+
+export function ListJobServices():Promise<snowflake.QueryResult>;
 
 export function ListMCPSessions():Promise<Array<mcp.SessionInfo>>;
 

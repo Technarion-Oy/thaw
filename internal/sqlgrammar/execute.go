@@ -407,9 +407,55 @@ func (v *Validator) ParseExecuteJobService() bool {
 		func() bool { return v.MatchWord("COMPUTE") },
 		func() bool { return v.MatchWord("POOL") },
 		v.parseIdentPath,
-		// the FROM specification + options block is free-form; require at least the
-		// FROM keyword then accept the remainder.
+		// The docs' usage notes and examples put the options before the spec,
+		// the syntax block after it; accept options here, then FROM and the
+		// free-form rest (spec, USING and any trailing options).
+		func() bool {
+			return v.ZeroOrMore(func() bool {
+				return v.Choice(
+					v.option("NAME", v.parseIdentPath),
+					v.option("ASYNC", v.parseScalar),
+					v.option("REPLICAS", v.parseScalar),
+					v.option("QUERY_WAREHOUSE", v.parseIdentPath),
+					v.option("COMMENT", v.parseString),
+					v.option("EXTERNAL_ACCESS_INTEGRATIONS", v.consumeBalancedParens),
+				)
+			})
+		},
 		func() bool { return v.MatchWord("FROM") },
+		v.consumeRest,
+	)
+}
+
+// ParseExecuteInferenceJobService validates the Snowflake
+// `EXECUTE INFERENCE JOB SERVICE` command.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/execute-inference-job-service
+//
+// Syntax:
+//
+//	EXECUTE INFERENCE JOB SERVICE
+//	  IN COMPUTE POOL <compute_pool_name>
+//	  WITH SPECIFICATION <specification_text>
+//	  FROM { ( <subquery> ) | @[<namespace>.]<stage_name>[/<path>] }
+//	  MODEL = [<db>.<schema>.]<model_name>
+//	  [ VERSION = <version_or_alias> ]
+//	  [ FUNCTION = '<function_name>' ]
+//	  [ NAME = [<db>.<schema>.]<name> ]
+//	  [ ASYNC = { TRUE | FALSE } ]
+//	  [ REPLICAS = <num> ]
+func (v *Validator) ParseExecuteInferenceJobService() bool {
+	return v.Sequence(
+		func() bool { return v.MatchKeyword("EXECUTE") },
+		func() bool { return v.MatchWord("INFERENCE") },
+		func() bool { return v.MatchWord("JOB") },
+		func() bool { return v.MatchWord("SERVICE") },
+		func() bool { return v.MatchWord("IN") },
+		func() bool { return v.MatchWord("COMPUTE") },
+		func() bool { return v.MatchWord("POOL") },
+		v.parseIdentPath,
+		func() bool { return v.MatchWord("WITH") },
+		func() bool { return v.MatchWord("SPECIFICATION") },
+		// spec text, FROM source, MODEL and options are free-form.
 		v.consumeRest,
 	)
 }

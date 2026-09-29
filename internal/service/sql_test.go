@@ -284,3 +284,88 @@ func TestParseServiceRoleGrants(t *testing.T) {
 		t.Errorf("got %+v\nwant %+v", got, want)
 	}
 }
+
+func TestBuildExecuteJobServiceSql(t *testing.T) {
+	got, err := BuildExecuteJobServiceSql(JobServiceConfig{
+		Name: "db.sc.my_job", ComputePool: "POOL", SpecSource: SpecSourceStage, Template: true,
+		SpecStage: "@st", SpecFile: "job.yaml", TemplateVars: []TemplateVar{{Key: "n", Value: "3"}},
+		Async: true, Replicas: "2", QueryWarehouse: "WH", Comment: "c", ExternalAccessIntegrations: "E1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `EXECUTE JOB SERVICE
+  IN COMPUTE POOL "POOL"
+  NAME = db.sc.my_job
+  ASYNC = TRUE
+  REPLICAS = 2
+  QUERY_WAREHOUSE = "WH"
+  COMMENT = 'c'
+  EXTERNAL_ACCESS_INTEGRATIONS = ("E1")
+  FROM @st
+  SPECIFICATION_TEMPLATE_FILE = 'job.yaml'
+  USING (n => 3);`
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+
+	if _, err := BuildExecuteJobServiceSql(JobServiceConfig{SpecInline: "x: $$"}); err == nil {
+		t.Error("$$ in an inline job spec should be rejected")
+	}
+	if _, err := BuildCreateServiceSql("D", "S", ServiceConfig{SpecInline: "x: $$"}); err == nil {
+		t.Error("$$ in an inline service spec should be rejected")
+	}
+	if _, err := BuildExecuteJobServiceSql(JobServiceConfig{Replicas: "0"}); err == nil {
+		t.Error("REPLICAS = 0 should be rejected")
+	}
+	if _, err := BuildExecuteJobServiceSql(JobServiceConfig{Name: "a.b.c.d"}); err == nil {
+		t.Error("four-part name should be rejected")
+	}
+	min, _ := BuildExecuteJobServiceSql(JobServiceConfig{})
+	if !strings.Contains(min, "<compute_pool>") || strings.Contains(min, "NAME =") || strings.Contains(min, "ASYNC") {
+		t.Errorf("minimal job: %s", min)
+	}
+}
+
+func TestBuildExecuteInferenceJobServiceSql(t *testing.T) {
+	got, err := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{
+		ComputePool: "POOL", Spec: "output: x", InputSource: InputSourceQuery,
+		Query: "SELECT id FROM t;", Model: `"DB"."SC"."m"`, Version: "v1", Function: "pre'dict",
+		Name: `"Job"`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `EXECUTE INFERENCE JOB SERVICE
+  IN COMPUTE POOL "POOL"
+  WITH SPECIFICATION $$
+output: x
+$$
+  FROM (
+SELECT id FROM t
+  )
+  MODEL = "DB"."SC"."m"
+  VERSION = v1
+  FUNCTION = 'pre''dict'
+  NAME = "Job";`
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+
+	stage, _ := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{InputSource: InputSourceStage, StagePath: "@st/in/"})
+	if !strings.Contains(stage, "\n  FROM @st/in/\n") {
+		t.Errorf("stage source: %s", stage)
+	}
+	if _, err := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Spec: "a $$ b"}); err == nil {
+		t.Error("$$ in spec should be rejected")
+	}
+	// A trailing line comment must not swallow the closing paren.
+	cm, _ := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Query: "SELECT * FROM t -- filter TBD"})
+	if !strings.Contains(cm, "-- filter TBD\n  )") {
+		t.Errorf("comment swallowed the paren: %s", cm)
+	}
+	bs, _ := BuildExecuteInferenceJobServiceSql(InferenceJobConfig{Function: `a\b`})
+	if !strings.Contains(bs, `FUNCTION = 'a\\b'`) {
+		t.Errorf("backslash in function not preserved: %s", bs)
+	}
+}

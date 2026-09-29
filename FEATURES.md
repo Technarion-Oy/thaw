@@ -1128,7 +1128,16 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
 - **Properties** — `DESCRIBE COMPUTE POOL` merged with the SHOW row; inline-editable min/max nodes, instance family, backup families, auto resume, auto suspend secs, placement group and comment (`ALTER COMPUTE POOL … SET / UNSET`), a **Tags** row, the remaining columns read-only, and a lazily loaded **Nodes** table (`SHOW NODES IN COMPUTE POOL`)
 - **Instance families…** — read-only `SHOW COMPUTE POOL INSTANCE FAMILIES` reference (also reachable from the picker), fetched once per dialog open; its `current_node_usage` column shows how many nodes of each family the account uses
 
-*In progress:* the Services, Jobs, Images, Snapshots and Gateways tabs land per tab.
+#### Jobs
+
+- **Table** from `SHOW JOB SERVICES IN ACCOUNT` (running, completed and async job services): status dot + word, `db.schema.name`, compute pool, async, created, owner; a **Status** facet; the detail panel lists every column
+- **Row ⋯ menu** — **Logs…** (`SYSTEM$GET_SERVICE_LOGS`, the same container / instance / lines viewer as Service Properties), **Properties…** (the Service Properties dialog) and **Drop** (confirm-guarded)
+- **Run job…** — a **Job / Inference job** switch, with live SQL preview:
+  - *Job* (`EXECUTE JOB SERVICE`): compute pool, the same specification section as Create Service (inline YAML or staged file, optional template + `USING` variables), optional `[db.schema.]name`, async, replicas, query warehouse, external access integrations, comment
+  - *Inference job* (`EXECUTE INFERENCE JOB SERVICE`): compute pool, spec YAML, input as a query (SQL editor with a table picker; rendered inside parentheses) or a stage path (with a stage browser), a model picker (`SHOW MODELS IN ACCOUNT`), version, function (quoted), name, async, replicas
+  - **Run** executes in a new query tab. A synchronous job blocks that tab until it finishes — the dialog closes so its output shows and it can be cancelled; an async job returns at once and the list refreshes
+
+*In progress:* the Services, Images, Snapshots and Gateways tabs land per tab.
 
 ---
 

@@ -201,16 +201,28 @@ func TestParseExecuteImmediateFrom(t *testing.T) {
 	)
 }
 
+func TestParseExecuteInferenceJobService(t *testing.T) {
+	assertValid(t, (*Validator).ParseExecuteInferenceJobService,
+		"EXECUTE INFERENCE JOB SERVICE IN COMPUTE POOL p WITH SPECIFICATION $$x$$ FROM ( SELECT 1 ) MODEL = m FUNCTION = 'predict'",
+	)
+	assertInvalid(t, (*Validator).ParseExecuteInferenceJobService,
+		`EXECUTE INFERENCE JOB SERVICE IN COMPUTE POOL p`, // missing WITH SPECIFICATION
+	)
+}
+
 func TestParseExecuteJobService(t *testing.T) {
 	assertValid(t, (*Validator).ParseExecuteJobService,
 		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool FROM SPECIFICATION 'spec'`,
 		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool FROM @stage SPECIFICATION_FILE = 'job.yaml'`,
 		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool FROM SPECIFICATION_TEMPLATE 'tpl' USING (x => 1)`,
+		// options before the spec, as in the docs' usage notes and examples
+		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool NAME = db.sc.j ASYNC = TRUE REPLICAS = 3 QUERY_WAREHOUSE = wh COMMENT = 'c' EXTERNAL_ACCESS_INTEGRATIONS = (e1) FROM SPECIFICATION $$x$$`,
 	)
 	assertInvalid(t, (*Validator).ParseExecuteJobService,
 		``,
 		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool`, // missing FROM ...
 		`EXECUTE JOB SERVICE mypool FROM SPECIFICATION 'spec'`,
+		`EXECUTE JOB SERVICE IN COMPUTE POOL mypool NAME = j`, // options but no FROM
 	)
 }
 

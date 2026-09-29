@@ -4368,6 +4368,38 @@ export namespace sequence {
 
 export namespace service {
 	
+	export class InferenceJobConfig {
+	    name: string;
+	    computePool: string;
+	    spec: string;
+	    inputSource: string;
+	    query: string;
+	    stagePath: string;
+	    model: string;
+	    version: string;
+	    function: string;
+	    async: boolean;
+	    replicas: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InferenceJobConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.computePool = source["computePool"];
+	        this.spec = source["spec"];
+	        this.inputSource = source["inputSource"];
+	        this.query = source["query"];
+	        this.stagePath = source["stagePath"];
+	        this.model = source["model"];
+	        this.version = source["version"];
+	        this.function = source["function"];
+	        this.async = source["async"];
+	        this.replicas = source["replicas"];
+	    }
+	}
 	export class TemplateVar {
 	    key: string;
 	    value: string;
@@ -4381,6 +4413,60 @@ export namespace service {
 	        this.key = source["key"];
 	        this.value = source["value"];
 	    }
+	}
+	export class JobServiceConfig {
+	    name: string;
+	    computePool: string;
+	    specSource: string;
+	    template: boolean;
+	    specInline: string;
+	    specStage: string;
+	    specFile: string;
+	    templateVars: TemplateVar[];
+	    async: boolean;
+	    replicas: string;
+	    queryWarehouse: string;
+	    externalAccessIntegrations: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JobServiceConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.computePool = source["computePool"];
+	        this.specSource = source["specSource"];
+	        this.template = source["template"];
+	        this.specInline = source["specInline"];
+	        this.specStage = source["specStage"];
+	        this.specFile = source["specFile"];
+	        this.templateVars = this.convertValues(source["templateVars"], TemplateVar);
+	        this.async = source["async"];
+	        this.replicas = source["replicas"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.externalAccessIntegrations = source["externalAccessIntegrations"];
+	        this.comment = source["comment"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ServiceConfig {
 	    name: string;

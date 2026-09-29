@@ -18,7 +18,7 @@ MFA removal, policy attach/detach, tag set/unset, delegated authorization).
 |---|---|
 | `users.go` | `BuildAlterUserPropertySQL(name, property, value)` — validates and renders one property change; `AlterProperty` executes it via the Snowflake client. |
 | `users_test.go` | Table test covering quoting, escaping, UNSET-on-empty, enum/integer validation, and the `DEFAULT_SECONDARY_ROLES` / `TYPE` / `PASSWORD` special forms. |
-| `actions.go` | The non-property `ALTER USER` action builders — `BuildResetPasswordSQL`, `BuildRenameUserSQL`, `BuildAbortAllQueriesSQL`, `BuildRemoveMfaMethodSQL`, `BuildSet/UnsetPolicySQL`, `BuildSet/UnsetTagsSQL`, `BuildAdd/RemoveDelegatedAuthSQL` — each with a matching `Ctx`-taking executor. `TagPair` is the `<name> = '<value>'` assignment struct. `renderQualifiedName` renders a free-hand, possibly-qualified tag/policy name (quote-aware split, folded bare parts). |
+| `actions.go` | The non-property `ALTER USER` action builders — `BuildResetPasswordSQL`, `BuildRenameUserSQL`, `BuildAbortAllQueriesSQL`, `BuildRemoveMfaMethodSQL`, `BuildSet/UnsetPolicySQL`, `BuildSet/UnsetTagsSQL`, `BuildAdd/RemoveDelegatedAuthSQL` — each with a matching `Ctx`-taking executor. `TagPair` is the `<name> = '<value>'` assignment struct. Free-hand, possibly-qualified tag/policy names are rendered by `snowflake.RenderQualifiedName` (quote-aware split, folded bare parts). |
 | `actions_test.go` | Table tests for every action builder: quoting, folding, enum/kind validation, the FORCE suffix, multi-tag SET, and the role-vs-AUTHORIZATIONS branch of REMOVE DELEGATED. |
 
 ## Property semantics
@@ -34,11 +34,11 @@ MFA removal, policy attach/detach, tag set/unset, delegated authorization).
 ## Action semantics (`actions.go`)
 
 - **`BuildResetPasswordSQL`** — `RESET PASSWORD` (generates a single-use reset URL; does *not* take a new password — use the `password` property for that). Its executor `ResetPassword` returns Snowflake's status row (the reset URL string) instead of discarding it, so the UI can show the link copyably.
-- **`BuildRenameUserSQL`** — `RENAME TO <new_name>`; the target is rendered via `renderQualifiedName` (single part), so a bare name folds and a name with a space must be typed quoted (same SQL-syntax model as `defaultNamespace`).
+- **`BuildRenameUserSQL`** — `RENAME TO <new_name>`; the target is rendered via `snowflake.RenderQualifiedName` (single part), so a bare name folds and a name with a space must be typed quoted (same SQL-syntax model as `defaultNamespace`).
 - **`BuildAbortAllQueriesSQL`** — `ABORT ALL QUERIES`.
 - **`BuildRemoveMfaMethodSQL`** — `REMOVE MFA METHOD <method>`; `method` is the system-generated per-enrollment identifier from the `name` column of `SHOW MFA METHODS` (**not** the factor type — that's a separate column), so it is `QuoteIdent`-wrapped exactly. The enrolled methods are listed by `App.ListUserMfaMethods`.
-- **`BuildSet/UnsetPolicySQL`** — `SET { AUTHENTICATION | PASSWORD | SESSION } POLICY <name> [ FORCE ]` / `UNSET … POLICY`; kind is validated, policy name is a `renderQualifiedName` (up to 3 parts), `force` appends the `FORCE` keyword.
-- **`BuildSet/UnsetTagsSQL`** — `SET TAG <n> = '<v>' [ , … ]` / `UNSET TAG <n> [ , … ]`; at least one tag required, names via `renderQualifiedName`, values via `QuoteTextLit`. `TagPair` carries one assignment.
+- **`BuildSet/UnsetPolicySQL`** — `SET { AUTHENTICATION | PASSWORD | SESSION } POLICY <name> [ FORCE ]` / `UNSET … POLICY`; kind is validated, policy name is a `snowflake.RenderQualifiedName` (up to 3 parts), `force` appends the `FORCE` keyword.
+- **`BuildSet/UnsetTagsSQL`** — `SET TAG <n> = '<v>' [ , … ]` / `UNSET TAG <n> [ , … ]`; at least one tag required, names via `snowflake.RenderQualifiedName`, values via `QuoteTextLit`. `TagPair` carries one assignment.
 - **`BuildAdd/RemoveDelegatedAuthSQL`** — `ADD DELEGATED AUTHORIZATION OF ROLE <r> TO SECURITY INTEGRATION <i>` / `REMOVE DELEGATED { AUTHORIZATION OF ROLE <r> | AUTHORIZATIONS } FROM SECURITY INTEGRATION <i>`; an **empty role** on remove selects the all-`AUTHORIZATIONS` form. Role/integration are picker-sourced canonical-case names, so they are `QuoteIdent`-wrapped exactly (like `asIdent` for `defaultRole`/`defaultWarehouse`) rather than run through the free-hand fold-or-quote path — a quoted mixed-case role/integration keeps its case.
 
 ## Gotchas

@@ -5,6 +5,7 @@ import { Alert, Button, Modal, Space, Tabs } from "antd";
 import { CloudServerOutlined } from "@ant-design/icons";
 import ContainerTabLayout from "./ContainerTabLayout";
 import ComputePoolsTab from "./ComputePoolsTab";
+import JobsTab from "./JobsTab";
 import {
   CONTAINER_TABS,
   useContainerServicesStore,
@@ -22,7 +23,7 @@ interface Props {
 const TABS: Record<ContainerTab, { label: string; objectLabel: string; newLabel: string; issue: number }> = {
   pools:     { label: "Compute pools",      objectLabel: "compute pools",      newLabel: "New pool…",     issue: 941 }, // landed: ComputePoolsTab
   services:  { label: "Services",           objectLabel: "services",           newLabel: "New service…",  issue: 944 },
-  jobs:      { label: "Jobs",               objectLabel: "job services",       newLabel: "Run job…",      issue: 942 },
+  jobs:      { label: "Jobs",               objectLabel: "job services",       newLabel: "Run job…",      issue: 942 }, // landed: JobsTab
   images:    { label: "Images",             objectLabel: "image repositories", newLabel: "New repo…",     issue: 943 },
   snapshots: { label: "Snapshots",          objectLabel: "volume snapshots",   newLabel: "New snapshot…", issue: 945 },
   gateways:  { label: "Gateways",           objectLabel: "gateways",           newLabel: "New gateway…",  issue: 943 },
@@ -60,7 +61,7 @@ export default function ContainerServicesModal({ onClose }: Props) {
           return {
             key,
             label: t.label,
-            children: key === "pools" ? <ComputePoolsTab /> : (
+            children: key === "pools" ? <ComputePoolsTab /> : key === "jobs" ? <JobsTab onCloseDialog={onClose} /> : (
               <ContainerTabLayout
                 objectLabel={t.objectLabel}
                 rowKey="name"
