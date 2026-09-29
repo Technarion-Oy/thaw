@@ -33,3 +33,15 @@ func (a *App) ListImagesInRepository(database, schema, name string) (*snowflake.
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	return client.Execute(a.fctx(FeatureObjectEditor), sql)
 }
+
+// ListImageRepositories runs SHOW IMAGE REPOSITORIES IN ACCOUNT for the
+// Container Services dialog's Images tab (repository_url, owner, comment, …).
+func (a *App) ListImageRepositories() (*snowflake.QueryResult, error) {
+	return a.execPoolSQL("SHOW IMAGE REPOSITORIES IN ACCOUNT")
+}
+
+// DropImageRepository runs DROP IMAGE REPOSITORY <fqn>.
+func (a *App) DropImageRepository(database, schema, name string) error {
+	_, err := a.execPoolSQL("DROP IMAGE REPOSITORY " + snowflake.Qualify(database, schema, name))
+	return err
+}
