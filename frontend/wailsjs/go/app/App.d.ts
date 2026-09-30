@@ -493,7 +493,11 @@ export function DropComputePool(arg1:string):Promise<void>;
 
 export function DropDatabase(arg1:string,arg2:string):Promise<void>;
 
+export function DropGateway(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function DropHybridTableIndex(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function DropImageRepository(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropIntegration(arg1:string):Promise<void>;
 
@@ -925,6 +929,8 @@ export function ListFileFormats(arg1:string,arg2:string):Promise<Array<string>>;
 
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
+export function ListGateways():Promise<snowflake.QueryResult>;
+
 export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitBranch>>;
 
 export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
@@ -932,6 +938,8 @@ export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:stri
 export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitTag>>;
 
 export function ListHybridTableIndexes(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListImageRepositories():Promise<snowflake.QueryResult>;
 
 export function ListImagesInRepository(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 

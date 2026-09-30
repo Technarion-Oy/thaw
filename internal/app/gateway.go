@@ -42,3 +42,15 @@ func (a *App) AlterGateway(database, schema, name, specification string) error {
 	_, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	return err
 }
+
+// ListGateways runs SHOW GATEWAYS IN ACCOUNT for the Container Services
+// dialog's Gateways tab. Ingress URLs may be absent here; see DescribeGateway.
+func (a *App) ListGateways() (*snowflake.QueryResult, error) {
+	return a.execPoolSQL("SHOW GATEWAYS IN ACCOUNT")
+}
+
+// DropGateway runs DROP GATEWAY <fqn>.
+func (a *App) DropGateway(database, schema, name string) error {
+	_, err := a.execPoolSQL("DROP GATEWAY " + snowflake.Qualify(database, schema, name))
+	return err
+}

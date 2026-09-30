@@ -834,8 +834,16 @@ export function DropDatabase(arg1, arg2) {
   return window['go']['app']['App']['DropDatabase'](arg1, arg2);
 }
 
+export function DropGateway(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropGateway'](arg1, arg2, arg3);
+}
+
 export function DropHybridTableIndex(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DropHybridTableIndex'](arg1, arg2, arg3, arg4);
+}
+
+export function DropImageRepository(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropImageRepository'](arg1, arg2, arg3);
 }
 
 export function DropIntegration(arg1) {
@@ -1698,6 +1706,10 @@ export function ListFinalizableTasks(arg1, arg2) {
   return window['go']['app']['App']['ListFinalizableTasks'](arg1, arg2);
 }
 
+export function ListGateways() {
+  return window['go']['app']['App']['ListGateways']();
+}
+
 export function ListGitBranches(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListGitBranches'](arg1, arg2, arg3);
 }
@@ -1712,6 +1724,10 @@ export function ListGitTags(arg1, arg2, arg3) {
 
 export function ListHybridTableIndexes(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListHybridTableIndexes'](arg1, arg2, arg3);
+}
+
+export function ListImageRepositories() {
+  return window['go']['app']['App']['ListImageRepositories']();
 }
 
 export function ListImagesInRepository(arg1, arg2, arg3) {

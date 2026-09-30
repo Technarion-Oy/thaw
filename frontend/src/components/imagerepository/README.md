@@ -8,6 +8,8 @@
 |---|---|
 | `CreateImageRepositoryModal.tsx` | Create form with a live `CREATE IMAGE REPOSITORY` SQL preview. Fields: name, OR REPLACE / IF NOT EXISTS (mutually exclusive — selecting one clears the other), and a comment. |
 | `ImageRepositoryPropertiesModal.tsx` | `SHOW IMAGE REPOSITORIES` metadata: a highlighted **Repository URL** (with copy button), an inline-editable **Comment**, a lazily-loaded **Images** table (`SHOW IMAGES IN IMAGE REPOSITORY`), and the generic property rows. |
+| `RegistryCommands.tsx` | Also exports `CopyButton` (clipboard icon with a toast). Login-method picker (Snowflake CLI / CLI token pipe / Docker with PAT) plus `docker tag`/`push`/`pull` lines for a repository URL; copy buttons. Used by the properties modal and the Container Services Images tab. |
+| `registrySnippets.ts` | Pure `registrySnippets(repositoryUrl, connectionParams)`; host is `repository_url.split("/")[0]`, user from `connectionStore`. Copied text never holds a secret. Tested in `registrySnippets.test.ts`. |
 
 ## Integration
 

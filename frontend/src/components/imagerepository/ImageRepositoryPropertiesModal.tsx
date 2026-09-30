@@ -14,6 +14,7 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
+import RegistryCommands from "./RegistryCommands";
 
 const { Text } = Typography;
 
@@ -275,6 +276,7 @@ export default function ImageRepositoryPropertiesModal({ db, schema, name, onClo
           ) : (
             <Text type="secondary">(unavailable)</Text>
           )}
+          {repositoryUrl && <div style={{ marginTop: 8 }}><RegistryCommands repositoryUrl={repositoryUrl} /></div>}
 
           <div style={SECTION_HEAD}>Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

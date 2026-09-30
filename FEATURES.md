@@ -1118,6 +1118,8 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
 - **Same shape on every tab**, so the six read as one system: a toolbar (free-text filter → facet selects → **Refresh** → one primary **New …** action), a dense table, and a detail panel for the selected row
 - **Empty states name the role and the fix** — *"No compute pools are visible to ROLE. Create one or switch role."* — because an empty SPCS list almost always means the active role cannot see them
 - **Per-object forms are the existing ones** — the tabs reuse the Service, Image Repository and Gateway create/properties dialogs (each with its live SQL preview) rather than duplicating them
+- **Images tab** — image repositories account-wide with a copy-URL button per row; selecting one lists its images (each with **Copy pull command**) and a **Registry commands** block: pick Snowflake CLI (default; works for SSO, key-pair, OAuth), CLI token pipe, or Docker with PAT (default for PAT connections), then copy the login and `docker tag`/`push`/`pull` lines prefilled with the real repository URL. Copied text holds only the host and user — never a password, PAT or session token. The same block appears in Image Repository Properties. Row menu: Properties…, Drop; **New repository…** asks for a database and schema first
+- **Gateways tab** — gateways account-wide (name, ingress and PrivateLink URLs, owner); row menu: Copy ingress URL, Properties…, Drop; **New gateway…**
 - Menu items are greyed out while disconnected and while the **Container Services** feature flag is off
 
 #### Compute pools
