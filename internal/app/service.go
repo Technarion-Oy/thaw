@@ -185,3 +185,16 @@ func (a *App) DropJobService(database, schema, name string) error {
 	_, err := a.execPoolSQL("DROP SERVICE " + snowflake.Qualify(database, schema, name))
 	return err
 }
+
+// ListServicesInAccount runs SHOW SERVICES EXCLUDE JOBS IN ACCOUNT for the
+// Container Services dialog's Services tab — job services are listed
+// separately by ListJobServices.
+func (a *App) ListServicesInAccount() (*snowflake.QueryResult, error) {
+	return a.execPoolSQL("SHOW SERVICES EXCLUDE JOBS IN ACCOUNT")
+}
+
+// DropService runs DROP SERVICE <fqn> for a non-job service.
+func (a *App) DropService(database, schema, name string) error {
+	_, err := a.execPoolSQL("DROP SERVICE " + snowflake.Qualify(database, schema, name))
+	return err
+}

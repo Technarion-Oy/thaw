@@ -12,6 +12,7 @@ cannot give: every list is a `SHOW … IN ACCOUNT`.
 |------|--------------|
 | `ContainerServicesModal.tsx` | The dialog: one wide modal, six tabs (Compute pools / Services / Jobs / Images / Snapshots / Gateways), one per Snowflake SPCS command group. Opened from `containerServicesStore`, mounted once in `QueryPage.tsx` (lazy, next to `TagManagementModal`). The per-tab `TABS` table supplies each tab's label, plural object name and primary-action label. |
 | `ComputePoolsTab.tsx` | **Compute pools** tab (#941): `SHOW COMPUTE POOLS` table (state dot, `active (min–max)` nodes, family, …), State facet, row ⋯ menu (Properties / Suspend·Resume / Stop all services… / Drop — confirms via `App.useApp()`), **New compute pool…** and **Instance families…**. Holds the instance-family list: `loadFamilies()` caches one promise per dialog open (cleared on failure, so the next need retries), shared by the three modals below. Stop-all workload types are checked before the confirm closes. |
+| `ServicesTab.tsx` | **Services** tab (#944): `SHOW SERVICES EXCLUDE JOBS IN ACCOUNT` table keyed by `db.schema.name` (`App.ListServicesInAccount`; job services are `JobsTab`'s). Status dot + word (`JobsTab`'s exported `jobStatusColor`, reused as-is — the two SHOW commands share the same status vocabulary), name, `database.schema`, compute pool, `current (min–max)` instances, auto-resume, query warehouse, owner, updated; Status / Compute pool / Database facets. Row ⋯ menu: Properties… (`service/ServicePropertiesModal`), Suspend/Resume (`AlterService`, same confirm copy as the object-tree context menu in `layout/Sidebar.tsx`), Redeploy… (opens the same modal with `focusSpec` so it scrolls straight to the Specification section), Drop (`DropService`, confirm-guarded). Detail panel: a status line plus `shared/LazyResultTable` for Endpoints and Instances — the same lazy sections Properties has, reused directly rather than duplicated. **New service…** through `ScopedCreate`. |
 | `JobsTab.tsx` | **Jobs** tab (#942): `SHOW JOB SERVICES IN ACCOUNT` table keyed by `db.schema.name` (status dot, pool, async, created, owner), Status facet, row ⋯ menu (Logs… → `service/ServiceLogs` in a small modal, Properties… → `service/ServicePropertiesModal`, Drop → `DropJobService`, confirm-guarded), **Run job…**. After a run it refreshes for an async job, or closes the whole dialog for a synchronous one so its query tab is visible. |
 | `RunJobModal.tsx` | **Job / Inference job** `Segmented` switch over `CreateModalShell` with live `SqlPreview` (`BuildExecuteJobServiceSql` / `BuildExecuteInferenceJobServiceSql`). Job reuses `service/ServiceSpecFields`; Inference takes spec YAML, a query (`shared/MonacoSqlField`) or stage path (`shared/StageFilePicker`), a model picker (`model/ModelSourcePicker`'s cached `loadModelsCached`), version, function. **Run** hands the SQL to `queryStore.executeInNewTab`. |
 | `ImagesTab.tsx` | **Images** tab (#943): `SHOW IMAGE REPOSITORIES IN ACCOUNT` table (copy-URL per row), detail = that repository's images (`ListImagesInRepository`, **Copy pull command** from `image_path`) plus `imagerepository/RegistryCommands`. Row menu: Properties… / Drop. **New repository…** goes through `ScopedCreate`. |
@@ -26,7 +27,7 @@ cannot give: every list is a `SHOW … IN ACCOUNT`.
 ## How a tab gets filled in
 
 Each tab is its own issue: #941 compute pools, #942 jobs, #943 images +
-gateways, #944 services, #945 snapshots. A tab that lands replaces its
+gateways, #944 services (landed), #945 snapshots. A tab that lands replaces its
 placeholder `notice` with real `columns`, `rows`, `loading`/`error`, a `filter`,
 a `detail` renderer and a row `⋯` menu, all passed to `ContainerTabLayout`. The
 shell deliberately ships no per-object modals of its own: the tabs reuse the
@@ -45,6 +46,10 @@ chrome and knows nothing about either).
   `toContainerTab` narrows the payload.
 - Greyed out while disconnected **and** while the `containerServices` feature
   flag is off (View → Enabled Features… → Developer Environments).
+- Right-clicking the **Services** group header in the object tree also opens
+  the dialog, on the Services tab (`layout/Sidebar.tsx`'s `openManageServices`,
+  via `containerServicesStore.openView("services")`) — mirrors Tags → **Manage
+  Tags…**.
 
 ## Conventions
 

@@ -323,6 +323,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/containerservices/JobsTab.tsx",
         "frontend/src/components/containerservices/RunJobModal.tsx",
         "frontend/src/components/containerservices/ScopedCreate.tsx",
+        "frontend/src/components/containerservices/ServicesTab.tsx",
         "frontend/src/components/containerservices/computePools.ts",
         "frontend/src/components/notebook/NotebookTab.tsx",
         "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
