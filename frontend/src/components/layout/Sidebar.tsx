@@ -103,6 +103,7 @@ import { useDiffStore } from "../../store/diffStore";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { useTagManagementStore } from "../../store/tagManagementStore";
+import { useContainerServicesStore } from "../../store/containerServicesStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
@@ -1030,6 +1031,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const treeScrollRef = useRef<HTMLDivElement>(null);
 
   const openTagManagementView = useTagManagementStore((s) => s.openView);
+  const openContainerServicesView = useContainerServicesStore((s) => s.openView);
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
@@ -2536,6 +2538,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const openTagManagement = () => {
     setCtxMenu(null);
     openTagManagementView();
+  };
+
+  const openManageServices = () => {
+    setCtxMenu(null);
+    openContainerServicesView("services");
   };
 
   const openTagReferences = () => {
@@ -4873,6 +4880,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Create Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
+            menuItem("Manage services…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openManageServices, undefined, !featureFlags.containerServices, "Container Services is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GATEWAY" &&
             menuItem("Create Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "CONTACT" &&

@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   App as AntApp, Modal, Spin, Button, Input, InputNumber, Space, Typography, Alert, Tooltip, Tag, Select,
   AutoComplete, Radio, message,
@@ -381,12 +381,15 @@ interface Props {
   schema: string;
   name: string;
   onClose: () => void;
+  /** Scroll straight to the Specification section once loaded (Redeploy… entry point). */
+  focusSpec?: boolean;
 }
 
-export default function ServicePropertiesModal({ db, schema, name, onClose }: Props) {
+export default function ServicePropertiesModal({ db, schema, name, onClose, focusSpec }: Props) {
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const specHeadRef = useRef<HTMLDivElement>(null);
 
   const { modal } = AntApp.useApp();
   const editorTheme = useThemeStore((s) => s.resolved) === "dark" ? "vs-dark" : "vs";
@@ -416,6 +419,13 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+  // Scroll to Specification once — not again on every reload() after an edit.
+  const specFocused = useRef(false);
+  useEffect(() => {
+    if (!focusSpec || !rows || specFocused.current) return;
+    specFocused.current = true;
+    specHeadRef.current?.scrollIntoView({ block: "start" });
+  }, [focusSpec, rows]);
 
   const objTags = useObjectTags({
     kind: "SERVICE", db, schema, name,
@@ -567,7 +577,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose }: Pr
             </tbody>
           </table>
 
-          <div style={SECTION_HEAD}>Specification</div>
+          <div ref={specHeadRef} style={SECTION_HEAD}>Specification</div>
           <Space wrap style={{ marginBottom: 8 }}>
             <Radio.Group
               size="small"

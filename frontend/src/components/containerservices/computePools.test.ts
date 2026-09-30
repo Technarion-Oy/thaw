@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { familyLabel, familyListText, rowsOf } from "./computePools";
+import { familyLabel, familyListText, rowsOf, serviceLifecycle, serviceStatusColor } from "./computePools";
 
 describe("computePools helpers", () => {
   it("keys rows by lower-cased column", () => {
@@ -16,5 +16,16 @@ describe("computePools helpers", () => {
   it("normalizes backup family lists", () => {
     expect(familyListText('["A","B"]')).toBe("A, B");
     expect(familyListText("")).toBe("");
+  });
+  it("colours transitional service states apart from failures", () => {
+    expect(serviceStatusColor("SUSPENDING")).toBe("var(--warning)");
+    expect(serviceStatusColor("deleting")).toBe("var(--warning)");
+    expect(serviceStatusColor("FAILED")).toBe("var(--danger)");
+  });
+  it("offers Resume only when suspended and nothing mid-transition", () => {
+    expect(serviceLifecycle("SUSPENDED")).toBe("RESUME");
+    expect(serviceLifecycle("RUNNING")).toBe("SUSPEND");
+    expect(serviceLifecycle("SUSPENDING")).toBeNull();
+    expect(serviceLifecycle("DELETING")).toBeNull();
   });
 });

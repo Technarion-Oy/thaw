@@ -41,3 +41,23 @@ export function stateColor(state: string | undefined): string {
     default: return "var(--danger)";
   }
 }
+
+/** Service / job status → dot colour (SHOW SERVICES and SHOW JOB SERVICES share the vocabulary). */
+export function serviceStatusColor(status: string | undefined): string {
+  switch ((status ?? "").toUpperCase()) {
+    case "DONE": return "var(--success)";
+    case "PENDING": case "RUNNING": return "var(--link)";
+    case "SUSPENDING": case "DELETING": return "var(--warning)";
+    case "SUSPENDED": case "DELETED": return "var(--text-faint)";
+    default: return "var(--danger)"; // FAILED, INTERNAL_ERROR, …
+  }
+}
+
+/** Which lifecycle action a service row offers; null while it is mid-transition. */
+export function serviceLifecycle(status: string | undefined): "RESUME" | "SUSPEND" | null {
+  switch ((status ?? "").toUpperCase()) {
+    case "SUSPENDED": return "RESUME";
+    case "SUSPENDING": case "DELETING": case "DELETED": return null;
+    default: return "SUSPEND";
+  }
+}

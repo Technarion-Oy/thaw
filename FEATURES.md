@@ -1121,6 +1121,7 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
 - **Images tab** — image repositories account-wide with a copy-URL button per row; selecting one lists its images (each with **Copy pull command**) and a **Registry commands** block: pick Snowflake CLI (default; works for SSO, key-pair, OAuth), CLI token pipe, or Docker with PAT (default for PAT connections), then copy the login and `docker tag`/`push`/`pull` lines prefilled with the real repository URL. Copied text holds only the host and user — never a password, PAT or session token. The same block appears in Image Repository Properties. Row menu: Properties…, Drop; **New repository…** asks for a database and schema first
 - **Gateways tab** — gateways account-wide (name, ingress and PrivateLink URLs, owner); row menu: Copy ingress URL, Properties…, Drop; **New gateway…**
 - Menu items are greyed out while disconnected and while the **Container Services** feature flag is off
+- The **Services** group header in the object tree (right-click **Services** under a schema) has a **Manage services…** item that opens the dialog straight on the Services tab, mirroring Tags → **Manage Tags…**
 
 #### Compute pools
 
@@ -1129,6 +1130,12 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
 - **New compute pool…** — form with live SQL preview: name, IF NOT EXISTS, FOR APPLICATION, min/max nodes, an **instance family picker** that shows vCPU / memory / GPU count and GPU memory / current node usage per family, backup families (multi-select from the same list), auto resume, initially suspended, auto suspend secs, placement group, comment and tags
 - **Properties** — `DESCRIBE COMPUTE POOL` merged with the SHOW row; inline-editable min/max nodes, instance family, backup families, auto resume, auto suspend secs, placement group and comment (`ALTER COMPUTE POOL … SET / UNSET`), a **Tags** row, the remaining columns read-only, and a lazily loaded **Nodes** table (`SHOW NODES IN COMPUTE POOL`)
 - **Instance families…** — read-only `SHOW COMPUTE POOL INSTANCE FAMILIES` reference (also reachable from the picker), fetched once per dialog open; its `current_node_usage` column shows how many nodes of each family the account uses
+
+#### Services
+
+- **Table** from `SHOW SERVICES EXCLUDE JOBS IN ACCOUNT` (job services are on the Jobs tab): status dot + word, name, `database.schema`, compute pool, instances as `current (min–max)`, auto-resume, query warehouse, owner, updated; **Status**, **Compute pool** and **Database** facets; the detail panel shows the status plus the same lazily loaded **Endpoints** and **Instances** sections as Service Properties, so a quick look does not need a second modal
+- **Row ⋯ menu** — **Properties…** (the Service Properties dialog), **Suspend / Resume** (the same confirm copy as the object-tree context menu), **Redeploy…** (opens Properties scrolled straight to the Specification section) and **Drop** (confirm-guarded)
+- **New service…** asks for a database and schema first, then opens the same Create Service dialog used from the object tree
 
 #### Jobs
 
@@ -1139,7 +1146,7 @@ Snowpark Container Services (SPCS) has an account-wide control center — **Snow
   - *Inference job* (`EXECUTE INFERENCE JOB SERVICE`): compute pool, spec YAML, input as a query (SQL editor with a table picker; rendered inside parentheses) or a stage path (with a stage browser), a model picker (`SHOW MODELS IN ACCOUNT`), version, function (quoted), name, async, replicas
   - **Run** executes in a new query tab. A synchronous job blocks that tab until it finishes — the dialog closes so its output shows and it can be cancelled; an async job returns at once and the list refreshes
 
-*In progress:* the Services, Images, Snapshots and Gateways tabs land per tab.
+*In progress:* the Snapshots tab lands per its own issue.
 
 ---
 

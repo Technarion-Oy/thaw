@@ -505,6 +505,8 @@ export function DropJobService(arg1:string,arg2:string,arg3:string):Promise<void
 
 export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DropService(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DuplicateFile(arg1:string):Promise<string>;
@@ -984,6 +986,8 @@ export function ListServiceRoleGrants(arg1:string,arg2:string,arg3:string,arg4:s
 export function ListServiceRoles(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function ListServiceVolumes(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
+export function ListServicesInAccount():Promise<snowflake.QueryResult>;
 
 export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 

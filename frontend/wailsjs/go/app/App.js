@@ -858,6 +858,10 @@ export function DropSchema(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropSchema'](arg1, arg2, arg3);
 }
 
+export function DropService(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropService'](arg1, arg2, arg3);
+}
+
 export function DropTaskTree(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropTaskTree'](arg1, arg2, arg3);
 }
@@ -1816,6 +1820,10 @@ export function ListServiceRoles(arg1, arg2, arg3) {
 
 export function ListServiceVolumes(arg1, arg2, arg3) {
   return window['go']['app']['App']['ListServiceVolumes'](arg1, arg2, arg3);
+}
+
+export function ListServicesInAccount() {
+  return window['go']['app']['App']['ListServicesInAccount']();
 }
 
 export function ListStageEntries(arg1, arg2, arg3, arg4) {
