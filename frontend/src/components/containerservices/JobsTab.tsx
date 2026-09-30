@@ -10,17 +10,7 @@ import { friendlyError } from "../common/errors";
 import ServicePropertiesModal, { ServiceLogs } from "../service/ServicePropertiesModal";
 import ContainerTabLayout from "./ContainerTabLayout";
 import RunJobModal from "./RunJobModal";
-import { rowsOf, type ResultRow } from "./computePools";
-
-/** Job status → dot colour (SHOW JOB SERVICES `status`). */
-export function jobStatusColor(status: string | undefined): string {
-  switch ((status ?? "").toUpperCase()) {
-    case "DONE": return "var(--success)";
-    case "PENDING": case "RUNNING": return "var(--link)";
-    case "SUSPENDED": case "DELETED": return "var(--text-faint)";
-    default: return "var(--danger)"; // FAILED, INTERNAL_ERROR, …
-  }
-}
+import { rowsOf, serviceStatusColor, type ResultRow } from "./computePools";
 
 const fqn = (r: ResultRow) => `${r.database_name}.${r.schema_name}.${r.name}`;
 
@@ -75,7 +65,7 @@ export default function JobsTab({ onCloseDialog }: { onCloseDialog: () => void }
       title: "Status", dataIndex: "status", width: 120,
       render: (s: string) => (
         <Space size={6}>
-          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: jobStatusColor(s) }} />
+          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: serviceStatusColor(s) }} />
           {s}
         </Space>
       ),

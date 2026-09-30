@@ -182,8 +182,7 @@ func (a *App) ListJobServices() (*snowflake.QueryResult, error) {
 
 // DropJobService runs DROP SERVICE <fqn> for a job service.
 func (a *App) DropJobService(database, schema, name string) error {
-	_, err := a.execPoolSQL("DROP SERVICE " + snowflake.Qualify(database, schema, name))
-	return err
+	return a.DropService(database, schema, name)
 }
 
 // ListServicesInAccount runs SHOW SERVICES EXCLUDE JOBS IN ACCOUNT for the
@@ -193,7 +192,7 @@ func (a *App) ListServicesInAccount() (*snowflake.QueryResult, error) {
 	return a.execPoolSQL("SHOW SERVICES EXCLUDE JOBS IN ACCOUNT")
 }
 
-// DropService runs DROP SERVICE <fqn> for a non-job service.
+// DropService runs DROP SERVICE <fqn>; job services share the same statement.
 func (a *App) DropService(database, schema, name string) error {
 	_, err := a.execPoolSQL("DROP SERVICE " + snowflake.Qualify(database, schema, name))
 	return err

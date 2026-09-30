@@ -4881,7 +4881,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
             menuItem("Create Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SERVICE" &&
-            menuItem("Manage services…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openManageServices)}
+            menuItem("Manage services…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openManageServices, undefined, !featureFlags.containerServices, "Container Services is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GATEWAY" &&
             menuItem("Create Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "CONTACT" &&

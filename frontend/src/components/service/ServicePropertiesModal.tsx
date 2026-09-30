@@ -419,8 +419,12 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
   }, [db, schema, name]);
 
   useEffect(() => { reload(); }, [reload]);
+  // Scroll to Specification once — not again on every reload() after an edit.
+  const specFocused = useRef(false);
   useEffect(() => {
-    if (focusSpec && rows) specHeadRef.current?.scrollIntoView({ block: "start" });
+    if (!focusSpec || !rows || specFocused.current) return;
+    specFocused.current = true;
+    specHeadRef.current?.scrollIntoView({ block: "start" });
   }, [focusSpec, rows]);
 
   const objTags = useObjectTags({

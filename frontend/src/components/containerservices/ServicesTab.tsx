@@ -14,8 +14,7 @@ import ServicePropertiesModal from "../service/ServicePropertiesModal";
 import ContainerTabLayout from "./ContainerTabLayout";
 import ScopedCreate from "./ScopedCreate";
 import CreateServiceModal from "../service/CreateServiceModal";
-import { jobStatusColor } from "./JobsTab";
-import { rowsOf, type ResultRow } from "./computePools";
+import { rowsOf, serviceLifecycle, serviceStatusColor, type ResultRow } from "./computePools";
 
 const { Text } = Typography;
 const fqn = (r: ResultRow) => `${r.database_name}.${r.schema_name}.${r.name}`;
@@ -25,7 +24,7 @@ function ServiceDetail({ r }: { r: ResultRow }) {
   return (
     <div>
       <Space size={6} style={{ marginBottom: 8 }}>
-        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: jobStatusColor(r.status) }} />
+        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: serviceStatusColor(r.status) }} />
         <Text strong style={{ fontSize: 12 }}>{r.status}</Text>
       </Space>
       <LazyResultTable title="Endpoints" noun="endpoint" load={() => ListServiceEndpoints(r.database_name, r.schema_name, r.name)} />
@@ -94,7 +93,7 @@ export default function ServicesTab() {
       title: "Status", dataIndex: "status", width: 110,
       render: (s: string) => (
         <Space size={6}>
-          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: jobStatusColor(s) }} />
+          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: serviceStatusColor(s) }} />
           {s}
         </Space>
       ),
@@ -110,14 +109,14 @@ export default function ServicesTab() {
     {
       key: "menu", width: 40,
       render: (_, r) => {
-        const suspended = r.status?.toUpperCase() === "SUSPENDED";
+        const action = serviceLifecycle(r.status);
         return (
           <Dropdown
             trigger={["click"]}
             menu={{
               items: [
                 { key: "props", label: "Properties…", onClick: () => setProps({ row: r, focusSpec: false }) },
-                { key: "life", label: suspended ? "Resume" : "Suspend", onClick: () => confirmLifecycle(r, suspended) },
+                { key: "life", label: action === "RESUME" ? "Resume" : "Suspend", disabled: !action, onClick: () => confirmLifecycle(r, action === "RESUME") },
                 { key: "redeploy", label: "Redeploy…", onClick: () => setProps({ row: r, focusSpec: true }) },
                 { type: "divider" },
                 { key: "drop", label: "Drop", danger: true, onClick: () => confirmDrop(r) },
