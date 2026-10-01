@@ -369,3 +369,14 @@ SELECT id FROM t
 		t.Errorf("backslash in function not preserved: %s", bs)
 	}
 }
+
+func TestBuildGetServiceLogsSql(t *testing.T) {
+	if got, want := BuildGetServiceLogsSql("D", "S", "svc", "main", 1, 50),
+		`SELECT SYSTEM$GET_SERVICE_LOGS('"D"."S"."svc"', 1, 'main', 50)`; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := BuildGetServiceLogsSql("D", "S", "o'k", "it's", 0, 0),
+		`SELECT SYSTEM$GET_SERVICE_LOGS('"D"."S"."o''k"', 0, 'it''s')`; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

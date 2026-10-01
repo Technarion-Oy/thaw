@@ -490,3 +490,19 @@ func BuildExecuteInferenceJobServiceSql(cfg InferenceJobConfig) (string, error) 
 	}
 	return sb.String() + opts + ";", nil
 }
+
+// BuildGetServiceLogsSql renders
+// SELECT SYSTEM$GET_SERVICE_LOGS('<fqn>', <instance_id>, '<container>'[, <num_lines>]).
+// instanceID is the 0-based service instance index; numLines, when > 0, caps
+// the number of trailing log lines. Snowflake returns the logs in one cell.
+func BuildGetServiceLogsSql(db, schema, name, containerName string, instanceID, numLines int) string {
+	// The fqn becomes a string-literal argument, so single-quote-escape it.
+	fqnLit := snowflake.EscapeStringLit(snowflake.Qualify(db, schema, name))
+	containerLit := snowflake.EscapeStringLit(containerName)
+	if numLines > 0 {
+		return fmt.Sprintf("SELECT SYSTEM$GET_SERVICE_LOGS('%s', %d, '%s', %d)",
+			fqnLit, instanceID, containerLit, numLines)
+	}
+	return fmt.Sprintf("SELECT SYSTEM$GET_SERVICE_LOGS('%s', %d, '%s')",
+		fqnLit, instanceID, containerLit)
+}

@@ -55,6 +55,7 @@ func buildServer(client *snowflake.Client, mode string, cfg SessionConfig, edito
 	registerTools(srv, client)
 	registerSchemaTools(srv, client)
 	registerAccountTools(srv, client)
+	registerSPCSTools(srv, client)
 	registerDiagTools(srv, diagCache)
 	registerProfileTools(srv, client)
 	registerLineageTools(srv, client)

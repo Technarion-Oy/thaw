@@ -19,6 +19,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `tools.go` | Tool input structs + `registerTools` (schema-browsing tools); `jsonResult`/`textResult` content helpers |
 | `schema_tools.go` | `registerSchemaTools` — extended schema discovery tools (`get_schema_foreign_keys`, `get_database_ddl`, `get_er_model`, `search_objects`, `get_all_data_types`, `validate_data_type`, `list_dropped_tables`, `list_dropped_schemas`, `list_dropped_databases`, `get_data_retention`); always registered in all modes |
 | `account_tools.go` | `registerAccountTools` — account & infrastructure tools (`list_roles`, `list_available_roles`, `get_role_ddl`, `list_warehouses`, `get_warehouse_ddl`, `list_integrations`, `list_secrets`, `list_file_formats`); always registered in all modes |
+| `spcs_tools.go` | `registerSPCSTools` — Snowpark Container Services tools: read-only compute pool / service / image / snapshot / gateway SHOW & DESCRIBE tools (raw `QueryResult`), `get_service_logs` (`SYSTEM$GET_SERVICE_LOGS` via `service.BuildGetServiceLogsSql`), and CREATE / EXECUTE JOB SERVICE builders delegating to `computepool`, `service`, `snapshot`, `imagerepository`, `gateway`; no mutating tool; always registered in all modes |
 | `diag_tools.go` | `registerDiagTools` — SQL diagnostics & validation tools (`validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`); type-conversion helpers for sqleditor ↔ snowflake types. `validate_sql` delegates to the shared orchestrator `sqleditor.Diagnose` via a `clientSchemaProvider` adapter (wraps a `*metadataCache` as a `sqleditor.SchemaProvider`), so validation ordering and ref-resolution semantics match the editor rather than being hand-mirrored (issue #354). Returns a `validateSqlResult` (`{markers, schemaAware, schemaAwareSkippedReason}`) so a caller can tell "phase 2 ran and found nothing" from "phase 2 was skipped" (issue #355) |
 | `metadata_cache.go` | `metadataCache` — short-lived per-session catalog cache (databases / schemas / objects / column types / foreign keys) keyed by qualified name with a `metadataCacheTTL` (5 s) window and `singleflight` in-flight dedup, in front of the `metadataSource` interface (satisfied by `*snowflake.Client`). Built once per session in `buildServer` and passed to every tool that runs the diagnostics pipeline (`validate_sql`, `suggest_join_conditions`, `open_sql_tab`), so metadata fetched by one call is reused by the next — including a `validate_sql` → `open_sql_tab` handoff (issue #355). `SessionContext` is intentionally never cached; only successful fetches are stored |
 | `profile_tools.go` | `registerProfileTools` — query profiling tools (`explain_query`, `get_explain_diagnostics`); wraps `queryprofile.RunExplain` and `queryprofile.GetExplainDiagnostics`; always registered in all modes |
@@ -46,6 +47,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `er_tools_test.go` | Unit tests for ER designer tools (`mergeAITables` / `mergeAITablesIntoState` merge logic, `describeERDelta` change-delta summaries, emit-gating for `open_er_designer`); `ERDesignerStateStore` unit tests (set/get, clear, concurrent access); registration gating for `get_er_designer_state` and `modify_er_designer`; tool behavior tests (designer open/closed, event emission, input validation, delta result + immediate cache consistency) |
 | `pipeline_tools_test.go` | Unit tests for pipeline tools (registration in all modes, mode-gating for `preview_stage_file`, emit-gating for `open_task_graph`, nil client, input validation) |
 | `account_tools_test.go` | Unit tests for account tools (registration in all modes, empty kind/name/schema validation) |
+| `spcs_tools_test.go` | Unit tests for SPCS tools (registration in all modes, nil client, empty db/schema/name/container validation, builder output equals the domain builders') |
 | `schema_tools_test.go` | Unit tests for schema tools (registration, validate_data_type valid/invalid, get_data_retention input validation, search_objects empty pattern, get_all_data_types, mode coverage) |
 | `profile_tools_test.go` | Unit tests for profiling tools (registration in all modes, nil client, empty SQL validation) |
 | `lineage_tools_test.go` | Unit tests for lineage tools (registration in all modes, nil client, missing fields, invalid kind validation) |
@@ -128,7 +130,7 @@ Metadata needs (listing databases, describing tables, etc.) are served by the de
 
 ### Tools
 
-The server exposes 62 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+9), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), SQL execution tools (+6–7 in readonly/explain_only modes), and `deploy_streamlit` (+1, readonly mode with a workspace root only):
+The server exposes 83 tools in the baseline metadata mode (no workspace, no emit, no editorCtx, no fnStore, no nb). Additional tools are registered when optional dependencies are provided: workspace tools (+9), emit-gated tools (+4), editor context tools (+2–3), notebook backend tools (+2), SQL execution tools (+6–7 in readonly/explain_only modes), and `deploy_streamlit` (+1, readonly mode with a workspace root only):
 
 **Schema-browsing tools** (always registered, `tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`.
 
@@ -161,6 +163,24 @@ The server exposes 62 tools in the baseline metadata mode (no workspace, no emit
 | `list_integrations` | List integrations of a given kind (API, NOTIFICATION, SECURITY, STORAGE, CATALOG, EXTERNAL ACCESS) |
 | `list_secrets` | List all secrets visible in the account (name, database, schema) |
 | `list_file_formats` | List file formats defined in a schema |
+
+**Snowpark Container Services tools** (always registered, `spcs_tools.go`):
+
+| Tool | Description |
+|---|---|
+| `list_compute_pools` | `SHOW COMPUTE POOLS` (every column) |
+| `describe_compute_pool` | `DESCRIBE COMPUTE POOL` |
+| `list_compute_pool_nodes` | `SHOW NODES IN COMPUTE POOL` |
+| `list_compute_pool_instance_families` | `SHOW COMPUTE POOL INSTANCE FAMILIES` |
+| `describe_service` | `DESCRIBE SERVICE` (status + spec) |
+| `list_service_endpoints` / `list_service_containers` / `list_service_instances` / `list_service_volumes` / `list_service_roles` | `SHOW ENDPOINTS` / `SERVICE CONTAINERS` / `SERVICE INSTANCES` / `SERVICE VOLUMES` / `ROLES IN SERVICE` |
+| `get_service_logs` | `SYSTEM$GET_SERVICE_LOGS` for one container + instance, optional trailing-line cap |
+| `list_images_in_repository` | `SHOW IMAGES IN IMAGE REPOSITORY` |
+| `list_snapshots` / `describe_snapshot` | `SHOW SNAPSHOTS IN ACCOUNT` / `DESCRIBE SNAPSHOT` |
+| `describe_gateway` | `DESCRIBE GATEWAY` |
+| `build_create_compute_pool_sql` / `build_create_service_sql` / `build_execute_job_service_sql` / `build_create_snapshot_sql` / `build_create_image_repository_sql` / `build_create_gateway_sql` | Pure builders delegating to the same domain builders as the Container Services dialog previews |
+
+SHOW/DESCRIBE tools return the raw `QueryResult` so every column the account reports comes through. There is deliberately **no** suspend / resume / execute-job tool — SPCS lifecycle verbs terminate or start containers; the AI proposes SQL through the builders and the user runs it via `open_sql_tab`.
 
 **SQL diagnostics tools** (always registered, `diag_tools.go`): `validate_sql`, `suggest_join_conditions`, `format_sql`, `get_snowflake_keywords`.
 
