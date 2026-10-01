@@ -4,7 +4,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 
 	"thaw/internal/apperrors"
 	"thaw/internal/service"
@@ -149,20 +148,7 @@ func (a *App) GetServiceLogs(database, schema, name, containerName string, insta
 	if client == nil {
 		return "", apperrors.ErrNotConnected
 	}
-	fqn := fmt.Sprintf("%s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	// fqn becomes a string-literal argument, so single-quote-escape it.
-	fqnLit := strings.ReplaceAll(fqn, "'", "''")
-	containerLit := snowflake.EscapeStringLit(containerName)
-
-	var sql string
-	if numLines > 0 {
-		sql = fmt.Sprintf("SELECT SYSTEM$GET_SERVICE_LOGS('%s', %d, '%s', %d)",
-			fqnLit, instanceID, containerLit, numLines)
-	} else {
-		sql = fmt.Sprintf("SELECT SYSTEM$GET_SERVICE_LOGS('%s', %d, '%s')",
-			fqnLit, instanceID, containerLit)
-	}
+	sql := service.BuildGetServiceLogsSql(database, schema, name, containerName, instanceID, numLines)
 
 	res, err := client.Execute(a.fctx(FeatureObjectEditor), sql)
 	if err != nil {
