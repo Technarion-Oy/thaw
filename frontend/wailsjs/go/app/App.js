@@ -186,6 +186,10 @@ export function AlterSessionPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterSessionPolicy'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterSnapshot(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterSnapshot'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterStage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterStage'](arg1, arg2, arg3, arg4);
 }
@@ -476,6 +480,10 @@ export function BuildCreateServiceSql(arg1, arg2, arg3) {
 
 export function BuildCreateSessionPolicySql(arg1, arg2, arg3) {
   return window['go']['app']['App']['BuildCreateSessionPolicySql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateSnapshotSql(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BuildCreateSnapshotSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateStageSql(arg1) {
@@ -806,6 +814,10 @@ export function DescribeSessionPolicy(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeSessionPolicy'](arg1, arg2, arg3);
 }
 
+export function DescribeSnapshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DescribeSnapshot'](arg1, arg2, arg3);
+}
+
 export function DetectStreamlitMainFile(arg1) {
   return window['go']['app']['App']['DetectStreamlitMainFile'](arg1);
 }
@@ -860,6 +872,10 @@ export function DropSchema(arg1, arg2, arg3) {
 
 export function DropService(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropService'](arg1, arg2, arg3);
+}
+
+export function DropSnapshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropSnapshot'](arg1, arg2, arg3);
 }
 
 export function DropTaskTree(arg1, arg2, arg3) {
@@ -1826,6 +1842,10 @@ export function ListServicesInAccount() {
   return window['go']['app']['App']['ListServicesInAccount']();
 }
 
+export function ListSnapshots() {
+  return window['go']['app']['App']['ListSnapshots']();
+}
+
 export function ListStageEntries(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ListStageEntries'](arg1, arg2, arg3, arg4);
 }
@@ -2324,6 +2344,10 @@ export function TaskHasChildren(arg1, arg2, arg3) {
 
 export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['TestAIModel'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function UndropSnapshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UndropSnapshot'](arg1, arg2, arg3);
 }
 
 export function UninstallEnvPackage(arg1) {

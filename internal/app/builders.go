@@ -44,6 +44,7 @@ import (
 	"thaw/internal/sequence"
 	"thaw/internal/service"
 	"thaw/internal/sessionpolicy"
+	"thaw/internal/snapshot"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/stage"
@@ -292,6 +293,12 @@ func (a *App) BuildCreateModelSql(database, schema string, cfg model.ModelConfig
 // BuildCreateDatasetSql returns the SQL for creating a Snowflake DATASET.
 func (a *App) BuildCreateDatasetSql(database, schema string, cfg dataset.DatasetConfig) (string, error) {
 	return dataset.BuildCreateDatasetSql(database, schema, cfg)
+}
+
+// BuildCreateSnapshotSql returns the SQL for creating a Snowpark Container
+// Services volume SNAPSHOT.
+func (a *App) BuildCreateSnapshotSql(database, schema string, cfg snapshot.SnapshotConfig) (string, error) {
+	return snapshot.BuildCreateSnapshotSql(database, schema, cfg)
 }
 
 // BuildCreateGatewaySql returns the SQL for creating a Snowflake GATEWAY.

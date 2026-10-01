@@ -9,7 +9,7 @@ import {
 } from "antd";
 import {
   DeploymentUnitOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, PlusOutlined,
-  CloudUploadOutlined,
+  CloudUploadOutlined, CameraOutlined,
 } from "@ant-design/icons";
 import Editor from "@monaco-editor/react";
 import {
@@ -20,6 +20,7 @@ import {
 import TagsRow from "../shared/TagsRow";
 import LazyResultTable from "../shared/LazyResultTable";
 import StageFilePicker from "../shared/StageFilePicker";
+import CreateSnapshotModal from "../snapshot/CreateSnapshotModal";
 import { useObjectTags } from "../shared/useObjectTags";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
@@ -389,6 +390,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [snapshotting, setSnapshotting] = useState(false);
   const specHeadRef = useRef<HTMLDivElement>(null);
 
   const { modal } = AntApp.useApp();
@@ -645,6 +647,13 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
           <LazyResultTable title="Instances" noun="instance" load={() => ListServiceInstances(db, schema, name)} />
           <LazyResultTable title="Containers" noun="container" load={() => GetServiceContainers(db, schema, name)} />
           <LazyResultTable title="Volumes" noun="volume" load={() => ListServiceVolumes(db, schema, name)} />
+          <Button size="small" icon={<CameraOutlined />} style={{ marginTop: 6 }} onClick={() => setSnapshotting(true)}>
+            Snapshot a block volume…
+          </Button>
+          {snapshotting && (
+            <CreateSnapshotModal db={db} schema={schema} service={{ db, schema, name }}
+              onClose={() => setSnapshotting(false)} onSuccess={() => message.success("Snapshot created")} />
+          )}
 
           <div style={SECTION_HEAD}>Service roles</div>
           {rolesError && (

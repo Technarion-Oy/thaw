@@ -79,6 +79,8 @@ import {
   BranchesOutlined,
   CloseOutlined,
   PartitionOutlined,
+  CameraOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
 import {
   objectIcon,
@@ -195,6 +197,9 @@ import CreateNetworkRuleModal from "../networkrule/CreateNetworkRuleModal";
 import NetworkRulePropertiesModal from "../networkrule/NetworkRulePropertiesModal";
 import CreateImageRepositoryModal from "../imagerepository/CreateImageRepositoryModal";
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";
+import CreateSnapshotModal from "../snapshot/CreateSnapshotModal";
+import RestoreSnapshotModal from "../snapshot/RestoreSnapshotModal";
+import SnapshotPropertiesModal from "../snapshot/SnapshotPropertiesModal";
 import CreateModelModal from "../model/CreateModelModal";
 import ModelPropertiesModal from "../model/ModelPropertiesModal";
 import CreateModelMonitorModal from "../modelmonitor/CreateModelMonitorModal";
@@ -903,6 +908,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [networkRulePropsModal, setNetworkRulePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createImageRepositoryModal, setCreateImageRepositoryModal] = useState<{ db: string; schema: string } | null>(null);
   const [imageRepositoryPropsModal, setImageRepositoryPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [snapshotModal, setSnapshotModal] = useState<{ mode: "create" | "restore"; db: string; schema: string } | null>(null);
+  const [snapshotPropsModal, setSnapshotPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createModelModal, setCreateModelModal] = useState<{ db: string; schema: string } | null>(null);
   const [modelPropsModal, setModelPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createModelMonitorModal, setCreateModelMonitorModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2844,6 +2851,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
 
+  const openSnapshotModal = (mode: "create" | "restore") => () => {
+    if (!ctxMenu) return;
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setSnapshotModal({ mode, db, schema });
+  };
+
   const openCreateGateway = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
@@ -3803,6 +3817,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       case "SEMANTIC VIEW":            return setSemanticViewPropsModal(p);
       case "SERVICE":                  return setServicePropsModal(p);
       case "GATEWAY":                  return setGatewayPropsModal(p);
+      case "SNAPSHOT":                 return setSnapshotPropsModal(p);
       case "CONTACT":                  return setContactPropsModal(p);
       case "STREAMLIT":                return setStreamlitPropsModal(p);
       // The callable kinds need the argument signature to resolve the overload
@@ -4770,6 +4785,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Image Repository…", <ContainerOutlined style={{ fontSize: 12 }} />, openCreateImageRepository)}
                   {menuItem("Service…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openCreateService)}
                   {menuItem("Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
+                  {menuItem("Snapshot…", <CameraOutlined style={{ fontSize: 12 }} />, openSnapshotModal("create"))}
                   {menuItem("Streamlit…", <AppstoreOutlined style={{ fontSize: 12 }} />, openCreateStreamlit)}
                   {menuItem("Deploy local Streamlit…", <CloudUploadOutlined style={{ fontSize: 12 }} />, openDeployStreamlit)}
                   {menuItem("Notebook…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateNotebook, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
@@ -4884,6 +4900,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Manage services…", <DeploymentUnitOutlined style={{ fontSize: 12 }} />, openManageServices, undefined, !featureFlags.containerServices, "Container Services is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GATEWAY" &&
             menuItem("Create Gateway…", <NodeIndexOutlined style={{ fontSize: 12 }} />, openCreateGateway)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SNAPSHOT" &&
+            menuItem("Create Snapshot…", <CameraOutlined style={{ fontSize: 12 }} />, openSnapshotModal("create"))}
+          {/* No SHOW SNAPSHOTS HISTORY exists to feed Show Dropped Objects, so restore by name. */}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SNAPSHOT" &&
+            menuItem("Restore dropped snapshot…", <UndoOutlined style={{ fontSize: 12 }} />, openSnapshotModal("restore"))}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "CONTACT" &&
             menuItem("Create Contact…", <ContactsOutlined style={{ fontSize: 12 }} />, openCreateContact)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STREAMLIT" &&
@@ -5174,7 +5195,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Dependencies & References…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "TABLE" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "EXTERNAL FUNCTION" && ctxMenu.objKind !== "DATA METRIC FUNCTION" && ctxMenu.objKind !== "PROCEDURE" && ctxMenu.objKind !== "EXTERNAL TABLE" && ctxMenu.objKind !== "ALERT" && ctxMenu.objKind !== "NETWORK RULE" && ctxMenu.objKind !== "IMAGE REPOSITORY" && ctxMenu.objKind !== "SERVICE" && ctxMenu.objKind !== "GATEWAY" && ctxMenu.objKind !== "SNAPSHOT" && ctxMenu.objKind !== "PACKAGES POLICY" && ctxMenu.objKind !== "CORTEX SEARCH SERVICE" && ctxMenu.objKind !== "AGENT" && ctxMenu.objKind !== "EXTERNAL AGENT" && ctxMenu.objKind !== "MCP SERVER" && ctxMenu.objKind !== "MODEL MONITOR" && ctxMenu.objKind !== "DATASET" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
@@ -5963,6 +5984,36 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createImageRepositoryModal.schema}
           onClose={() => setCreateImageRepositoryModal(null)}
           onSuccess={() => refreshDatabaseByName(createImageRepositoryModal.db, { schema: createImageRepositoryModal.schema, kind: "IMAGE REPOSITORY" })}
+        />
+      )}
+
+      {snapshotModal?.mode === "create" && (
+        <CreateSnapshotModal
+          db={snapshotModal.db}
+          schema={snapshotModal.schema}
+          onClose={() => setSnapshotModal(null)}
+          onSuccess={() => refreshDatabaseByName(snapshotModal.db, { schema: snapshotModal.schema, kind: "SNAPSHOT" })}
+        />
+      )}
+
+      {snapshotModal?.mode === "restore" && (
+        <RestoreSnapshotModal
+          db={snapshotModal.db}
+          schema={snapshotModal.schema}
+          onClose={() => setSnapshotModal(null)}
+          onSuccess={(n) => {
+            message.success(`Restored snapshot "${n}"`);
+            refreshDatabaseByName(snapshotModal.db, { schema: snapshotModal.schema, kind: "SNAPSHOT" });
+          }}
+        />
+      )}
+
+      {snapshotPropsModal && (
+        <SnapshotPropertiesModal
+          db={snapshotPropsModal.db}
+          schema={snapshotPropsModal.schema}
+          name={snapshotPropsModal.name}
+          onClose={() => setSnapshotPropsModal(null)}
         />
       )}
 

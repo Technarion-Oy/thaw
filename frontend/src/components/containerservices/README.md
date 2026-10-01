@@ -10,12 +10,13 @@ cannot give: every list is a `SHOW … IN ACCOUNT`.
 
 | File | What it does |
 |------|--------------|
-| `ContainerServicesModal.tsx` | The dialog: one wide modal, six tabs (Compute pools / Services / Jobs / Images / Snapshots / Gateways), one per Snowflake SPCS command group. Opened from `containerServicesStore`, mounted once in `QueryPage.tsx` (lazy, next to `TagManagementModal`). The per-tab `TABS` table supplies each tab's label, plural object name and primary-action label. |
+| `ContainerServicesModal.tsx` | The dialog: one wide modal, six tabs (Compute pools / Services / Jobs / Images / Snapshots / Gateways), one per Snowflake SPCS command group. Opened from `containerServicesStore`, mounted once in `QueryPage.tsx` (lazy, next to `TagManagementModal`). `LABELS` holds each tab's title; each tab component owns its plural object name and primary action. |
 | `ComputePoolsTab.tsx` | **Compute pools** tab (#941): `SHOW COMPUTE POOLS` table (state dot, `active (min–max)` nodes, family, …), State facet, row ⋯ menu (Properties / Suspend·Resume / Stop all services… / Drop — confirms via `App.useApp()`), **New compute pool…** and **Instance families…**. Holds the instance-family list: `loadFamilies()` caches one promise per dialog open (cleared on failure, so the next need retries), shared by the three modals below. Stop-all workload types are checked before the confirm closes. |
 | `ServicesTab.tsx` | **Services** tab (#944): `SHOW SERVICES EXCLUDE JOBS IN ACCOUNT` table keyed by `db.schema.name` (`App.ListServicesInAccount`; job services are `JobsTab`'s). Status dot + word (`computePools.serviceStatusColor`, shared with `JobsTab` — the two SHOW commands share the same status vocabulary; `SUSPENDING`/`DELETING` show amber, not failure red), name, `database.schema`, compute pool, `current (min–max)` instances, auto-resume, query warehouse, owner, updated; Status / Compute pool / Database facets. Row ⋯ menu: Properties… (`service/ServicePropertiesModal`), Suspend/Resume (`AlterService`; `computePools.serviceLifecycle` picks the label and disables it while `SUSPENDING`/`DELETING`; same confirm copy as the object-tree context menu in `layout/Sidebar.tsx`), Redeploy… (opens the same modal with `focusSpec` so it scrolls straight to the Specification section, once — not again after each in-modal reload), Drop (`DropService`, confirm-guarded). Detail panel: a status line plus `shared/LazyResultTable` for Endpoints and Instances — the same lazy sections Properties has, reused directly rather than duplicated. **New service…** through `ScopedCreate`. |
 | `JobsTab.tsx` | **Jobs** tab (#942): `SHOW JOB SERVICES IN ACCOUNT` table keyed by `db.schema.name` (status dot, pool, async, created, owner), Status facet, row ⋯ menu (Logs… → `service/ServiceLogs` in a small modal, Properties… → `service/ServicePropertiesModal`, Drop → `DropJobService`, confirm-guarded), **Run job…**. After a run it refreshes for an async job, or closes the whole dialog for a synchronous one so its query tab is visible. |
 | `RunJobModal.tsx` | **Job / Inference job** `Segmented` switch over `CreateModalShell` with live `SqlPreview` (`BuildExecuteJobServiceSql` / `BuildExecuteInferenceJobServiceSql`). Job reuses `service/ServiceSpecFields`; Inference takes spec YAML, a query (`shared/MonacoSqlField`) or stage path (`shared/StageFilePicker`), a model picker (`model/ModelSourcePicker`'s cached `loadModelsCached`), version, function. **Run** hands the SQL to `queryStore.executeInNewTab`. |
 | `ImagesTab.tsx` | **Images** tab (#943): `SHOW IMAGE REPOSITORIES IN ACCOUNT` table (copy-URL per row), detail = that repository's images (`ListImagesInRepository`, **Copy pull command** from `image_path`) plus `imagerepository/RegistryCommands`. Row menu: Properties… / Drop. **New repository…** goes through `ScopedCreate`. |
+| `SnapshotsTab.tsx` | **Snapshots** tab (#945): `SHOW SNAPSHOTS IN ACCOUNT` table keyed by `db.schema.name` (name, database.schema, service, volume, instance, size, state, comment — service/instance read under their likely column aliases, unverified live); Service / Database facets plus a **Restore dropped…** button (`ScopedCreate` → `snapshot/RestoreSnapshotModal`). Row menu: Properties… (`snapshot/SnapshotPropertiesModal`), Drop (`DropSnapshot`; the success toast has an **Undo** → `UndropSnapshot`). **New snapshot…** through `ScopedCreate` → `snapshot/CreateSnapshotModal`. |
 | `GatewaysTab.tsx` | **Gateways** tab (#943): `SHOW GATEWAYS IN ACCOUNT` table; row menu Copy ingress URL (falls back to `DescribeGateway` when SHOW omits it) / Properties… / Drop; **New gateway…** through `ScopedCreate`. |
 | `ScopedCreate.tsx` | Account-scope entry for schema-scoped create modals: database + schema picker (session defaults; schemas from `ListUserSchemas`, so no `INFORMATION_SCHEMA`), then renders the real modal. |
 | `CreateComputePoolModal.tsx` | `CREATE COMPUTE POOL` form on `CreateModalShell` with live `SqlPreview` (`BuildCreateComputePoolSql`); instance family picker labelled with vCPU / memory / GPU / usage, backup families multi-select, `shared/TagInput`. |
@@ -26,14 +27,15 @@ cannot give: every list is a `SHOW … IN ACCOUNT`.
 
 ## How a tab gets filled in
 
-Each tab is its own issue: #941 compute pools, #942 jobs, #943 images +
-gateways, #944 services (landed), #945 snapshots. A tab that lands replaces its
-placeholder `notice` with real `columns`, `rows`, `loading`/`error`, a `filter`,
-a `detail` renderer and a row `⋯` menu, all passed to `ContainerTabLayout`. The
+Each tab was its own issue: #941 compute pools, #942 jobs, #943 images +
+gateways, #944 services, #945 snapshots — all landed. A tab passes its
+`columns`, `rows`, `loading`/`error`, a `filter`, an optional `detail` renderer
+and a row `⋯` menu to `ContainerTabLayout`. The
 shell deliberately ships no per-object modals of its own: the tabs reuse the
 existing `CreateServiceModal` / `ServicePropertiesModal` /
 `CreateImageRepositoryModal` / `ImageRepositoryPropertiesModal` /
-`CreateGatewayModal` / `GatewayPropertiesModal` rather than duplicating them.
+`CreateGatewayModal` / `GatewayPropertiesModal` / `CreateSnapshotModal` /
+`SnapshotPropertiesModal` rather than duplicating them.
 Those modals take `database`/`schema` props, so a tab opening one from account
 scope has to pick a database and schema first (`CreateModalShell` itself is pure
 chrome and knows nothing about either).
