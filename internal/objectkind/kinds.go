@@ -114,10 +114,11 @@ var Kinds = []Kind{
 	{Name: "PACKAGES POLICY", Plural: "PACKAGES POLICIES", Label: "Packages Policies"},
 	{Name: "NETWORK RULE", Plural: "NETWORK RULES", Label: "Network Rules", GetDDLType: "NETWORK_RULE"},
 	// Snowpark Container Services objects: GET_DDL has no 'IMAGE REPOSITORY',
-	// 'SERVICE' or 'GATEWAY' object type.
+	// 'SERVICE', 'GATEWAY' or 'SNAPSHOT' object type.
 	{Name: "IMAGE REPOSITORY", Plural: "IMAGE REPOSITORIES", Label: "Image Repositories"},
 	{Name: "SERVICE", Plural: "SERVICES", Label: "Services"},
 	{Name: "GATEWAY", Plural: "GATEWAYS", Label: "Gateways"},
+	{Name: "SNAPSHOT", Plural: "SNAPSHOTS", Label: "Snapshots"},
 	{Name: "CONTACT", Plural: "CONTACTS", Label: "Contacts", GetDDLType: "CONTACT"},
 	{Name: "STREAMLIT", Plural: "STREAMLITS", Label: "Streamlits", GetDDLType: "STREAMLIT"},
 	{Name: "FILE FORMAT", Plural: "FILE FORMATS", Label: "File Formats", GetDDLType: "FILE FORMAT"},

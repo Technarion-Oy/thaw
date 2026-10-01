@@ -51,6 +51,7 @@ export const OBJECT_KINDS: readonly SnowflakeObjectKind[] = [
   { name: "IMAGE REPOSITORY", label: "Image Repositories", basic: false, ddl: false },
   { name: "SERVICE", label: "Services", basic: false, ddl: false },
   { name: "GATEWAY", label: "Gateways", basic: false, ddl: false },
+  { name: "SNAPSHOT", label: "Snapshots", basic: false, ddl: false },
   { name: "CONTACT", label: "Contacts", basic: false, ddl: true },
   { name: "STREAMLIT", label: "Streamlits", basic: false, ddl: true },
   { name: "FILE FORMAT", label: "File Formats", basic: false, ddl: true },

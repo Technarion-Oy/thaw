@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: Snowpark & Developer Workflows
 
-import { Alert, Button, Modal, Space, Tabs } from "antd";
+import { Button, Modal, Space, Tabs } from "antd";
 import { CloudServerOutlined } from "@ant-design/icons";
-import ContainerTabLayout from "./ContainerTabLayout";
 import ComputePoolsTab from "./ComputePoolsTab";
 import ServicesTab from "./ServicesTab";
 import JobsTab from "./JobsTab";
 import ImagesTab from "./ImagesTab";
 import GatewaysTab from "./GatewaysTab";
+import SnapshotsTab from "./SnapshotsTab";
 import {
   CONTAINER_TABS,
   useContainerServicesStore,
@@ -19,24 +19,19 @@ interface Props {
   onClose: () => void;
 }
 
-// Per-tab metadata. `objectLabel` and `newLabel` also drive the shared layout's
-// empty state and primary action, so a tab landing later only has to add its
-// columns, its loader and its row menu. `issue` is the child issue that fills it
-// in; when every tab has landed these placeholders (and the field) go away.
-const TABS: Record<ContainerTab, { label: string; objectLabel: string; newLabel: string; issue: number }> = {
-  pools:     { label: "Compute pools",      objectLabel: "compute pools",      newLabel: "New pool…",     issue: 941 }, // landed: ComputePoolsTab
-  services:  { label: "Services",           objectLabel: "services",           newLabel: "New service…",  issue: 944 }, // landed: ServicesTab
-  jobs:      { label: "Jobs",               objectLabel: "job services",       newLabel: "Run job…",      issue: 942 }, // landed: JobsTab
-  images:    { label: "Images",             objectLabel: "image repositories", newLabel: "New repo…",     issue: 943 }, // landed: ImagesTab
-  snapshots: { label: "Snapshots",          objectLabel: "volume snapshots",   newLabel: "New snapshot…", issue: 945 },
-  gateways:  { label: "Gateways",           objectLabel: "gateways",           newLabel: "New gateway…",  issue: 943 }, // landed: GatewaysTab
+const LABELS: Record<ContainerTab, string> = {
+  pools: "Compute pools",
+  services: "Services",
+  jobs: "Jobs",
+  images: "Images",
+  snapshots: "Snapshots",
+  gateways: "Gateways",
 };
 
 /**
  * Account-wide Snowpark Container Services control center (issue #939): one wide
  * modal, one tab per Snowflake SPCS command group, all six sharing
- * `ContainerTabLayout`. This is the shell — each tab's data, columns and
- * lifecycle actions arrive with its own child issue.
+ * `ContainerTabLayout`.
  */
 export default function ContainerServicesModal({ onClose }: Props) {
   const tab = useContainerServicesStore((s) => s.tab);
@@ -59,28 +54,18 @@ export default function ContainerServicesModal({ onClose }: Props) {
       <Tabs
         activeKey={tab}
         onChange={(key) => setTab(key as ContainerTab)}
-        items={CONTAINER_TABS.map((key) => {
-          const t = TABS[key];
-          return {
-            key,
-            label: t.label,
-            children: key === "pools" ? <ComputePoolsTab /> : key === "services" ? <ServicesTab /> : key === "jobs" ? <JobsTab onCloseDialog={onClose} /> : key === "images" ? <ImagesTab /> : key === "gateways" ? <GatewaysTab /> : (
-              <ContainerTabLayout
-                objectLabel={t.objectLabel}
-                rowKey="name"
-                columns={[]}
-                rows={[] as { name: string }[]}
-                newLabel={t.newLabel}
-                notice={
-                  <Alert
-                    type="info" showIcon banner style={{ marginBottom: 10, fontSize: 12 }}
-                    message={`${t.label} are not wired up yet — this tab lands with issue #${t.issue}.`}
-                  />
-                }
-              />
-            ),
-          };
-        })}
+        items={CONTAINER_TABS.map((key) => ({
+          key,
+          label: LABELS[key],
+          children: {
+            pools: <ComputePoolsTab />,
+            services: <ServicesTab />,
+            jobs: <JobsTab onCloseDialog={onClose} />,
+            images: <ImagesTab />,
+            snapshots: <SnapshotsTab />,
+            gateways: <GatewaysTab />,
+          }[key],
+        }))}
       />
     </Modal>
   );

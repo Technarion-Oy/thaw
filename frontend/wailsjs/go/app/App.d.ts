@@ -46,6 +46,7 @@ import {secret} from '../models';
 import {sequence} from '../models';
 import {service} from '../models';
 import {sessionpolicy} from '../models';
+import {snapshot} from '../models';
 import {storagelifecyclepolicy} from '../models';
 import {stream} from '../models';
 import {streamlit} from '../models';
@@ -168,6 +169,8 @@ export function AlterSequence(arg1:string,arg2:string,arg3:string,arg4:string):P
 export function AlterService(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterSessionPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterSnapshot(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterStage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
@@ -314,6 +317,8 @@ export function BuildCreateSequenceSql(arg1:string,arg2:string,arg3:sequence.Seq
 export function BuildCreateServiceSql(arg1:string,arg2:string,arg3:service.ServiceConfig):Promise<string>;
 
 export function BuildCreateSessionPolicySql(arg1:string,arg2:string,arg3:sessionpolicy.SessionPolicyConfig):Promise<string>;
+
+export function BuildCreateSnapshotSql(arg1:string,arg2:string,arg3:snapshot.SnapshotConfig):Promise<string>;
 
 export function BuildCreateStageSql(arg1:stage.StageConfig):Promise<string>;
 
@@ -479,6 +484,8 @@ export function DescribeSemanticView(arg1:string,arg2:string,arg3:string):Promis
 
 export function DescribeSessionPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
+export function DescribeSnapshot(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
+
 export function DetectStreamlitMainFile(arg1:string):Promise<streamlit.MainFileResult>;
 
 export function Disconnect():Promise<void>;
@@ -506,6 +513,8 @@ export function DropJobService(arg1:string,arg2:string,arg3:string):Promise<void
 export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropService(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DropSnapshot(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -989,6 +998,8 @@ export function ListServiceVolumes(arg1:string,arg2:string,arg3:string):Promise<
 
 export function ListServicesInAccount():Promise<snowflake.QueryResult>;
 
+export function ListSnapshots():Promise<snowflake.QueryResult>;
+
 export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
 export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
@@ -1238,6 +1249,8 @@ export function SuspendTaskList(arg1:string,arg2:string,arg3:Array<string>):Prom
 export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
+
+export function UndropSnapshot(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
 
