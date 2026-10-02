@@ -1,0 +1,642 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Snowpark Container Services service / job specification",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "containers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Lowercase letters, digits, hyphens; starts with a letter, ends alphanumeric, \u2264 63 chars.",
+                "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+              },
+              "image": {
+                "type": "string",
+                "description": "Image path, e.g. /db/schema/repo/image:tag"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              },
+              "resources": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "requests": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cpu": {
+                        "type": [
+                          "number",
+                          "string"
+                        ],
+                        "description": "vCPU: 0.5 or 500m"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "description": "e.g. 6Gi, 512Mi"
+                      },
+                      "nvidia.com/gpu": {
+                        "type": "integer",
+                        "description": "GPUs"
+                      }
+                    }
+                  },
+                  "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cpu": {
+                        "type": [
+                          "number",
+                          "string"
+                        ],
+                        "description": "vCPU: 0.5 or 500m"
+                      },
+                      "memory": {
+                        "type": "string",
+                        "description": "e.g. 6Gi, 512Mi"
+                      },
+                      "nvidia.com/gpu": {
+                        "type": "integer",
+                        "description": "GPUs"
+                      }
+                    }
+                  }
+                }
+              },
+              "readinessProbe": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "port": {
+                    "type": "integer"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "periodSeconds": {
+                    "type": "integer",
+                    "description": "Default 5 (readiness) / 10 (liveness)"
+                  },
+                  "failureThreshold": {
+                    "type": "integer",
+                    "description": "Default 3"
+                  }
+                }
+              },
+              "livenessProbe": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "port": {
+                    "type": "integer"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "periodSeconds": {
+                    "type": "integer",
+                    "description": "Default 5 (readiness) / 10 (liveness)"
+                  },
+                  "failureThreshold": {
+                    "type": "integer",
+                    "description": "Default 3"
+                  }
+                }
+              },
+              "volumeMounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "A spec.volumes name"
+                    },
+                    "mountPath": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "mountPath"
+                  ]
+                }
+              },
+              "mountSessionToken": {
+                "type": "boolean",
+                "default": true
+              },
+              "sessionTokenConfig": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "description": "e.g. \"0644\""
+                  },
+                  "mountConnectionConfig": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "secrets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "snowflakeSecret": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "description": "Secret object name"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "objectName": {
+                              "type": "string"
+                            },
+                            "objectReference": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "envVarName": {
+                      "type": "string"
+                    },
+                    "secretKeyRef": {
+                      "enum": [
+                        "username",
+                        "password",
+                        "secret_string"
+                      ]
+                    },
+                    "directoryPath": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "name",
+              "image"
+            ]
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Lowercase letters, digits, hyphens; starts with a letter, ends alphanumeric, \u2264 63 chars.",
+                "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "portRange": {
+                "type": "string",
+                "description": "a-b (TCP, non-public only)",
+                "pattern": "^\\d+-\\d+$"
+              },
+              "public": {
+                "type": "boolean",
+                "default": false
+              },
+              "protocol": {
+                "enum": [
+                  "HTTP",
+                  "TCP"
+                ],
+                "default": "HTTP"
+              },
+              "corsSettings": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "Access-Control-Allow-Origin": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "Access-Control-Allow-Methods": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "Access-Control-Allow-Headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "Access-Control-Expose-Headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "Access-Control-Allow-Origin"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Lowercase letters, digits, hyphens; starts with a letter, ends alphanumeric, \u2264 63 chars.",
+                "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+              },
+              "source": {
+                "enum": [
+                  "local",
+                  "memory",
+                  "block",
+                  "stage"
+                ]
+              },
+              "size": {
+                "type": "string",
+                "description": "Required for memory / block, e.g. 10Gi"
+              },
+              "uid": {
+                "type": "integer"
+              },
+              "gid": {
+                "type": "integer"
+              },
+              "blockConfig": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "initialContents": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "fromSnapshot": {
+                        "type": "string",
+                        "description": "Snapshot name"
+                      }
+                    }
+                  },
+                  "iops": {
+                    "type": "integer"
+                  },
+                  "throughput": {
+                    "type": "integer"
+                  },
+                  "encryption": {
+                    "enum": [
+                      "SNOWFLAKE_SSE",
+                      "SNOWFLAKE_FULL"
+                    ]
+                  },
+                  "snapshotOnDelete": {
+                    "type": "boolean"
+                  },
+                  "snapshotDeleteAfter": {
+                    "type": "string",
+                    "description": "e.g. 7d"
+                  }
+                }
+              },
+              "stageConfig": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "@stage[/path]"
+                  },
+                  "metadataCache": {
+                    "type": "string"
+                  },
+                  "resources": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "requests": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "cpu": {
+                            "type": [
+                              "number",
+                              "string"
+                            ],
+                            "description": "vCPU: 0.5 or 500m"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "description": "e.g. 6Gi, 512Mi"
+                          },
+                          "nvidia.com/gpu": {
+                            "type": "integer",
+                            "description": "GPUs"
+                          }
+                        }
+                      },
+                      "limits": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "cpu": {
+                            "type": [
+                              "number",
+                              "string"
+                            ],
+                            "description": "vCPU: 0.5 or 500m"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "description": "e.g. 6Gi, 512Mi"
+                          },
+                          "nvidia.com/gpu": {
+                            "type": "integer",
+                            "description": "GPUs"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "name",
+              "source"
+            ]
+          }
+        },
+        "logExporters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "eventTableConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "logLevel": {
+                  "enum": [
+                    "INFO",
+                    "ERROR",
+                    "NONE"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "platformMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "metricConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "groups": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "system",
+                      "system_limits",
+                      "status",
+                      "network",
+                      "storage"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "resourceManagement": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "autoScalingPolicies": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scaleUp": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "anyConditions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "metricName": {
+                            "type": "string"
+                          },
+                          "aggregationType": {
+                            "enum": [
+                              "min",
+                              "max",
+                              "avg"
+                            ]
+                          },
+                          "stabilizationPeriodSecs": {
+                            "type": "integer"
+                          },
+                          "targetScaling": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "targetValue": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "scaleDown": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "allConditions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "metricName": {
+                            "type": "string"
+                          },
+                          "aggregationType": {
+                            "enum": [
+                              "min",
+                              "max",
+                              "avg"
+                            ]
+                          },
+                          "stabilizationPeriodSecs": {
+                            "type": "integer"
+                          },
+                          "targetScaling": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "targetValue": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "suspend": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "allConditions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "metricName": {
+                            "type": "string"
+                          },
+                          "aggregationType": {
+                            "enum": [
+                              "min",
+                              "max",
+                              "avg"
+                            ]
+                          },
+                          "stabilizationPeriodSecs": {
+                            "type": "integer"
+                          },
+                          "targetScaling": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "targetValue": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "containers"
+      ]
+    },
+    "serviceRoles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^\\w+$"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "securityContext": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "executeAsCaller": {
+              "type": "boolean"
+            },
+            "enableCustomCredentials": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "spec"
+  ]
+}

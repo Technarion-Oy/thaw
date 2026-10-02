@@ -140,6 +140,16 @@ Icons are the one hand-maintained part (they are React components). Coverage tes
 
 `Client` (`internal/snowflake/client.go`) has a per-schema 30 s TTL cache for `ListObjects`/`ListBasicObjects`, keyed by `"DB\x00SCHEMA"` (full) and `"basic\x00DB\x00SCHEMA"` (basic). `getObjectCache` returns `slices.Clone()` to avoid corrupting the backing array. `ClearObjectCache()` / `ClearObjectCacheForDatabase(db)` are IPC methods. The sidebar search cascade is three-tier: `objectStore` (instant) → Go TTL cache → `ListBasicObjects` fallback.
 
+## Structured YAML specs (Form | YAML)
+
+SPCS specifications (service / job, gateway, inference job) are edited with `frontend/src/components/service/SpecEditor.tsx` (#958). The **YAML text stays the value** parents hold and send to the Go builders (which only wrap it in dollar quotes); Form mode is a view over the parsed document:
+
+- Forms are built from the path-bound primitives in `service/specFields.tsx` (`<Str p={["spec","containers",i,"name"]} … />`), reading/writing through `SpecCtx` — so keys a form doesn't render survive a round trip, and there is no hand-written object ⇄ YAML mapper.
+- YAML mode is Monaco with a model path `inmemory://spcs/<kind>.spcs`; `editor/monacoSetup.ts` binds the matching hand-written JSON schema (`service/specSchemas/`). Use a non-`.yaml` path — `**/*.yaml` is the dbt catch-all.
+- Text that isn't a plain mapping (a `{{ }}` template, syntax errors) stays in YAML with a one-line reason.
+- Cross-field checks are pure functions in `service/specDoc.ts`; gate submit on `specProblems(kind, text).length === 0`.
+- Properties modals key the editor on the loaded spec so a reload re-picks Form vs YAML.
+
 ## Monaco SQL editor
 
 - Main component: `frontend/src/components/editor/SqlEditor.tsx`; pure helpers in `sqlEditorUtils.ts`.

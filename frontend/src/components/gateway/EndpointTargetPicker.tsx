@@ -3,43 +3,46 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect } from "react";
-import { Select, InputNumber, Button, Typography } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { Select } from "antd";
 import { ListDatabases, ListUserSchemas, ListObjects, ListServiceEndpoints } from "../../../wailsjs/go/app/App";
-
-const { Text } = Typography;
 
 interface Props {
   // The gateway's own database / schema — used as the initial selection so the
   // common case (routing to a co-located service) needs no extra clicks.
   defaultDb: string;
   defaultSchema: string;
-  // Called with a ready-to-insert YAML target block when the user clicks Insert.
-  onInsert: (block: string) => void;
+  /** The endpoint reference `db.schema.service!endpoint` ("" when incomplete). */
+  value: string;
+  onChange: (value: string) => void;
 }
 
-// EndpointTargetPicker lets the user pick a service endpoint by browsing
-// database → schema → service → endpoint (rather than hand-typing the
-// fully-qualified `db.schema.service!endpoint` reference into the YAML), then
-// inserts a complete weighted `targets` entry into the specification editor.
-// Services come from ListObjects (filtered to kind SERVICE); endpoints come from
-// SHOW ENDPOINTS IN SERVICE (ListServiceEndpoints). All selects are searchable,
-// so a service / endpoint not surfaced by the listing can still be typed.
-export default function EndpointTargetPicker({ defaultDb, defaultSchema, onInsert }: Props) {
+const REF = /^([^.]+)\.([^.]+)\.([^!]+)!(.+)$/;
+
+// EndpointTargetPicker is a row control for one gateway target: database →
+// schema → service → endpoint searchable dropdowns that emit the
+// fully-qualified `db.schema.service!endpoint` reference once all four are set
+// (and "" while incomplete). Services come from ListObjects (filtered to kind
+// SERVICE); endpoints come from SHOW ENDPOINTS IN SERVICE (ListServiceEndpoints).
+export default function EndpointTargetPicker({ defaultDb, defaultSchema, value, onChange }: Props) {
   const [databases, setDatabases] = useState<string[]>([]);
   const [schemas, setSchemas] = useState<string[]>([]);
   const [services, setServices] = useState<string[]>([]);
   const [endpoints, setEndpoints] = useState<string[]>([]);
 
-  const [db, setDb] = useState(defaultDb);
-  const [schema, setSchema] = useState(defaultSchema);
-  const [service, setService] = useState<string>("");
-  const [endpoint, setEndpoint] = useState<string>("");
-  const [weight, setWeight] = useState<number>(100);
+  const m = REF.exec(value);
+  const [db, setDb] = useState(m?.[1] ?? defaultDb);
+  const [schema, setSchema] = useState(m?.[2] ?? defaultSchema);
+  const [service, setService] = useState<string>(m?.[3] ?? "");
+  const [endpoint, setEndpoint] = useState<string>(m?.[4] ?? "");
+
+  // Follow the value when it changes underneath (a row above was removed).
+  useEffect(() => {
+    const r = REF.exec(value);
+    if (r) { setDb(r[1]); setSchema(r[2]); setService(r[3]); setEndpoint(r[4]); }
+  }, [value]);
 
   const [loadingServices, setLoadingServices] = useState(false);
   const [loadingEndpoints, setLoadingEndpoints] = useState(false);
-
   useEffect(() => { ListDatabases().then(setDatabases).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -71,82 +74,23 @@ export default function EndpointTargetPicker({ defaultDb, defaultSchema, onInser
   }, [db, schema, service]);
 
   const opts = (xs: string[]) => xs.map((x) => ({ label: x, value: x }));
-  const canInsert = !!(db && schema && service && endpoint);
-
-  const handleInsert = () => {
-    if (!canInsert) return;
-    const block = `  - type: endpoint\n    value: ${db}.${schema}.${service}!${endpoint}\n    weight: ${weight}\n`;
-    onInsert(block);
+  const pick = (d: string, sc: string, sv: string, ep: string) => {
+    setDb(d); setSchema(sc); setService(sv); setEndpoint(ep);
+    onChange(d && sc && sv && ep ? `${d}.${sc}.${sv}!${ep}` : "");
   };
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "10px 12px",
-        marginBottom: 8,
-        background: "var(--bg-subtle, transparent)",
-      }}
-    >
-      <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
-        Add an endpoint target — pick a service and endpoint, then Insert to drop a weighted{" "}
-        <code>db.schema.service!endpoint</code> entry into the specification at the cursor.
-      </Text>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-        <Select
-          showSearch
-          size="small"
-          style={{ minWidth: 130 }}
-          placeholder="Database"
-          value={db || undefined}
-          options={opts(databases)}
-          onChange={(v) => { setDb(v); setSchema(""); setService(""); setEndpoint(""); }}
-        />
-        <Select
-          showSearch
-          size="small"
-          style={{ minWidth: 130 }}
-          placeholder="Schema"
-          value={schema || undefined}
-          options={opts(schemas)}
-          onChange={(v) => { setSchema(v); setService(""); setEndpoint(""); }}
-        />
-        <Select
-          showSearch
-          size="small"
-          style={{ minWidth: 150 }}
-          placeholder="Service"
-          value={service || undefined}
-          loading={loadingServices}
-          options={opts(services)}
-          notFoundContent={loadingServices ? "Loading…" : "No services"}
-          onChange={(v) => { setService(v); setEndpoint(""); }}
-        />
-        <Select
-          showSearch
-          size="small"
-          style={{ minWidth: 150 }}
-          placeholder="Endpoint"
-          value={endpoint || undefined}
-          loading={loadingEndpoints}
-          options={opts(endpoints)}
-          notFoundContent={loadingEndpoints ? "Loading…" : "No endpoints"}
-          onChange={(v) => setEndpoint(v)}
-        />
-        <InputNumber
-          size="small"
-          style={{ width: 90 }}
-          min={0}
-          max={100}
-          value={weight}
-          onChange={(v) => setWeight(typeof v === "number" ? v : 100)}
-          addonBefore="wt"
-        />
-        <Button size="small" type="primary" icon={<PlusOutlined />} disabled={!canInsert} onClick={handleInsert}>
-          Insert
-        </Button>
-      </div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <Select showSearch size="small" style={{ minWidth: 120, flex: 1 }} placeholder="Database"
+        value={db || undefined} options={opts(databases)} onChange={(v) => pick(v, "", "", "")} />
+      <Select showSearch size="small" style={{ minWidth: 120, flex: 1 }} placeholder="Schema"
+        value={schema || undefined} options={opts(schemas)} onChange={(v) => pick(db, v, "", "")} />
+      <Select showSearch size="small" style={{ minWidth: 140, flex: 1 }} placeholder="Service"
+        value={service || undefined} loading={loadingServices} options={opts(services)}
+        notFoundContent={loadingServices ? "Loading…" : "No services"} onChange={(v) => pick(db, schema, v, "")} />
+      <Select showSearch size="small" style={{ minWidth: 140, flex: 1 }} placeholder="Endpoint"
+        value={endpoint || undefined} loading={loadingEndpoints} options={opts(endpoints)}
+        notFoundContent={loadingEndpoints ? "Loading…" : "No endpoints"} onChange={(v) => pick(db, schema, service, v)} />
     </div>
   );
 }

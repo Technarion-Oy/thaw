@@ -11,7 +11,6 @@ import {
   DeploymentUnitOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, PlusOutlined,
   CloudUploadOutlined, CameraOutlined,
 } from "@ant-design/icons";
-import Editor from "@monaco-editor/react";
 import {
   GetObjectProperties, AlterService, ListServiceEndpoints, GetServiceContainers, GetServiceLogs,
   ListServiceInstances, ListServiceVolumes, ListServiceRoles, ListServiceRoleGrants,
@@ -22,8 +21,9 @@ import LazyResultTable from "../shared/LazyResultTable";
 import StageFilePicker from "../shared/StageFilePicker";
 import CreateSnapshotModal from "../snapshot/CreateSnapshotModal";
 import { useObjectTags } from "../shared/useObjectTags";
-import { useThemeStore } from "../../store/themeStore";
-import { patchMonacoClipboard } from "../../utils/monacoClipboard";
+import SpecEditor from "./SpecEditor";
+import ServiceSpecForm from "./ServiceSpecForm";
+import { specProblems } from "./specDoc";
 import { service as svcModels, type snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -394,7 +394,6 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
   const specHeadRef = useRef<HTMLDivElement>(null);
 
   const { modal } = AntApp.useApp();
-  const editorTheme = useThemeStore((s) => s.resolved) === "dark" ? "vs-dark" : "vs";
 
   // Specification editor (redeploy via ALTER SERVICE … FROM SPECIFICATION).
   const [specSource, setSpecSource] = useState<"inline" | "stage">("inline");
@@ -517,7 +516,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
   // from a blank editor replaces a spec the user can't see.
   const specMissing = !rows?.some((r) => r.key.toLowerCase() === "spec");
   const canRedeploy = specSource === "inline"
-    ? specDraft !== null && specDraft !== spec && specDraft.trim() !== ""
+    ? specDraft !== null && specDraft !== spec && specDraft.trim() !== "" && specProblems("service", specDraft).length === 0
     : specStage !== "" && specFile !== "";
 
   return (
@@ -585,7 +584,7 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
               size="small"
               value={specSource}
               onChange={(e) => setSpecSource(e.target.value)}
-              options={[{ value: "inline", label: "Inline YAML" }, { value: "stage", label: "Staged file" }]}
+              options={[{ value: "inline", label: "Inline" }, { value: "stage", label: "Staged file" }]}
               optionType="button"
             />
             <Button
@@ -615,17 +614,10 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
             />
           )}
           {specSource === "inline" ? (
-            <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-              <Editor
-                height={300}
-                language="yaml"
-                theme={editorTheme}
-                value={specText}
-                onChange={(v) => setSpecDraft(v ?? "")}
-                onMount={(editor) => patchMonacoClipboard(editor)}
-                options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 12, wordWrap: "on", automaticLayout: true }}
-              />
-            </div>
+            // Keyed on the live spec so a reload re-picks Form vs YAML for the new text.
+            <SpecEditor key={spec} kind="service" value={specText} onChange={setSpecDraft}>
+              <ServiceSpecForm />
+            </SpecEditor>
           ) : (
             <>
               <StageFilePicker

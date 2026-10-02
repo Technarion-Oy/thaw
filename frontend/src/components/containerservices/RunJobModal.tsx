@@ -14,6 +14,9 @@ import MonacoSqlField from "../shared/MonacoSqlField";
 import StageFilePicker from "../shared/StageFilePicker";
 import { useSqlPreview } from "../shared/createModalHooks";
 import ServiceSpecFields, { EMPTY_SPEC, specReady, type SpecFieldsValue } from "../service/ServiceSpecFields";
+import SpecEditor from "../service/SpecEditor";
+import { specProblems } from "../service/specDoc";
+import InferenceSpecForm from "./InferenceSpecForm";
 import { loadModelsCached } from "../model/ModelSourcePicker";
 import type { service as svcModels } from "../../../wailsjs/go/models";
 
@@ -22,15 +25,6 @@ interface Props {
   /** Called after the statement is handed to a new query tab. */
   onRan: (async: boolean) => void;
 }
-
-const JOB_SPEC_PLACEHOLDER = `spec:
-  containers:
-  - name: main
-    image: /db/schema/repo/image:latest
-    args: ["--run-once"]`;
-
-const INFERENCE_SPEC_PLACEHOLDER = `output:
-  stage_location: "@db.schema.stage/results/"`;
 
 const DEFAULT_QUERY = "SELECT * FROM ";
 
@@ -85,8 +79,8 @@ export default function RunJobModal({ onClose, onRan }: Props) {
   );
 
   const canSubmit = preview !== "" && pool !== "" && (kind === "job"
-    ? specReady(spec)
-    : inf.spec.trim() !== "" && inf.model !== ""
+    ? specReady(spec, "job")
+    : inf.spec.trim() !== "" && specProblems("inference", inf.spec).length === 0 && inf.model !== ""
       && (inf.inputSource === "stage" ? inf.stagePath.trim() !== "" : inf.query.trim() !== "" && inf.query !== DEFAULT_QUERY));
 
   const run = () => {
@@ -135,18 +129,15 @@ export default function RunJobModal({ onClose, onRan }: Props) {
 
         {kind === "job" ? (
           <ServiceSpecFields
-            db="" schema="" value={spec} noun="Job" placeholder={JOB_SPEC_PLACEHOLDER}
+            db="" schema="" value={spec} noun="Job" kind="job"
             onChange={(patch) => setSpec((prev) => ({ ...prev, ...patch }))}
           />
         ) : (
           <>
-            <Form.Item label="Specification (YAML)" required style={itemStyle}>
-              <Input.TextArea
-                value={inf.spec} onChange={(e) => setI({ spec: e.target.value })}
-                placeholder={INFERENCE_SPEC_PLACEHOLDER}
-                autoSize={{ minRows: 4, maxRows: 12 }}
-                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
-              />
+            <Form.Item label="Specification" required style={itemStyle}>
+              <SpecEditor kind="inference" value={inf.spec} onChange={(v) => setI({ spec: v })} height={260}>
+                <InferenceSpecForm />
+              </SpecEditor>
             </Form.Item>
             <Form.Item label="Input" style={{ marginBottom: 6 }}>
               <Radio.Group

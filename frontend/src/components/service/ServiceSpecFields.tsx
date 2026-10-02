@@ -5,6 +5,9 @@
 import { Form, Input, Checkbox, Radio, Button, Space, Typography } from "antd";
 import { PlusOutlined, MinusCircleOutlined } from "@ant-design/icons";
 import StageFilePicker from "../shared/StageFilePicker";
+import SpecEditor from "./SpecEditor";
+import ServiceSpecForm from "./ServiceSpecForm";
+import { specProblems } from "./specDoc";
 import type { service as svcModels } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -25,27 +28,28 @@ export const EMPTY_SPEC: SpecFieldsValue = {
   specSource: "inline", template: false, specInline: "", specStage: "", specFile: "", templateVars: [],
 };
 
-export const specReady = (v: SpecFieldsValue) =>
+/** Complete enough to submit: a staged file, or inline YAML the form's checks accept. */
+export const specReady = (v: SpecFieldsValue, kind: "service" | "job") =>
   v.specSource === "stage"
     ? v.specStage.trim().length > 0 && v.specFile.trim().length > 0
-    : v.specInline.trim().length > 0;
+    : v.specInline.trim().length > 0 && (v.template || specProblems(kind, v.specInline).length === 0);
 
 interface Props {
   db: string;
   schema: string;
   value: SpecFieldsValue;
   onChange: (patch: Partial<SpecFieldsValue>) => void;
-  /** Placeholder YAML for the inline editor. */
-  placeholder: string;
   /** "Service" / "Job" — used in the inline editor label. */
   noun: string;
+  kind: "service" | "job";
 }
 
 /**
  * Specification section shared by CREATE SERVICE and EXECUTE JOB SERVICE: inline
- * YAML or a staged file, optionally a template with USING ( k => v ) variables.
+ * (Form | YAML via SpecEditor) or a staged file, optionally a template with
+ * USING ( k => v ) variables — a template is always edited as YAML.
  */
-export default function ServiceSpecFields({ db, schema, value: cfg, onChange, placeholder, noun }: Props) {
+export default function ServiceSpecFields({ db, schema, value: cfg, onChange, noun, kind }: Props) {
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
   const setVars = (templateVars: TemplateVar[]) => onChange({ templateVars });
   const updateVar = (i: number, field: "key" | "value", val: string) =>
@@ -62,7 +66,7 @@ export default function ServiceSpecFields({ db, schema, value: cfg, onChange, pl
             buttonStyle="solid"
             size="small"
           >
-            <Radio.Button value="inline">Inline YAML</Radio.Button>
+            <Radio.Button value="inline">Inline</Radio.Button>
             <Radio.Button value="stage">From stage file</Radio.Button>
           </Radio.Group>
           <Checkbox checked={cfg.template} onChange={(e) => onChange({ template: e.target.checked })}>
@@ -100,17 +104,13 @@ export default function ServiceSpecFields({ db, schema, value: cfg, onChange, pl
         </>
       ) : (
         <Form.Item
-          label={cfg.template ? `${noun} specification template (YAML, with {{ variables }})` : `${noun} specification (YAML)`}
+          label={cfg.template ? `${noun} specification template (YAML, with {{ variables }})` : `${noun} specification`}
           required
           style={itemStyle}
         >
-          <Input.TextArea
-            value={cfg.specInline}
-            onChange={(e) => onChange({ specInline: e.target.value })}
-            placeholder={placeholder}
-            autoSize={{ minRows: 8, maxRows: 18 }}
-            style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
-          />
+          <SpecEditor kind={kind} template={cfg.template} value={cfg.specInline} onChange={(specInline) => onChange({ specInline })}>
+            <ServiceSpecForm job={kind === "job"} />
+          </SpecEditor>
         </Form.Item>
       )}
 

@@ -359,6 +359,10 @@ import dbtProjectSchema from "../../schemas/dbt/dbt_project-latest.json";
 import dbtYmlFilesSchema from "../../schemas/dbt/dbt_yml_files-latest.json";
 import packagesSchema from "../../schemas/dbt/packages-latest.json";
 import selectorsSchema from "../../schemas/dbt/selectors-latest.json";
+// Hand-written SPCS specification schemas (issue #958) — Snowflake publishes none.
+import spcsServiceSchema from "../service/specSchemas/service.json";
+import spcsGatewaySchema from "../service/specSchemas/gateway.json";
+import spcsInferenceSchema from "../service/specSchemas/inference.json";
 
 // ── Use locally bundled Monaco instead of CDN ─────────────────────────────────
 // By default @monaco-editor/loader fetches Monaco from jsDelivr at runtime.
@@ -519,6 +523,10 @@ export function ensureMonacoSetup(monaco: unknown): void {
   //   4. everything else *.yml → dbt_yml_files-latest.json   (covers model
   //      configs, sources, seeds, snapshots, exposures, metrics, …)
   //
+  // The SPCS spec editors (service/SpecEditor) use in-memory model paths
+  // ending ".spcs" — deliberately not *.yaml, so the dbt catch-all never
+  // matches them. A template (".spcs" with no schema) gets syntax only.
+  //
   // All schemas are bundled locally — no network request at runtime.
   configureMonacoYaml(m, {
     enableSchemaRequest: false,
@@ -527,6 +535,21 @@ export function ensureMonacoSetup(monaco: unknown): void {
     validate: true,
     format: true,
     schemas: [
+      {
+        uri: "thaw://spcs/service",
+        fileMatch: ["**/service.spcs", "**/job.spcs"],
+        schema: spcsServiceSchema as object,
+      },
+      {
+        uri: "thaw://spcs/gateway",
+        fileMatch: ["**/gateway.spcs"],
+        schema: spcsGatewaySchema as object,
+      },
+      {
+        uri: "thaw://spcs/inference",
+        fileMatch: ["**/inference.spcs"],
+        schema: spcsInferenceSchema as object,
+      },
       {
         uri: "dbt-jsonschema://dbt_project",
         fileMatch: ["**/dbt_project.yml", "**/dbt_project.yaml"],
