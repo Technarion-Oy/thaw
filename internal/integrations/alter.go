@@ -65,7 +65,7 @@ var (
 // modal may edit: kind → property → value type. Derived from the SET / UNSET
 // lists in the internal/sqlgrammar ParseAlter*Integration* doc comments.
 // Subtypes of a kind (notification email / webhook / queue, the security
-// integration flavours) are unioned: DESCRIBE only returns the rows of the
+// integration flavors) are unioned: DESCRIBE only returns the rows of the
 // integration's own subtype, so the others never render.
 var alterable = map[string]map[string]propSpec{
 	"STORAGE": {
