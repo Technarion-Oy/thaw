@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { dumpSpec, parseSpec, setIn, specProblems, validateGatewaySpec, validateServiceSpec } from "./specDoc";
+import {
+  dumpSpec, parseEndpointRef, parseImagePath, parseSpec, setIn, specProblems, validateGatewaySpec, validateServiceSpec,
+} from "./specDoc";
 
 describe("spec form ⇄ YAML", () => {
   it("round-trips, keeping keys the form doesn't know", () => {
@@ -58,9 +60,27 @@ describe("gateway spec checks", () => {
     expect(validateGatewaySpec({ spec: { type: "shadow_traffic", primary: [{ type: "endpoint", value: "d.s.svc!ep" }], shadow: [t(10)] } })).toEqual([]);
     expect(validateGatewaySpec({ spec: { type: "shadow_traffic", primary: [], shadow: [] } })).toHaveLength(2);
   });
+
+  it("accepts quoted identifiers in endpoint refs", () => {
+    expect(parseEndpointRef("d.s.svc!ep")).toEqual(["d", "s", "svc", "ep"]);
+    expect(parseEndpointRef('"my.db"."My Schema"."a""b"!ep')).toEqual(['"my.db"', '"My Schema"', '"a""b"', "ep"]);
+    expect(parseEndpointRef("a.b.c.d!ep")).toBeNull();
+    expect(parseEndpointRef("d.s.svc")).toBeNull();
+    const quoted = { type: "endpoint", value: '"my.db".s."Svc"!ep', weight: 100 };
+    expect(validateGatewaySpec({ spec: { type: "traffic_split", targets: [quoted] } })).toEqual([]);
+  });
 });
 
-it("specProblems skips unparseable text", () => {
-  expect(specProblems("service", "spec: [")).toEqual([]);
+it("parseImagePath keeps a registry host out of the database box", () => {
+  expect(parseImagePath("/db/sc/repo/img:1")).toEqual({ host: "", parts: ["db", "sc", "repo", "img:1"] });
+  expect(parseImagePath("/db/sc/repo/team/img:1")).toEqual({ host: "", parts: ["db", "sc", "repo", "team/img:1"] });
+  expect(parseImagePath("org-acct.registry.snowflakecomputing.com/db/sc/repo/img:1"))
+    .toEqual({ host: "org-acct.registry.snowflakecomputing.com", parts: ["db", "sc", "repo", "img:1"] });
+  expect(parseImagePath("nginx:latest")).toBeNull();
+});
+
+it("specProblems blocks invalid YAML but leaves templates alone", () => {
+  expect(specProblems("service", "spec: [")[0]).toContain("Not valid YAML");
+  expect(specProblems("service", "image: {{ img }}")).toEqual([]);
   expect(specProblems("inference", "output: {}")).toEqual(["output.stage_location is required."]);
 });

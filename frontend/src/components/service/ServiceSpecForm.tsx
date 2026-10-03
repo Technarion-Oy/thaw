@@ -8,7 +8,7 @@ import {
   ListImageRepositories, ListImagesInRepository, ListSecretsInAccount, ListSnapshots,
 } from "../../../wailsjs/go/app/App";
 import { rowsOf } from "../containerservices/computePools";
-import { getIn, setIn, type Doc, type Path } from "./specDoc";
+import { getIn, parseImagePath, setIn, type Doc, type Path } from "./specDoc";
 import { Bool, Grid, Group, KV, List, Num, Sel, Str, Tags, useSpec } from "./specFields";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"];
@@ -39,17 +39,14 @@ const imagesOf = (r: Repo) => {
 function ImageField({ p, repos }: { p: Path; repos: Repo[] }) {
   const { doc, set } = useSpec();
   const value: string = getIn(doc, p) ?? "";
-  const parse = (v: string) => {
-    const s = v.split("/").filter(Boolean);
-    return s.length >= 4 ? [s[0], s[1], s[2], s.slice(3).join("/")] : null;
-  };
-  const [pick, setPick] = useState<string[]>(() => parse(value) ?? ["", "", "", ""]);
+  const [pick, setPick] = useState<string[]>(() => parseImagePath(value)?.parts ?? ["", "", "", ""]);
   // Follow the value when it changes underneath (YAML edit, row removed above).
-  useEffect(() => { const v = parse(value); if (v) setPick(v); }, [value]);
+  useEffect(() => { const v = parseImagePath(value); if (v) setPick(v.parts); }, [value]);
   const [db, schema, repo, image] = pick;
   const update = (next: string[]) => {
     setPick(next);
-    set(p, next.every(Boolean) ? `/${next.join("/")}` : undefined);
+    // A registry host the value was written with stays in front.
+    set(p, next.every(Boolean) ? `${parseImagePath(value)?.host ?? ""}/${next.join("/")}` : undefined);
   };
 
   const lc = (x: string) => x.toLowerCase();

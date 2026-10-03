@@ -147,7 +147,7 @@ SPCS specifications (service / job, gateway, inference job) are edited with `fro
 - Forms are built from the path-bound primitives in `service/specFields.tsx` (`<Str p={["spec","containers",i,"name"]} … />`), reading/writing through `SpecCtx` — so keys a form doesn't render survive a round trip, and there is no hand-written object ⇄ YAML mapper.
 - YAML mode is Monaco with a model path `inmemory://spcs/<kind>.spcs`; `editor/monacoSetup.ts` binds the matching hand-written JSON schema (`service/specSchemas/`). Use a non-`.yaml` path — `**/*.yaml` is the dbt catch-all.
 - Text that isn't a plain mapping (a `{{ }}` template, syntax errors) stays in YAML with a one-line reason.
-- Cross-field checks are pure functions in `service/specDoc.ts`; gate submit on `specProblems(kind, text).length === 0`.
+- Cross-field checks are pure functions in `service/specDoc.ts`; gate submit on `specProblems(kind, text).length === 0` (it also reports invalid YAML; text containing `{{` is left unchecked).
 - Properties modals key the editor on the loaded spec so a reload re-picks Form vs YAML.
 
 ## Monaco SQL editor

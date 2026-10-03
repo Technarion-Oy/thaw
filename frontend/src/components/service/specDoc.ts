@@ -54,6 +54,28 @@ export function setIn(doc: Doc, path: Path, value: unknown): Doc {
   return base;
 }
 
+// ── Value formats the pickers split ──────────────────────────────────────────
+
+/**
+ * An image path as the picker's four boxes (db, schema, repo, image[:tag]) plus
+ * an optional registry host (`org-acct.registry.snowflakecomputing.com/db/…`),
+ * kept so editing a box doesn't drop it. null when it isn't a repository path.
+ */
+export function parseImagePath(v: string): { host: string; parts: string[] } | null {
+  const s = v.split("/").filter(Boolean);
+  const host = !v.startsWith("/") && s.length >= 5 && s[0].includes(".") ? s.shift()! : "";
+  return s.length >= 4 ? { host, parts: [s[0], s[1], s[2], s.slice(3).join("/")] } : null;
+}
+
+const IDENT = String.raw`(?:"(?:[^"]|"")+"|[^.!\s"]+)`;
+const ENDPOINT_REF = new RegExp(String.raw`^(${IDENT})\.(${IDENT})\.(${IDENT})!([^.!\s]+)$`);
+
+/**
+ * `db.schema.service!endpoint` → its four parts as written (a quoted
+ * identifier keeps its quotes, so `"my.db"` is one part), or null.
+ */
+export const parseEndpointRef = (v: string): string[] | null => ENDPOINT_REF.exec(v)?.slice(1) ?? null;
+
 // ── Cross-field checks ───────────────────────────────────────────────────────
 
 const DNS_NAME = /^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -133,14 +155,12 @@ export function validateServiceSpec(doc: Doc, job = false): string[] {
   return p;
 }
 
-const ENDPOINT_REF = /^[^.!\s]+\.[^.!\s]+\.[^.!\s]+![^.!\s]+$/;
-
 export function validateGatewaySpec(doc: Doc): string[] {
   const p: string[] = [];
   const spec = doc?.spec ?? {};
   const target = (label: string, t: Doc) => {
     if (!t?.value) p.push(`${label}: pick an endpoint.`);
-    else if (!ENDPOINT_REF.test(t.value)) p.push(`${label}: "${t.value}" isn't db.schema.service!endpoint.`);
+    else if (!parseEndpointRef(String(t.value))) p.push(`${label}: "${t.value}" isn't db.schema.service!endpoint.`);
   };
   if (spec.type === "traffic_split") {
     const ts = arr(spec.targets);
@@ -176,14 +196,14 @@ export function validateInferenceSpec(doc: Doc): string[] {
 }
 
 /**
- * Problems blocking submit for spec text of a kind. Unparseable text (YAML
- * syntax errors, templates) returns [] — the YAML editor's schema squiggles
- * and Snowflake report those.
+ * Problems blocking submit for spec text of a kind. Invalid YAML is a problem;
+ * text with `{{` isn't checked at all — it may be a template, or a literal
+ * the form can't tell from one — and is left to Snowflake.
  */
 export function specProblems(kind: SpecKind, text: string): string[] {
   if (!text.trim()) return [];
   const r = parseSpec(text);
-  if ("error" in r) return [];
+  if ("error" in r) return /\{\{/.test(text) ? [] : [r.error];
   switch (kind) {
     case "gateway": return validateGatewaySpec(r.doc);
     case "inference": return validateInferenceSpec(r.doc);

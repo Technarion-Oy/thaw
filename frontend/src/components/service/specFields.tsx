@@ -103,7 +103,14 @@ export function KV({ p, label, keyPh = "NAME", valPh = "value", valueOptions, wr
   const map: Record<string, unknown> = getIn(doc, p) ?? {};
   const entries = (): [string, string][] => Object.entries(map).map(([k, v]) => [k, unwrap(v)]);
   const [rows, setRows] = useState(entries);
-  const toMap = (r: [string, string][]) => Object.fromEntries(r.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), wrap(v)]));
+  // First row wins on a repeated key, so typing a name that already exists
+  // can't overwrite the other row's value; the repeat is flagged below.
+  const toMap = (r: [string, string][]) => {
+    const m: Record<string, unknown> = {};
+    for (const [k, v] of r) if (k.trim() && !(k.trim() in m)) m[k.trim()] = wrap(v);
+    return m;
+  };
+  const dup = (i: number) => rows[i][0].trim() !== "" && rows.findIndex(([k]) => k.trim() === rows[i][0].trim()) !== i;
   const key = JSON.stringify(map);
   useEffect(() => {
     if (JSON.stringify(toMap(rows)) !== key) setRows(entries());
@@ -114,7 +121,8 @@ export function KV({ p, label, keyPh = "NAME", valPh = "value", valueOptions, wr
     <Form.Item label={label} style={{ ...ITEM, gridColumn: "1 / -1" }}>
       {rows.map(([k, v], i) => (
         <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-          <Input value={k} onChange={(e) => cell(i, 0, e.target.value)} placeholder={keyPh} style={{ flex: 1 }} />
+          <Input value={k} onChange={(e) => cell(i, 0, e.target.value)} placeholder={keyPh} style={{ flex: 1 }}
+            status={dup(i) ? "error" : undefined} title={dup(i) ? "Duplicate name — this row is ignored" : undefined} />
           {valueOptions ? (
             <Select value={v || undefined} onChange={(x) => cell(i, 1, x ?? "")} options={opts(valueOptions)} placeholder={valPh} style={{ flex: 1 }} />
           ) : (
@@ -135,16 +143,18 @@ export function List({ p, label, noun, item = () => ({}), max, children }: {
 }) {
   const { doc, set } = useSpec();
   const xs: unknown[] = Array.isArray(getIn(doc, p)) ? getIn(doc, p) : [];
+  const [gen, setGen] = useState(0);
   return (
     <div style={{ gridColumn: "1 / -1", marginBottom: 8 }}>
       {label && <Typography.Text strong style={{ fontSize: 12, display: "block", marginBottom: 4 }}>{label}</Typography.Text>}
-      {/* Keyed by index + length: removing a row remounts the rest, so row-local
-          state (KV rows, port/range, env/dir) re-derives from the document. */}
+      {/* Keyed by index + removal count: removing a row remounts the rest, so
+          row-local state (KV rows, port/range, env/dir) re-derives from the
+          document; adding one leaves the others (and their open groups) alone. */}
       {xs.map((_, i) => (
-        <div key={`${i}/${xs.length}`} style={{ display: "flex", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", marginBottom: 6 }}>
+        <div key={`${i}/${gen}`} style={{ display: "flex", gap: 4, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", marginBottom: 6 }}>
           <div style={{ flex: 1, minWidth: 0 }}>{children([...p, i], i)}</div>
           <Button type="text" size="small" icon={<MinusCircleOutlined />} title={`Remove ${noun}`}
-            onClick={() => set(p, xs.filter((_, j) => j !== i))} />
+            onClick={() => { setGen(gen + 1); set(p, xs.filter((_, j) => j !== i)); }} />
         </div>
       ))}
       <Button type="dashed" size="small" icon={<PlusOutlined />} disabled={max != null && xs.length >= max}
