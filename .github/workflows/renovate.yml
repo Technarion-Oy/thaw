@@ -178,7 +178,7 @@ jobs:
         run: npm install -g npm@10.9.8
 
       - name: Install Renovate
-        run: npm install -g renovate@44.14.10
+        run: npm install -g renovate@44.125.1
 
       - name: Run Renovate
         env:
@@ -260,7 +260,7 @@ jobs:
       # surfaces here instead of as a silent migration PR later. Keep the
       # version in sync with the Renovate job above (Renovate updates both).
       - name: Validate renovate.json
-        run: npx --yes --package renovate@44.14.10 renovate-config-validator --strict
+        run: npx --yes --package renovate@44.125.1 renovate-config-validator --strict
 
       - name: Unlock permissions for host runner agent
         if: always()
