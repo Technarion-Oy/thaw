@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (173)
+- [Frontend — npm packages](#frontend--npm-packages) (172)
 
 ## Backend — Go modules
 
@@ -9391,8 +9391,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `es-toolkit` | 1.45.1 | MIT |
 | `eventemitter3` | 5.0.4 | MIT |
 | `frac` | 1.1.2 | Apache-2.0 |
-| `immer` | 10.2.0 | MIT |
-| `immer` | 11.1.4 | MIT |
+| `immer` | 11.1.18 | MIT |
 | `internmap` | 2.0.3 | ISC |
 | `is-mobile` | 5.0.0 | MIT |
 | `json2mq` | 0.2.0 | MIT |
@@ -9416,10 +9415,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `react-dom` | 19.3.0 | MIT |
 | `react-is` | 19.3.0 | MIT |
 | `react-redux` | 9.2.0 | MIT |
-| `recharts` | 3.8.0 | MIT |
+| `recharts` | 3.10.1 | MIT |
 | `redux` | 5.0.1 | MIT |
 | `redux-thunk` | 3.1.0 | MIT |
-| `reselect` | 5.1.1 | MIT |
+| `reselect` | 5.2.0 | MIT |
 | `ret` | 0.1.15 | MIT |
 | `scheduler` | 0.28.0 | MIT |
 | `scroll-into-view-if-needed` | 3.1.0 | MIT |
@@ -14104,36 +14103,7 @@ Copyright (C) 2012-present   SheetJS
 
 ### immer
 
-- **Version:** 10.2.0
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2017 Michel Weststrate
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### immer
-
-- **Version:** 11.1.4
+- **Version:** 11.1.18
 - **License:** MIT
 
 ```
@@ -14961,7 +14931,7 @@ SOFTWARE.
 
 ### recharts
 
-- **Version:** 3.8.0
+- **Version:** 3.10.1
 - **License:** MIT
 
 ```
@@ -15048,7 +15018,7 @@ SOFTWARE.
 
 ### reselect
 
-- **Version:** 5.1.1
+- **Version:** 5.2.0
 - **License:** MIT
 
 ```
