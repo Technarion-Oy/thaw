@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Snowflake gateway specification",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "spec": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "traffic_split",
+            "shadow_traffic"
+          ]
+        },
+        "split_type": {
+          "enum": [
+            "custom"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "endpoint"
+              },
+              "value": {
+                "type": "string",
+                "description": "db.schema.service!endpoint"
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "type",
+              "value",
+              "weight"
+            ]
+          },
+          "description": "Weights must sum to 100"
+        },
+        "primary": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "endpoint"
+              },
+              "value": {
+                "type": "string",
+                "description": "db.schema.service!endpoint"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        },
+        "shadow": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "endpoint"
+              },
+              "value": {
+                "type": "string",
+                "description": "db.schema.service!endpoint"
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "type",
+              "value",
+              "weight"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "spec"
+  ]
+}

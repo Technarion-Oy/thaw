@@ -29,15 +29,6 @@ type ServiceCfg = Omit<svcModels.ServiceConfig, "convertValues" | "templateVars"
   templateVars: TemplateVar[];
 };
 
-const SPEC_PLACEHOLDER = `spec:
-  containers:
-  - name: main
-    image: /db/schema/repo/image:latest
-  endpoints:
-  - name: api
-    port: 8080
-    public: true`;
-
 export default function CreateServiceModal({ db, schema, onClose, onSuccess }: Props) {
   const [cfg, setCfg] = useState<ServiceCfg>({
     name: "",
@@ -88,7 +79,7 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const canSubmit =
-    preview !== "" && cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady(cfg);
+    preview !== "" && cfg.name.trim().length > 0 && cfg.computePool.trim().length > 0 && specReady(cfg, "service");
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -108,7 +99,7 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
       icon={<DeploymentUnitOutlined />}
       title="Create Service"
       subtitle={`${db}.${schema}`}
-      width={720}
+      width={820}
       error={error}
       errorTitle="Service creation failed"
       onErrorClose={() => setError(null)}
@@ -163,8 +154,8 @@ export default function CreateServiceModal({ db, schema, onClose, onSuccess }: P
           schema={schema}
           value={cfg}
           onChange={(patch) => setCfg((prev) => ({ ...prev, ...patch }))}
-          placeholder={SPEC_PLACEHOLDER}
           noun="Service"
+          kind="service"
         />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>

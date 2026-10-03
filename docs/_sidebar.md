@@ -169,7 +169,6 @@
     - [CreateGatewayModal](frontend/components/gateway/CreateGatewayModal.md)
     - [EndpointTargetPicker](frontend/components/gateway/EndpointTargetPicker.md)
     - [GatewayPropertiesModal](frontend/components/gateway/GatewayPropertiesModal.md)
-    - [insertSpecTarget](frontend/components/gateway/insertSpecTarget.md)
   - **Components — git**
     - [ChangeRow](frontend/components/git/ChangeRow.md)
     - [ChangesView](frontend/components/git/ChangesView.md)

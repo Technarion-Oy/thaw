@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Inference job specification",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stage_location": {
+          "type": "string",
+          "description": "@db.schema.stage/path/"
+        },
+        "mode": {
+          "enum": [
+            "error",
+            "overwrite"
+          ]
+        }
+      },
+      "required": [
+        "stage_location"
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu_requests": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "memory_requests": {
+          "type": "string",
+          "description": "e.g. 8GiB"
+        },
+        "gpu_requests": {
+          "type": "integer"
+        }
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "num_workers": {
+          "type": "integer"
+        },
+        "max_batch_rows": {
+          "type": "integer"
+        },
+        "engine_options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "engine": {
+              "enum": [
+                "DEFAULT",
+                "VLLM",
+                "PYTHON_GENERIC"
+              ]
+            },
+            "engine_args_override": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "column_handling": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "input_format": {
+                "enum": [
+                  "full_stage_path"
+                ]
+              },
+              "convert_to": {
+                "enum": [
+                  "raw_bytes",
+                  "base64",
+                  "base64_data_url"
+                ]
+              }
+            }
+          }
+        },
+        "partition_column": {
+          "type": "string"
+        }
+      }
+    },
+    "image_build": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image_repo": {
+          "type": "string"
+        },
+        "force_rebuild": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "required": [
+    "output"
+  ]
+}

@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Form, Input, Checkbox, Alert, Typography } from "antd";
 import { NodeIndexOutlined } from "@ant-design/icons";
 import { BuildCreateGatewaySql, ExecDDL } from "../../../wailsjs/go/app/App";
@@ -10,25 +10,20 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import Editor from "@monaco-editor/react";
-import { useThemeStore } from "../../store/themeStore";
-import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-import EndpointTargetPicker from "./EndpointTargetPicker";
-import { insertSpecTarget } from "./insertSpecTarget";
+import SpecEditor from "../service/SpecEditor";
+import { specProblems } from "../service/specDoc";
+import GatewaySpecForm from "./GatewaySpecForm";
 
 const { Text } = Typography;
 
 // A skeleton traffic-split specification: a single endpoint target taking 100%
-// of the traffic, mirroring the Snowflake reference so users fill in the
-// service / endpoint and add additional weighted targets rather than recall the
-// YAML shape from scratch. Weights across all targets must sum to 100.
+// of the traffic, so the form opens with one row to pick the endpoint for.
 const DEFAULT_SPEC = `spec:
   type: traffic_split
   split_type: custom
   targets:
-  - type: endpoint
-    value: <database>.<schema>.<service>!<endpoint>
-    weight: 100
+    - type: endpoint
+      weight: 100
 `;
 
 interface Props {
@@ -39,15 +34,11 @@ interface Props {
 }
 
 export default function CreateGatewayModal({ db, schema, onClose, onSuccess }: Props) {
-  const resolved = useThemeStore((s) => s.resolved);
-  const editorTheme = resolved === "dark" ? "vs-dark" : "vs";
-
   const [name, setName] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [orReplace, setOrReplace] = useState(false);
   const [ifNotExists, setIfNotExists] = useState(false);
   const [specification, setSpecification] = useState(DEFAULT_SPEC);
-  const editorRef = useRef<any>(null);
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
@@ -63,7 +54,8 @@ export default function CreateGatewayModal({ db, schema, onClose, onSuccess }: P
   );
   const { creating, error, setError, submit } = useCreateSubmit();
 
-  const canSubmit = name.trim().length > 0 && specification.trim().length > 0;
+  const canSubmit = name.trim().length > 0 && specification.trim().length > 0
+    && specProblems("gateway", specification).length === 0;
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -95,7 +87,7 @@ export default function CreateGatewayModal({ db, schema, onClose, onSuccess }: P
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="A gateway fronts Snowpark Container Services endpoints, splitting ingress HTTP traffic across up to five service endpoints by weight (weights must sum to 100). The routing is defined by the YAML specification below."
+          message="A gateway fronts Snowpark Container Services endpoints: a traffic split routes ingress HTTP traffic across up to five service endpoints by weight (summing to 100); shadow traffic serves from one primary endpoint and mirrors a share of requests to shadow endpoints."
         />
 
         {/* OR REPLACE and IF NOT EXISTS are mutually exclusive in Snowflake;
@@ -131,33 +123,14 @@ export default function CreateGatewayModal({ db, schema, onClose, onSuccess }: P
           />
         </Form.Item>
 
-        <Form.Item label="Specification" required style={itemStyle} help="YAML traffic-split specification. Sent via FROM SPECIFICATION $$ … $$.">
-          <EndpointTargetPicker
-            defaultDb={db}
-            defaultSchema={schema}
-            onInsert={(block) => insertSpecTarget(editorRef.current, block, (b) => setSpecification((s) => s.replace(/\s*$/, "") + "\n" + b))}
-          />
-          <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-            <Editor
-              height={300}
-              language="yaml"
-              theme={editorTheme}
-              value={specification}
-              onChange={(v) => setSpecification(v ?? "")}
-              onMount={(editor) => { patchMonacoClipboard(editor); editorRef.current = editor; }}
-              options={{
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fontSize: 12,
-                wordWrap: "on",
-                automaticLayout: true,
-              }}
-            />
-          </div>
+        <Form.Item label="Specification" required style={itemStyle} help="Sent via FROM SPECIFICATION $$ … $$.">
+          <SpecEditor kind="gateway" value={specification} onChange={setSpecification} height={300}>
+            <GatewaySpecForm defaultDb={db} defaultSchema={schema} />
+          </SpecEditor>
         </Form.Item>
 
         <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
-          Each <code>value</code> is a fully-qualified endpoint <code>db.schema.service!endpoint</code> that must already exist. The traffic split can be changed later via the gateway’s Properties panel (ALTER GATEWAY … FROM SPECIFICATION).
+          Each target is a fully-qualified endpoint <code>db.schema.service!endpoint</code> that must already exist. The specification can be changed later via the gateway’s Properties panel (ALTER GATEWAY … FROM SPECIFICATION).
         </Text>
 
         <SqlPreview sql={preview} />

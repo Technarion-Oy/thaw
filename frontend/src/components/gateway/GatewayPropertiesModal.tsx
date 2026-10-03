@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Space, Typography, Alert, Tooltip, message,
 } from "antd";
@@ -11,11 +11,9 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, DescribeGateway, AlterGateway } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import Editor from "@monaco-editor/react";
-import { useThemeStore } from "../../store/themeStore";
-import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-import EndpointTargetPicker from "./EndpointTargetPicker";
-import { insertSpecTarget } from "./insertSpecTarget";
+import SpecEditor from "../service/SpecEditor";
+import { specProblems } from "../service/specDoc";
+import GatewaySpecForm from "./GatewaySpecForm";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -67,12 +65,9 @@ function UrlRow({ label, url }: { label: string; url: string }) {
 // Gateways front Snowpark Container Services endpoints, splitting ingress
 // traffic per the YAML specification. The entire ALTER GATEWAY surface is the
 // FROM SPECIFICATION update, so this panel shows the SHOW metadata plus the
-// DESCRIBE GATEWAY ingress URL(s) and exposes the live specification in an
-// editable Monaco editor — saving runs ALTER GATEWAY … FROM SPECIFICATION.
+// DESCRIBE GATEWAY ingress URL(s) and exposes the live specification in the
+// Form | YAML SpecEditor — saving runs ALTER GATEWAY … FROM SPECIFICATION.
 export default function GatewayPropertiesModal({ db, schema, name, onClose }: Props) {
-  const resolved = useThemeStore((s) => s.resolved);
-  const editorTheme = resolved === "dark" ? "vs-dark" : "vs";
-
   const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +79,6 @@ export default function GatewayPropertiesModal({ db, schema, name, onClose }: Pr
   const [specLoading, setSpecLoading] = useState(false);
   const [specError, setSpecError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const editorRef = useRef<any>(null);
 
   const reload = useCallback(async () => {
     setRows(null); setError(null);
@@ -137,6 +131,7 @@ export default function GatewayPropertiesModal({ db, schema, name, onClose }: Pr
   const comment = find("comment");
   const handledKeys = new Set(["owner", "gateway_type", "comment"]);
   const dirty = spec !== loadedSpec;
+  const invalid = specProblems("gateway", spec).length > 0;
 
   return (
     <Modal
@@ -163,7 +158,7 @@ export default function GatewayPropertiesModal({ db, schema, name, onClose }: Pr
             type="info"
             showIcon
             style={{ marginBottom: 12 }}
-            message="A gateway’s only mutable property is its traffic-split specification. Editing the YAML below and saving runs ALTER GATEWAY … FROM SPECIFICATION. To rename a gateway, recreate it with CREATE OR REPLACE."
+            message="A gateway’s only mutable property is its specification. Editing it below and saving runs ALTER GATEWAY … FROM SPECIFICATION. To rename a gateway, recreate it with CREATE OR REPLACE."
           />
 
           <div style={SECTION_HEAD}>Overview</div>
@@ -204,36 +199,18 @@ export default function GatewayPropertiesModal({ db, schema, name, onClose }: Pr
               icon={<SaveOutlined />}
               onClick={saveSpec}
               loading={saving}
-              disabled={!dirty || !spec.trim()}
+              disabled={!dirty || !spec.trim() || invalid}
             >
               Update specification
             </Button>
             {dirty && <Text type="warning" style={{ fontSize: 11 }}>Unsaved changes</Text>}
           </Space>
-          <EndpointTargetPicker
-            defaultDb={db}
-            defaultSchema={schema}
-            onInsert={(block) => insertSpecTarget(editorRef.current, block, (b) => setSpec((s) => s.replace(/\s*$/, "") + "\n" + b))}
-          />
-          <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-            <Editor
-              height={320}
-              language="yaml"
-              theme={editorTheme}
-              value={spec}
-              onChange={(v) => setSpec(v ?? "")}
-              onMount={(editor) => { patchMonacoClipboard(editor); editorRef.current = editor; }}
-              options={{
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fontSize: 12,
-                wordWrap: "on",
-                automaticLayout: true,
-              }}
-            />
-          </div>
+          {/* Keyed on the loaded spec so a reload re-picks Form vs YAML for the new text. */}
+          <SpecEditor key={loadedSpec} kind="gateway" value={spec} onChange={setSpec}>
+            <GatewaySpecForm defaultDb={db} defaultSchema={schema} />
+          </SpecEditor>
           <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 6 }}>
-            Traffic-split YAML (weights across all endpoint targets must sum to 100). The spec is only readable with USAGE / MODIFY / OWNERSHIP on the gateway.
+            Traffic-split weights must sum to 100. The spec is only readable with USAGE / MODIFY / OWNERSHIP on the gateway.
           </Text>
 
           <div style={SECTION_HEAD}>Properties</div>
