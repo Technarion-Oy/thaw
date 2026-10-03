@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (173)
+- [Frontend — npm packages](#frontend--npm-packages) (175)
 
 ## Backend — Go modules
 
@@ -9331,9 +9331,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@reduxjs/toolkit` | 2.11.2 | MIT |
 | `@standard-schema/spec` | 1.1.0 | MIT |
 | `@standard-schema/utils` | 0.3.0 | MIT |
-| `@tanstack/react-table` | 8.21.3 | MIT |
+| `@tanstack/react-store` | 0.11.2 | MIT |
+| `@tanstack/react-table` | 9.2.4 | MIT |
 | `@tanstack/react-virtual` | 3.13.24 | MIT |
-| `@tanstack/table-core` | 8.21.3 | MIT |
+| `@tanstack/store` | 0.11.2 | MIT |
+| `@tanstack/table-core` | 9.2.4 | MIT |
 | `@tanstack/virtual-core` | 3.14.0 | MIT |
 | `@types/d3-array` | 3.2.2 | MIT |
 | `@types/d3-color` | 3.1.3 | MIT |
@@ -11004,9 +11006,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### @tanstack/react-store
+
+- **Version:** 0.11.2
+- **License:** MIT
+
+```
+MIT License
+
+Copyright (c) 2021 Tanner Linsley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### @tanstack/react-table
 
-- **Version:** 8.21.3
+- **Version:** 9.2.4
 - **License:** MIT
 
 ```
@@ -11062,9 +11093,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### @tanstack/store
+
+- **Version:** 0.11.2
+- **License:** MIT
+
+```
+MIT License
+
+Copyright (c) 2021 Tanner Linsley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### @tanstack/table-core
 
-- **Version:** 8.21.3
+- **Version:** 9.2.4
 - **License:** MIT
 
 ```
