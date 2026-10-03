@@ -62,18 +62,18 @@ jobs:
           apt-get update
           apt-get install -y git curl wget gcc pkg-config
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # cache: false — the self-hosted runners' cache backend is slow for large
       # caches: enabling it added ~6 min of cache-save overhead (Go build+module
       # cache) with no restore benefit, doubling the job. Matches every other
       # workflow in this repo, which all use cache: false for the same reason.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
           cache: npm
