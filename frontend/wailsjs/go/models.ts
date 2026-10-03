@@ -2716,6 +2716,34 @@ export namespace integrations {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class Property {
+	    name: string;
+	    type: string;
+	    value: string;
+	    default: string;
+	    editable: boolean;
+	    editor: string;
+	    options: string[];
+	    unsettable: boolean;
+	    secret: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Property(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.value = source["value"];
+	        this.default = source["default"];
+	        this.editable = source["editable"];
+	        this.editor = source["editor"];
+	        this.options = source["options"];
+	        this.unsettable = source["unsettable"];
+	        this.secret = source["secret"];
+	    }
+	}
 	export class SecurityIntegrationParams {
 	    name: string;
 	    caseSensitive: boolean;

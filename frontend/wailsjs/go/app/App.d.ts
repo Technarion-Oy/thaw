@@ -134,6 +134,10 @@ export function AlterIcebergTable(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function AlterImageRepository(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function AlterIntegration(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function AlterIntegrationProperty(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterJoinPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterMaskingPolicy(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
@@ -476,6 +480,8 @@ export function DescribeExternalFunction(arg1:string,arg2:string,arg3:string,arg
 
 export function DescribeGateway(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
+export function DescribeIntegration(arg1:string,arg2:string):Promise<Array<integrations.Property>>;
+
 export function DescribeMCPServer(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
 export function DescribePasswordPolicy(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
@@ -645,8 +651,6 @@ export function GetGitCommitFilter(arg1:string,arg2:string,arg3:string):Promise<
 export function GetGitConfig():Promise<config.GitConfig>;
 
 export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
-
-export function GetIntegrationProperties(arg1:string):Promise<Array<snowflake.PropertyPair>>;
 
 export function GetJoinPolicyReferences(arg1:string,arg2:string,arg3:string):Promise<snowflake.QueryResult>;
 
