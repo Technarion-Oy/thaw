@@ -142,6 +142,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/account/IntegrationPropertiesModal.tsx",
         "frontend/src/components/account/userPropertyUtils.ts",
         "frontend/src/components/agent/AgentPropertiesModal.tsx",
         "frontend/src/components/agent/CreateAgentModal.tsx",

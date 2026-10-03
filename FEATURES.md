@@ -842,7 +842,7 @@ Click the clock icon in the Administration panel header (always visible, even be
 
 ### Integrations
 
-Browse, create, modify, and drop all six Snowflake integration types from a lazy-loading tree in the Administration panel:
+Browse, create, edit, and drop all six Snowflake integration types from a lazy-loading tree in the Administration panel:
 
 | Kind | Supported Subtypes / Providers |
 |------|-------------------------------|
@@ -855,8 +855,7 @@ Browse, create, modify, and drop all six Snowflake integration types from a lazy
 
 - **Lazy loading** — each category's integrations are fetched from Snowflake only when the node is first expanded
 - **Create** — right-click any category to open a structured form; fields change dynamically based on the selected integration type and subtype; cloud provider defaults (S3 / GCS / Azure for Storage; equivalent defaults for API) are pre-selected based on the current Snowflake region; the option is automatically disabled when the current role lacks `CREATE INTEGRATION`
-- **Properties** — right-click any integration and choose **Properties** to see its `DESCRIBE INTEGRATION` output as a key/value table
-- **Modify** — right-click and choose **Modify** to open a modal showing current DESCRIBE properties alongside an editable ALTER SQL textarea; click **Run** to execute the statement
+- **Properties** — right-click any integration and choose **Properties…** for a single editable modal over its `DESCRIBE INTEGRATION` output, shared by all six kinds: every property Snowflake lets you alter for that kind is an inline-editable row (toggle for booleans such as `ENABLED`, text for `COMMENT` / ARNs / URLs, number, dropdown for enumerations, comma-separated editor for lists such as `STORAGE_ALLOWED_LOCATIONS` or `ALLOWED_NETWORK_RULES`) that saves on its own via `ALTER <KIND> INTEGRATION … SET` and re-reads the properties; clearing a value emits `UNSET` where the grammar allows it. Secrets that DESCRIBE never returns (`API_KEY`, `OAUTH_CLIENT_SECRET`, catalog `REST_AUTHENTICATION` secrets) are set-only rows. Everything else (generated IAM user ARNs / external IDs, provider and type) stays read-only. Includes property search, **Copy**, and a **Tags** editor. Snowflake errors (e.g. missing privilege) show inline under the edited row
 - **Drop** — right-click and choose **Drop** with a Popconfirm confirmation; the category reloads automatically on success
 
 ### Backup Sets

@@ -114,6 +114,14 @@ export function AlterImageRepository(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterImageRepository'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterIntegration(arg1, arg2, arg3) {
+  return window['go']['app']['App']['AlterIntegration'](arg1, arg2, arg3);
+}
+
+export function AlterIntegrationProperty(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['AlterIntegrationProperty'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterJoinPolicy(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['AlterJoinPolicy'](arg1, arg2, arg3, arg4);
 }
@@ -798,6 +806,10 @@ export function DescribeGateway(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeGateway'](arg1, arg2, arg3);
 }
 
+export function DescribeIntegration(arg1, arg2) {
+  return window['go']['app']['App']['DescribeIntegration'](arg1, arg2);
+}
+
 export function DescribeMCPServer(arg1, arg2, arg3) {
   return window['go']['app']['App']['DescribeMCPServer'](arg1, arg2, arg3);
 }
@@ -1136,10 +1148,6 @@ export function GetGitConfig() {
 
 export function GetGitFileContent(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GetGitFileContent'](arg1, arg2, arg3, arg4);
-}
-
-export function GetIntegrationProperties(arg1) {
-  return window['go']['app']['App']['GetIntegrationProperties'](arg1);
 }
 
 export function GetJoinPolicyReferences(arg1, arg2, arg3) {

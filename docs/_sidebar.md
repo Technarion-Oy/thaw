@@ -49,7 +49,7 @@
     - [AccountPanel](frontend/components/account/AccountPanel.md)
     - [CreateIntegrationModal](frontend/components/account/CreateIntegrationModal.md)
     - [CreateUserModal](frontend/components/account/CreateUserModal.md)
-    - [IntegrationModifyModal](frontend/components/account/IntegrationModifyModal.md)
+    - [IntegrationPropertiesModal](frontend/components/account/IntegrationPropertiesModal.md)
     - [IntegrationsPanel](frontend/components/account/IntegrationsPanel.md)
     - [KeyPairAuthModal](frontend/components/account/KeyPairAuthModal.md)
     - [QueryHistoryModal](frontend/components/account/QueryHistoryModal.md)

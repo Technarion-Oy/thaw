@@ -4,7 +4,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 	"thaw/internal/apperrors"
 	"thaw/internal/integrations"
 	"thaw/internal/snowflake"
@@ -75,20 +74,18 @@ func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) 
 	return client.ListIntegrations(a.fctx(FeatureIntegrations), kind)
 }
 
-// GetIntegrationProperties runs DESCRIBE INTEGRATION for the named integration
-// and returns the result as key/value pairs.
-func (a *App) GetIntegrationProperties(name string) ([]snowflake.PropertyPair, error) {
+// DescribeIntegration runs DESCRIBE INTEGRATION for the named integration and
+// returns its rows (property, type, value, default) annotated with the edit
+// hints for the given kind — which rows are editable, with which editor — from
+// the integrations allow-list. Backs the Integration Properties modal.
+func (a *App) DescribeIntegration(kind, name string) ([]integrations.Property, error) {
 	client := a.currentClient()
 	if client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	esc := strings.ReplaceAll(name, `"`, `""`)
-	res, err := client.Execute(a.fctx(FeatureIntegrations), fmt.Sprintf(`DESCRIBE INTEGRATION "%s"`, esc))
+	res, err := client.Execute(a.fctx(FeatureIntegrations), "DESCRIBE INTEGRATION "+snowflake.QuoteIdent(name))
 	if err != nil {
 		return nil, err
-	}
-	if len(res.Rows) == 0 {
-		return []snowflake.PropertyPair{}, nil
 	}
 	toString := func(v interface{}) string {
 		if v == nil {
@@ -105,20 +102,51 @@ func (a *App) GetIntegrationProperties(name string) ([]snowflake.PropertyPair, e
 			return fmt.Sprintf("%v", t)
 		}
 	}
-	// DESCRIBE INTEGRATION returns rows of (property, property_type, property_value, property_default)
-	// We return property / property_value pairs.
-	var pairs []snowflake.PropertyPair
+	// DESCRIBE INTEGRATION returns rows of (property, property_type, property_value, property_default).
+	rows := make([]integrations.Property, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		if len(row) < 3 {
+		if len(row) < 3 || toString(row[0]) == "" {
 			continue
 		}
-		k := toString(row[0])
-		v := toString(row[2])
-		if k != "" {
-			pairs = append(pairs, snowflake.PropertyPair{Key: k, Value: v})
+		p := integrations.Property{Name: toString(row[0]), Type: toString(row[1]), Value: toString(row[2])}
+		if len(row) > 3 {
+			p.Default = toString(row[3])
 		}
+		rows = append(rows, p)
 	}
-	return pairs, nil
+	return integrations.AnnotateProperties(kind, rows), nil
+}
+
+// AlterIntegrationProperty sets (or, for an empty value, unsets) one property
+// of an integration via ALTER <kind> INTEGRATION. Only properties in the
+// integrations allow-list are accepted.
+func (a *App) AlterIntegrationProperty(kind, name, property, value string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	sql, err := integrations.BuildAlterIntegrationPropertySQL(kind, name, property, value)
+	if err != nil {
+		return err
+	}
+	return client.ExecDDL(a.fctx(FeatureIntegrations), sql)
+}
+
+// AlterIntegration runs ALTER <kind> INTEGRATION <name> <clause>. clause is
+// everything after the name — used for `SET TAG …` / `UNSET TAG …` by the
+// Properties modal's tag editor (like AlterWarehouse). The caller is
+// responsible for quoting inside the clause.
+func (a *App) AlterIntegration(kind, name, clause string) error {
+	client := a.currentClient()
+	if client == nil {
+		return apperrors.ErrNotConnected
+	}
+	k, err := integrations.NormalizeKind(kind)
+	if err != nil {
+		return err
+	}
+	return client.ExecDDL(a.fctx(FeatureIntegrations),
+		fmt.Sprintf("ALTER %s INTEGRATION %s %s", k, snowflake.QuoteIdent(name), clause))
 }
 
 // DropIntegration drops the named integration.

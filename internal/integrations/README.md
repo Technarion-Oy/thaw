@@ -1,6 +1,6 @@
 # internal/integrations
 
-> SQL DDL builders for Snowflake `CREATE INTEGRATION` statements (Storage, API, Catalog, External Access, Notification, Security).
+> SQL DDL builders for Snowflake `CREATE INTEGRATION` statements and per-property `ALTER INTEGRATION` (Storage, API, Catalog, External Access, Notification, Security).
 
 ## Responsibility
 
@@ -19,6 +19,8 @@ Note: this package (`internal/integrations`) is distinct from `internal/integrat
 |---|---|
 | `builder.go` | All parameter structs and `Build*SQL` functions; internal helpers `sq`, `qident`, `boolKw`, `identToken`, `squotedTuple`, `identListFromString`, `validateIdentRef`, `mustBeOneOf`, `secretsTuple` (value splitting uses the shared `snowflake.SplitValues`). |
 | `builder_test.go` | Unit tests for the builder functions. |
+| `alter.go` | The `alterable` allow-list (kind → property → value type), `BuildAlterIntegrationPropertySQL`, and `AnnotateProperties` / `Property` for the Properties modal. |
+| `alter_test.go` | Table-driven tests: SET / UNSET, rejected properties and enums, quoting / injection per value type, subtype gating. |
 
 ## Key types & functions
 
@@ -36,6 +38,9 @@ Note: this package (`internal/integrations`) is distinct from `internal/integrat
 | `BuildExternalAccessIntegrationSQL(p)` | Validates network rule and secret references as identifier refs. |
 | `BuildNotificationIntegrationSQL(p)` | Handles all seven notification subtypes. |
 | `BuildSecurityIntegrationSQL(p)` | Handles all six security integration types. |
+| `BuildAlterIntegrationPropertySQL(kind, name, property, value)` | `ALTER <KIND> INTEGRATION <name> SET <PROP> = <value>`, or `UNSET <PROP>` for an empty value where the grammar allows it. Rejects any property not in the `alterable` allow-list for the kind; validates and quotes the value by type (boolean / number / text / select / list / ident / identList). |
+| `Property` / `AnnotateProperties(kind, rows)` | A `DESCRIBE INTEGRATION` row plus edit hints (`editable`, `editor`, `options`, `unsettable`, `secret`). `AnnotateProperties` fills the hints from the allow-list and appends set-only rows for applicable secrets DESCRIBE doesn't return. |
+| `NormalizeKind(kind)` | Validates an integration kind for use as the `ALTER <kind> INTEGRATION` keyword. |
 
 ## Patterns & integration
 
@@ -47,3 +52,6 @@ Note: this package (`internal/integrations`) is distinct from `internal/integrat
 
 - `git_https_api` API integration is handled by a dedicated `buildGitHttpsApiSQL` function because its DDL structure (especially `API_USER_AUTHENTICATION` block) differs significantly from the other API providers.
 - `secretsTuple` distinguishes the special keywords `ALL` and `NONE` from ordinary identifier references to avoid quoting them.
+- The `alterable` table in `alter.go` is the **single source of truth** for what the Properties modal can edit — add a property there (derive it from the matching `internal/sqlgrammar` `ParseAlter*Integration*` doc comment), never in TypeScript. Subtypes of a kind are unioned; use `requires` when a property name also appears as a read-only row on another subtype (e.g. `OAUTH_CLIENT_ID` on Snowflake OAuth).
+- ALTER values are quoted with `snowflake.QuoteTextLit` (backslashes doubled), not `QuoteStringLit` — a value ending in `\` would otherwise escape the closing quote.
+- Not editable yet (render read-only): `WEBHOOK_HEADERS`, the Azure / GCP notification queue fields, RSA public keys, and the `REFRESH` actions.
