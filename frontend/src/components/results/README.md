@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-Renders the results of a Snowflake query as a virtualised TanStack Table v8 grid. Provides
+Renders the results of a Snowflake query as a virtualised TanStack Table v9 grid (via the v8-compatible `@tanstack/react-table/legacy` entry point — `useLegacyTable`). Provides
 per-column formatting, conditional colour rules, in-grid search, a status bar with selection
 statistics, quick charting, EXPLAIN output, and the Query Profile (operator stats). Integrates
 with the `gridStore` singleton for shared selection/search/formatting state.

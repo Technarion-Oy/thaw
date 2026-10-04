@@ -8,10 +8,12 @@ import {
   InboxOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import {
-  useReactTable,
+  useLegacyTable as useReactTable,
   getCoreRowModel,
   getSortedRowModel,
-  type ColumnDef,
+  type LegacyColumnDef as ColumnDef,
+} from "@tanstack/react-table/legacy";
+import {
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";

@@ -3,7 +3,7 @@
 // @thaw-domain: SQL Editor & Diagnostics
 
 import { create } from "zustand";
-import type { Row } from "@tanstack/react-table";
+import type { LegacyRow as Row } from "@tanstack/react-table/legacy";
 
 // ─── Selection ────────────────────────────────────────────────────────────────
 

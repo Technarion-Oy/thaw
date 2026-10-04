@@ -13,16 +13,18 @@ import React, {
   Suspense,
 } from "react";
 import {
-  useReactTable,
+  useLegacyTable as useReactTable,
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
-  type ColumnDef,
+  type LegacyColumnDef as ColumnDef,
+  type LegacyHeader as Header,
+  type LegacyCell as Cell,
+} from "@tanstack/react-table/legacy";
+import {
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
-  type Header,
-  type Cell,
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -258,7 +260,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
   const [containerWidth, setContainerWidth] = useState(0);
-  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
+  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ start: [], end: [] });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   // Visual column order (TanStack column IDs). View-only — never touches result.columns/rows.
   // Empty array means default SELECT order. Reset on schema change, preserved on re-run.
@@ -311,7 +313,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       });
       setColumnSizing(sizing);
       setSorting([]);
-      setColumnPinning({ left: [], right: [] });
+      setColumnPinning({ start: [], end: [] });
       setColumnFilters([]);
       setColumnOrder(defaultColumnOrder(result.columns));
       if (!standalone) resetGrid(); // full reset — clears formatting
@@ -406,8 +408,8 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   });
 
   // Separate pinned and unpinned columns
-  const leftPinned = table.getLeftLeafColumns();
-  const rightPinned = table.getRightLeafColumns();
+  const leftPinned = table.getStartLeafColumns();
+  const rightPinned = table.getEndLeafColumns();
   const centerColumns = table.getCenterLeafColumns();
 
   // Visual ⇄ original column index translation. Leaf columns in left-to-right
@@ -852,25 +854,25 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
   const pinColumn = (columnId: string, direction: "left" | "right") => {
     setColumnPinning((prev) => {
-      const left = (prev.left ?? []).filter((id) => id !== columnId);
-      const right = (prev.right ?? []).filter((id) => id !== columnId);
-      if (direction === "left") left.push(columnId);
-      else right.push(columnId);
-      return { left, right };
+      const start = prev.start.filter((id) => id !== columnId);
+      const end = prev.end.filter((id) => id !== columnId);
+      if (direction === "left") start.push(columnId);
+      else end.push(columnId);
+      return { start, end };
     });
     setHeaderCtxMenu(null);
   };
 
   const unpinColumn = (columnId: string) => {
     setColumnPinning((prev) => ({
-      left: (prev.left ?? []).filter((id) => id !== columnId),
-      right: (prev.right ?? []).filter((id) => id !== columnId),
+      start: prev.start.filter((id) => id !== columnId),
+      end: prev.end.filter((id) => id !== columnId),
     }));
     setHeaderCtxMenu(null);
   };
 
   const isPinned = (columnId: string) => {
-    return (columnPinning.left ?? []).includes(columnId) || (columnPinning.right ?? []).includes(columnId);
+    return columnPinning.start.includes(columnId) || columnPinning.end.includes(columnId);
   };
 
   // ─── Column reordering (drag headers) ─────────────────────────────────────
