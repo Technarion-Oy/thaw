@@ -9355,6 +9355,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@types/react-dom` | 19.3.0 | MIT |
 | `@types/trusted-types` | 2.0.7 | MIT |
 | `@types/use-sync-external-store` | 0.0.6 | MIT |
+| `@vscode/l10n` | 0.0.18 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
 | `@xyflow/react` | 12.12.0 | MIT |
@@ -9406,12 +9407,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `monaco-marker-data-provider` | 1.2.5 | MIT |
 | `monaco-types` | 0.1.2 | MIT |
 | `monaco-worker-manager` | 2.0.1 | MIT |
-| `monaco-yaml` | 5.4.1 | MIT |
+| `monaco-yaml` | 5.5.1 | MIT |
 | `moo` | 0.5.3 | BSD-3-Clause |
 | `nearley` | 2.20.1 | MIT |
 | `node-sql-parser` | 5.4.0 | Apache-2.0 |
 | `path-browserify` | 1.0.1 | MIT |
 | `prettier` | 3.8.1 | MIT |
+| `proxy-disposable` | 1.0.0 | MIT |
 | `railroad-diagrams` | 1.0.0 | CC0-1.0 |
 | `randexp` | 0.4.6 | MIT |
 | `react` | 19.3.0 | MIT |
@@ -11701,6 +11703,13 @@ SOFTWARE.
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
 ```
+
+### @vscode/l10n
+
+- **Version:** 0.0.18
+- **License:** MIT
+
+_No license file was found in the distributed package. Refer to the project's repository for its license terms._
 
 ### @xterm/addon-fit
 
@@ -14527,7 +14536,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### monaco-yaml
 
-- **Version:** 5.4.1
+- **Version:** 5.5.1
 - **License:** MIT
 
 ```
@@ -14867,6 +14876,32 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### proxy-disposable
+
+- **Version:** 1.0.0
+- **License:** MIT
+
+```
+# MIT License
+
+Copyright © 2026 Remco Haszing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the “Software”), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### railroad-diagrams
