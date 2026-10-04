@@ -9332,9 +9332,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@standard-schema/spec` | 1.1.0 | MIT |
 | `@standard-schema/utils` | 0.3.0 | MIT |
 | `@tanstack/react-table` | 8.21.3 | MIT |
-| `@tanstack/react-virtual` | 3.13.24 | MIT |
+| `@tanstack/react-virtual` | 3.14.13 | MIT |
 | `@tanstack/table-core` | 8.21.3 | MIT |
-| `@tanstack/virtual-core` | 3.14.0 | MIT |
+| `@tanstack/virtual-core` | 3.17.11 | MIT |
 | `@types/d3-array` | 3.2.2 | MIT |
 | `@types/d3-color` | 3.1.3 | MIT |
 | `@types/d3-drag` | 3.0.7 | MIT |
@@ -11035,7 +11035,7 @@ SOFTWARE.
 
 ### @tanstack/react-virtual
 
-- **Version:** 3.13.24
+- **Version:** 3.14.13
 - **License:** MIT
 
 ```
@@ -11093,7 +11093,7 @@ SOFTWARE.
 
 ### @tanstack/virtual-core
 
-- **Version:** 3.14.0
+- **Version:** 3.17.11
 - **License:** MIT
 
 ```
