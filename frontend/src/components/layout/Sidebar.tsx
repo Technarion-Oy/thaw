@@ -93,7 +93,7 @@ import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "react";
 import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -112,6 +112,7 @@ import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
+import CreateSchemaModal from "../schema/CreateSchemaModal";
 import CreateTableModal from "../database/CreateTableModal";
 import AddColumnModal from "../database/AddColumnModal";
 import InsertRowModal from "../database/InsertRowModal";
@@ -831,6 +832,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
+  const [createSchemaDb, setCreateSchemaDb] = useState<string | null>(null);
+  // Databases that accept DDL (not shared / imported). null = unknown, so
+  // nothing is disabled on a failed lookup.
+  const [userDbs, setUserDbs] = useState<Set<string> | null>(null);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [addColumnModal, setAddColumnModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [insertRowModal, setInsertRowModal] = useState<{ db: string; schema: string; table: string } | null>(null);
@@ -1257,6 +1262,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       );
       useObjectStore.getState().setDatabases(dbs);
       setLoaded(true);
+      ListUserDatabases().then((u) => setUserDbs(new Set(u ?? []))).catch(() => setUserDbs(null));
       window.dispatchEvent(new Event("thaw:refresh-diagnostics"));
     } catch (e) {
       console.error(e);
@@ -4697,6 +4703,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           onClick={(e) => e.stopPropagation()}
         >
           {ctxMenu.nodeType === "db" && menuItem("Create Database…", <DatabaseOutlined style={{ fontSize: 12 }} />, () => { setCtxMenu(null); setCreateDbOpen(true); })}
+          {ctxMenu.nodeType === "db" && menuItem("Create Schema…", <PartitionOutlined style={{ fontSize: 12 }} />, () => { setCreateSchemaDb(ctxMenu.nodeKey.slice("db:".length)); setCtxMenu(null); }, undefined, userDbs !== null && !userDbs.has(ctxMenu.nodeKey.slice("db:".length)), "Schemas cannot be created in a shared / imported database.")}
           {ctxMenu.nodeType === "db" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Objects…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
@@ -5387,6 +5394,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         <CreateDatabaseModal
           onClose={() => setCreateDbOpen(false)}
           onSuccess={refreshAllDatabases}
+        />
+      )}
+
+      {/* Create Schema modal */}
+      {createSchemaDb && (
+        <CreateSchemaModal
+          db={createSchemaDb}
+          onClose={() => setCreateSchemaDb(null)}
+          onSuccess={(schema) => refreshDatabaseByName(createSchemaDb, { schema })}
         />
       )}
 
