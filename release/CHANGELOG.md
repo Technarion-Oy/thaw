@@ -1,3 +1,30 @@
+# [0.9.0](https://github.com/Technarion-Oy/thaw/compare/v0.8.0...v0.9.0) (2026-10-04)
+
+
+### Bug Fixes
+
+* Align compute pool grammar rules with Snowflake docs ([#947](https://github.com/Technarion-Oy/thaw/issues/947)) ([fcbc590](https://github.com/Technarion-Oy/thaw/commit/fcbc59087de5ad7a2048344a30927dcce935f5e5))
+
+
+### Features
+
+* add "Copy selection" to the result grid context menu ([#986](https://github.com/Technarion-Oy/thaw/issues/986)) ([c98130a](https://github.com/Technarion-Oy/thaw/commit/c98130abbfe69aa92892e2b3674b60216f8081c6)), closes [#984](https://github.com/Technarion-Oy/thaw/issues/984)
+* Compute Pools tab — create, alter, suspend/resume, stop all, nodes, instance families ([#950](https://github.com/Technarion-Oy/thaw/issues/950)) ([b8855b4](https://github.com/Technarion-Oy/thaw/commit/b8855b479dbe36e9aeaeae51905b724d4f690980)), closes [#941](https://github.com/Technarion-Oy/thaw/issues/941)
+* editable Integration Properties modal ([#964](https://github.com/Technarion-Oy/thaw/issues/964)) ([ece451c](https://github.com/Technarion-Oy/thaw/commit/ece451c93dfd9c264662cd1293beb3a5675c1a50)), closes [#961](https://github.com/Technarion-Oy/thaw/issues/961)
+* Form | YAML editors for SPCS specifications ([#963](https://github.com/Technarion-Oy/thaw/issues/963)) ([5ae4ac8](https://github.com/Technarion-Oy/thaw/commit/5ae4ac8c3b59b7364a30685559c2566c1c6ec092)), closes [#958](https://github.com/Technarion-Oy/thaw/issues/958)
+* Images and Gateways tabs — account-wide lists over the existing modals ([#956](https://github.com/Technarion-Oy/thaw/issues/956)) ([a9b5daa](https://github.com/Technarion-Oy/thaw/commit/a9b5daa54d391eaddb9b788b9c644b6fdc38b16d)), closes [#943](https://github.com/Technarion-Oy/thaw/issues/943)
+* Jobs tab — Run Job dialog (EXECUTE [INFERENCE] JOB SERVICE) and job list ([#953](https://github.com/Technarion-Oy/thaw/issues/953)) ([668862a](https://github.com/Technarion-Oy/thaw/commit/668862a507eb3290e076651d417e3017fa704e0d)), closes [#942](https://github.com/Technarion-Oy/thaw/issues/942)
+* Service properties — instances, volumes, service roles, redeploy ([#949](https://github.com/Technarion-Oy/thaw/issues/949)) ([1c04a95](https://github.com/Technarion-Oy/thaw/commit/1c04a959b4ac1e25d84538a1942a07c998f18854)), closes [#940](https://github.com/Technarion-Oy/thaw/issues/940)
+* Services tab — account-wide service list with lifecycle actions ([#957](https://github.com/Technarion-Oy/thaw/issues/957)) ([8e5559d](https://github.com/Technarion-Oy/thaw/commit/8e5559dd9ceb946a2ebba98c328d3ba2b622a2f0))
+* Snapshots — SNAPSHOT object kind, create/properties/drop/undrop, and Snapshots tab ([#960](https://github.com/Technarion-Oy/thaw/issues/960)) ([2175bde](https://github.com/Technarion-Oy/thaw/commit/2175bde9531808c93fe8563e7d2a5f7ab704c099)), closes [#945](https://github.com/Technarion-Oy/thaw/issues/945)
+* Snowpark Container Services submenu and dialog shell ([#948](https://github.com/Technarion-Oy/thaw/issues/948)) ([1d8282a](https://github.com/Technarion-Oy/thaw/commit/1d8282ad808ec53332adcafa8312da6b4d154d19)), closes [#939](https://github.com/Technarion-Oy/thaw/issues/939) [#945](https://github.com/Technarion-Oy/thaw/issues/945) [944/#945](https://github.com/Technarion-Oy/thaw/issues/945) [#939](https://github.com/Technarion-Oy/thaw/issues/939)
+* Snowpark Container Services tools ([#962](https://github.com/Technarion-Oy/thaw/issues/962)) ([f546f82](https://github.com/Technarion-Oy/thaw/commit/f546f82152a1d5d5c3580f93a4c5415bd8017f98)), closes [#946](https://github.com/Technarion-Oy/thaw/issues/946) [#945](https://github.com/Technarion-Oy/thaw/issues/945)
+
+
+### Performance Improvements
+
+* cap Quick Chart at 2,000 sampled rows ([#985](https://github.com/Technarion-Oy/thaw/issues/985)) ([cb75f74](https://github.com/Technarion-Oy/thaw/commit/cb75f746d4dda3df79be8e93096ae3b1be9fd415)), closes [#983](https://github.com/Technarion-Oy/thaw/issues/983)
+
 # [0.8.0](https://github.com/Technarion-Oy/thaw/compare/v0.7.1...v0.8.0) (2026-09-20)
 
 
