@@ -9423,7 +9423,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `ret` | 0.1.15 | MIT |
 | `scheduler` | 0.28.0 | MIT |
 | `scroll-into-view-if-needed` | 3.1.0 | MIT |
-| `sql-formatter` | 15.7.3 | MIT |
+| `sql-formatter` | 15.9.0 | MIT |
 | `ssf` | 0.11.2 | Apache-2.0 |
 | `state-local` | 1.0.7 | MIT |
 | `string-convert` | 0.2.1 | MIT |
@@ -15162,7 +15162,7 @@ SOFTWARE.
 
 ### sql-formatter
 
-- **Version:** 15.7.3
+- **Version:** 15.9.0
 - **License:** MIT
 
 ```
