@@ -18,7 +18,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import type { Row } from "@tanstack/react-table";
+import type { LegacyRow as Row } from "@tanstack/react-table/legacy";
 import type { SelectionRange } from "../../store/gridStore";
 import { visualToOriginalIndex } from "./columnOrderUtils";
 
