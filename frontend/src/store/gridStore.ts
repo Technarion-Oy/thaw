@@ -3,7 +3,8 @@
 // @thaw-domain: SQL Editor & Diagnostics
 
 import { create } from "zustand";
-import type { LegacyRow as Row } from "@tanstack/react-table/legacy";
+import type { Row } from "@tanstack/react-table";
+import type { ResultGridFeatures } from "../utils/tableFeatures";
 
 // ─── Selection ────────────────────────────────────────────────────────────────
 
@@ -66,8 +67,8 @@ export type ConditionalRule = ColorScaleRule | DataBarRule | TextMatchRule;
 
 interface GridState {
   // Filtered/sorted rows from TanStack table model (set by ResultGrid)
-  tableRows: Row<unknown[]>[] | null;
-  setTableRows: (rows: Row<unknown[]>[]) => void;
+  tableRows: Row<ResultGridFeatures, unknown[]>[] | null;
+  setTableRows: (rows: Row<ResultGridFeatures, unknown[]>[]) => void;
 
   // Range selection. NOTE: selectionRange.startCol/endCol are *visual* column
   // positions (left-to-right on screen), not original SELECT indices — columns
@@ -115,7 +116,7 @@ interface GridState {
 }
 
 const initialState = {
-  tableRows: null as Row<unknown[]>[] | null,
+  tableRows: null as Row<ResultGridFeatures, unknown[]>[] | null,
   selectionRange: null as SelectionRange | null,
   selectionOrigin: null as SelectionOrigin | null,
   columnVisualOrder: null as number[] | null,

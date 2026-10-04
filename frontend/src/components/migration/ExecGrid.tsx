@@ -5,15 +5,12 @@
 import { useEffect, useRef, useMemo, useState } from "react";
 import { Tag } from "antd";
 import {
-  useLegacyTable as useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  type LegacyColumnDef as ColumnDef,
-} from "@tanstack/react-table/legacy";
-import {
+  useTable,
+  type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type MigrationExecEvent,
@@ -38,7 +35,7 @@ export default function ExecGrid({ events, deployDone }: ExecGridProps) {
     [events]
   );
 
-  const columns = useMemo<ColumnDef<MigrationExecEvent>[]>(() => [
+  const columns = useMemo<ColumnDef<SortableGridFeatures, MigrationExecEvent>[]>(() => [
     {
       id: "pass",
       accessorKey: "pass",
@@ -81,13 +78,12 @@ export default function ExecGrid({ events, deployDone }: ExecGridProps) {
     },
   ], []);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortableGridFeatures,
     data: terminalEvents,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -100,7 +96,7 @@ export default function ExecGrid({ events, deployDone }: ExecGridProps) {
     overscan: 5,
   });
   const virtualRows = virtualizer.getVirtualItems();
-  const visibleCols = table.getVisibleLeafColumns();
+  const visibleCols = table.getAllLeafColumns();
 
   // Auto-scroll to the latest event during deployment
   useEffect(() => {
@@ -208,7 +204,7 @@ export default function ExecGrid({ events, deployDone }: ExecGridProps) {
                     : undefined,
                 }}
               >
-                {row.getVisibleCells().map((cell) => (
+                {row.getAllCells().map((cell) => (
                   <td
                     key={cell.id}
                     style={{

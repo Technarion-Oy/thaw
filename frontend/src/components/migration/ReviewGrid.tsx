@@ -5,15 +5,12 @@
 import { useRef, useMemo, useState } from "react";
 import { Checkbox, Tag } from "antd";
 import {
-  useLegacyTable as useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  type LegacyColumnDef as ColumnDef,
-} from "@tanstack/react-table/legacy";
-import {
+  useTable,
+  type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type MigrationDiffItem,
@@ -41,7 +38,7 @@ export default function ReviewGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
 
-  const columns = useMemo<ColumnDef<MigrationDiffItem>[]>(() => [
+  const columns = useMemo<ColumnDef<SortableGridFeatures, MigrationDiffItem>[]>(() => [
     {
       id: "checkbox",
       header: "",
@@ -92,13 +89,12 @@ export default function ReviewGrid({
     },
   ], []);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortableGridFeatures,
     data,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -111,7 +107,7 @@ export default function ReviewGrid({
     overscan: 5,
   });
   const virtualRows = virtualizer.getVirtualItems();
-  const visibleCols = table.getVisibleLeafColumns();
+  const visibleCols = table.getAllLeafColumns();
 
   return (
     <div
@@ -218,7 +214,7 @@ export default function ReviewGrid({
                 }}
                 onClick={() => onRowClick(row.original)}
               >
-                {row.getVisibleCells().map((cell) => (
+                {row.getAllCells().map((cell) => (
                   <td
                     key={cell.id}
                     style={{

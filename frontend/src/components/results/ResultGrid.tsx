@@ -13,20 +13,16 @@ import React, {
   Suspense,
 } from "react";
 import {
-  useLegacyTable as useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getFilteredRowModel,
-  type LegacyColumnDef as ColumnDef,
-  type LegacyHeader as Header,
-  type LegacyCell as Cell,
-} from "@tanstack/react-table/legacy";
-import {
+  useTable,
+  type ColumnDef,
+  type Header,
+  type Cell,
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
   flexRender,
 } from "@tanstack/react-table";
+import { resultGridFeatures, type ResultGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, message } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
@@ -362,7 +358,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   }, [conditionalRuleColumns, result.rows]);
 
   // Column definitions
-  const columns = useMemo<ColumnDef<unknown[]>[]>(
+  const columns = useMemo<ColumnDef<ResultGridFeatures, unknown[]>[]>(
     () =>
       result.columns.map((col, colIdx) => ({
         id: `${colIdx}_${col}`,
@@ -376,7 +372,8 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     [result.columns, initialWidths],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: resultGridFeatures,
     data,
     columns,
     state: { sorting, columnSizing, columnPinning, columnFilters, columnOrder },
@@ -385,9 +382,6 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     onColumnPinningChange: setColumnPinning,
     onColumnFiltersChange: setColumnFilters,
     onColumnOrderChange: setColumnOrder,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -418,7 +412,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   // *visual* position space; data reads translate back to the original SELECT
   // index via visualToOriginal so highlight/copy/aggregations stay correct
   // (and copy emits in visual order) no matter how columns are arranged.
-  const visualLeafColumns = table.getVisibleLeafColumns();
+  const visualLeafColumns = table.getAllLeafColumns();
   const visualOrderKey = visualLeafColumns.map((c) => c.id).join("\0");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const visualToOriginal = useMemo(
@@ -1057,7 +1051,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
   // ─── Render a header cell ─────────────────────────────────────────────────
 
-  const renderHeaderCell = (columnId: string, colIndex: number, header: Header<unknown[], unknown>, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+  const renderHeaderCell = (columnId: string, colIndex: number, header: Header<ResultGridFeatures, unknown[], unknown>, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const column = header.column;
     const isSorted = column.getIsSorted();
     const isFiltered = columnFilters.some((f) => f.id === columnId);
@@ -1190,7 +1184,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
 
   // ─── Render a body cell ───────────────────────────────────────────────────
 
-  const renderBodyCell = (cell: Cell<unknown[], unknown>, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+  const renderBodyCell = (cell: Cell<ResultGridFeatures, unknown[], unknown>, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const columnId = cell.column.id;
     const colIdx = colIdxFromColumnId(columnId);
     // Range selection is tracked in visual-position space (see visualToOriginal).
@@ -1410,7 +1404,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
             {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
               if (!row) return null;
-              const cells = row.getVisibleCells();
+              const cells = row.getAllCells();
               const cellMap = new Map(cells.map((c) => [c.column.id, c]));
               return (
                 <tr

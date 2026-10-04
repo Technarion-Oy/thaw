@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-Renders the results of a Snowflake query as a virtualised TanStack Table v9 grid (via the v8-compatible `@tanstack/react-table/legacy` entry point — `useLegacyTable`). Provides
+Renders the results of a Snowflake query as a virtualised TanStack Table v9 grid (`useTable` with the explicit `resultGridFeatures` set from `utils/tableFeatures.ts` — sorting, filtering, pinning, sizing/resizing, ordering). Provides
 per-column formatting, conditional colour rules, in-grid search, a status bar with selection
 statistics, quick charting, EXPLAIN output, and the Query Profile (operator stats). Integrates
 with the `gridStore` singleton for shared selection/search/formatting state.
@@ -71,7 +71,7 @@ in `columnOrderUtils.ts` (unit-tested). Gated behind the `columnReorder` feature
 **Visual vs. original column indices:** Range selection (and therefore copy, the StatusBar
 aggregations, Quick Chart, and the Cell Detail Panel) is tracked in **visual** column positions
 (left-to-right on screen), because columns can be reordered *and* pinned — visual order ≠ SELECT
-order. `ResultGrid` builds a `visualToOriginal` map from `table.getVisibleLeafColumns()` and
+order. `ResultGrid` builds a `visualToOriginal` map from `table.getAllLeafColumns()` and
 publishes it to `gridStore.columnVisualOrder`. Selection handlers convert original→visual via
 `originalToVisual`; every data read converts back with `visualToOriginalIndex(map, visualPos)` so
 highlight, aggregation, and copy cover exactly the columns the user swept, and copy emits in visual
