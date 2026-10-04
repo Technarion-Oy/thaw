@@ -533,7 +533,7 @@ export function ensureMonacoSetup(monaco: unknown): void {
     hover: true,
     completion: true,
     validate: true,
-    format: true,
+    format: { enable: true },
     schemas: [
       {
         uri: "thaw://spcs/service",
