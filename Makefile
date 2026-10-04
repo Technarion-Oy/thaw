@@ -2,7 +2,7 @@
 #
 # make docs          Regenerate all documentation (frontend + backend).
 # make docs-serve    Serve docs/ locally at http://localhost:4000
-# make install-tools Install gomarkdoc and TypeDoc devDependencies (run once).
+# make install-tools Install gomarkdoc (run once). TypeDoc runs via npx (see frontend/package.json).
 
 GOPATH_BIN   := $(shell go env GOPATH)/bin
 GOMARKDOC    := $(GOPATH_BIN)/gomarkdoc
@@ -37,7 +37,7 @@ docs: docs-frontend docs-backend docs-sidebar
 docs-frontend:
 	@echo "==> Frontend docs (TypeDoc)…"
 	@mkdir -p $(DOCS_FRONTEND)
-	cd frontend && npx typedoc --options typedoc.json
+	cd frontend && npm run docs
 
 ## docs-backend: Generate Go docs with gomarkdoc → docs/backend/
 docs-backend:
@@ -99,10 +99,9 @@ docs-serve:
 	@echo "Serving docs at http://localhost:$(DOCS_PORT) — Ctrl+C to stop"
 	python3 -m http.server $(DOCS_PORT) --directory $(DOCS_DIR)
 
-## install-tools: Install gomarkdoc and TypeDoc (run once per machine).
+## install-tools: Install gomarkdoc (run once per machine). TypeDoc needs no install:
+## `npm run docs` fetches it via npx with its own TypeScript 5.x (TypeDoc can't run on TS 7).
 install-tools:
 	@echo "==> Installing gomarkdoc…"
 	go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@latest
-	@echo "==> Installing TypeDoc…"
-	cd frontend && npm install --save-dev typedoc typedoc-plugin-markdown
 	@echo "Done. You can now run 'make docs'."
