@@ -21,7 +21,7 @@ import {
 import type { Row } from "@tanstack/react-table";
 import type { ResultGridFeatures } from "../../utils/tableFeatures";
 import type { SelectionRange } from "../../store/gridStore";
-import { visualToOriginalIndex } from "./columnOrderUtils";
+import { buildQuickChartData } from "./quickChartUtils";
 
 type ChartType = "bar" | "line" | "scatter";
 
@@ -36,18 +36,6 @@ interface Props {
   onClose: () => void;
 }
 
-// Detect if a column is primarily numeric by sampling values.
-function isNumericColumn(values: unknown[]): boolean {
-  let numericCount = 0;
-  let total = 0;
-  for (const v of values) {
-    if (v === null || v === undefined) continue;
-    total++;
-    if (!isNaN(Number(v)) && v !== "" && v !== true && v !== false) numericCount++;
-  }
-  return total > 0 && numericCount / total > 0.7;
-}
-
 const CHART_COLORS = [
   "#1677ff", "#52c41a", "#fa8c16", "#eb2f96", "#722ed1",
   "#13c2c2", "#f5222d", "#faad14",
@@ -56,73 +44,11 @@ const CHART_COLORS = [
 export default function QuickChartModal({ tableRows, columns, selectionRange, visualToOriginal, onClose }: Props) {
   const [chartType, setChartType] = useState<ChartType>("bar");
 
-  const { data, xKey, valueKeys } = useMemo(() => {
-    const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
-    const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow);
-    const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
-    const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
-
-    // selectionRange columns are visual positions; translate each to its
-    // original SELECT index (in visual, left-to-right order) for data reads.
-    const colIndices: number[] = [];
-    for (let c = minCol; c <= maxCol; c++) colIndices.push(visualToOriginalIndex(visualToOriginal, c));
-
-    const names = colIndices.map((c) => columns[c] ?? `Col ${c}`);
-
-    // Sample values per column to detect types
-    const sampleValues = colIndices.map((c) => {
-      const vals: unknown[] = [];
-      for (let r = minRow; r <= maxRow; r++) {
-        vals.push(tableRows[r]?.original[c]);
-      }
-      return vals;
-    });
-
-    const numericFlags = sampleValues.map((vals) => isNumericColumn(vals));
-
-    // Pick x-axis: first non-numeric column, or first column if all numeric
-    let xIdx = numericFlags.findIndex((n) => !n);
-    if (xIdx < 0) xIdx = 0;
-
-    const xColIndex = colIndices[xIdx];
-    const xName = names[xIdx];
-
-    // Value columns: all numeric columns except the x-axis
-    const valCols: { index: number; name: string }[] = [];
-    for (let i = 0; i < colIndices.length; i++) {
-      if (i === xIdx) continue;
-      if (numericFlags[i]) {
-        valCols.push({ index: colIndices[i], name: names[i] });
-      }
-    }
-
-    // When all columns are numeric, xIdx is 0 and was excluded from valCols above.
-    // Add it back so at least one value column is available for charting.
-    if (valCols.length === 0 && numericFlags[xIdx]) {
-      valCols.push({ index: colIndices[xIdx], name: names[xIdx] });
-    }
-
-    // Build chart data
-    const rows: Record<string, unknown>[] = [];
-    for (let r = minRow; r <= maxRow; r++) {
-      const row = tableRows[r]?.original;
-      if (!row) continue;
-      const entry: Record<string, unknown> = {
-        [xName]: row[xColIndex] != null ? String(row[xColIndex]) : `Row ${r}`,
-      };
-      for (const vc of valCols) {
-        const val = row[vc.index];
-        entry[vc.name] = val != null ? Number(val) : null;
-      }
-      rows.push(entry);
-    }
-
-    return {
-      data: rows,
-      xKey: xName,
-      valueKeys: valCols.map((vc) => vc.name),
-    };
-  }, [tableRows, columns, selectionRange, visualToOriginal]);
+  const { data, xKey, valueKeys, totalRows } = useMemo(
+    () => buildQuickChartData(tableRows, columns, selectionRange, visualToOriginal),
+    [tableRows, columns, selectionRange, visualToOriginal],
+  );
+  const reduced = data.length < totalRows;
 
   const renderChart = () => {
     if (valueKeys.length === 0) {
@@ -146,7 +72,7 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, vi
               <Tooltip />
               <Legend />
               {valueKeys.map((key, i) => (
-                <Bar key={key} dataKey={key} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                <Bar key={key} dataKey={key} fill={CHART_COLORS[i % CHART_COLORS.length]} isAnimationActive={!reduced} />
               ))}
             </BarChart>
           </ResponsiveContainer>
@@ -167,6 +93,7 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, vi
                   dataKey={key}
                   stroke={CHART_COLORS[i % CHART_COLORS.length]}
                   dot={data.length < 50}
+                  isAnimationActive={!reduced}
                 />
               ))}
             </LineChart>
@@ -191,6 +118,7 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, vi
                   name={key}
                   dataKey={key}
                   fill={CHART_COLORS[i % CHART_COLORS.length]}
+                  isAnimationActive={!reduced}
                 />
               ))}
             </ScatterChart>
@@ -220,7 +148,10 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, vi
       </div>
       {renderChart()}
       <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
-        X-axis: {xKey} | Value columns: {valueKeys.join(", ") || "none"} | {data.length} data points
+        X-axis: {xKey} | Value columns: {valueKeys.join(", ") || "none"} | {" "}
+        {reduced
+          ? `showing ${data.length.toLocaleString()} of ${totalRows.toLocaleString()} rows (evenly sampled)`
+          : `${data.length} data points`}
       </div>
     </Modal>
   );

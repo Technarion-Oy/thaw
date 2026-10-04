@@ -69,6 +69,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/results/StatusBar.tsx",
         "frontend/src/components/results/cellDetailUtils.ts",
         "frontend/src/components/results/columnOrderUtils.ts",
+        "frontend/src/components/results/quickChartUtils.ts",
         "frontend/src/store/editorTabPrefsStore.ts",
         "frontend/src/store/gridStore.ts",
         "frontend/src/store/queryStore.ts",
