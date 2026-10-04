@@ -33,7 +33,7 @@ import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
 import { computeCellScrollLeft } from "./cellDetailUtils";
-import { defaultColumnOrder, reorderColumnOrder, visualToOriginalIndex } from "./columnOrderUtils";
+import { defaultColumnOrder, reorderColumnOrder, selectionToTsv } from "./columnOrderUtils";
 import { applyFormat } from "./DataTypeFormatModal";
 import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
 import ColumnFilterDropdown from "./ColumnFilterDropdown";
@@ -41,6 +41,8 @@ import ConditionalFormattingModal from "./ConditionalFormattingModal";
 import DataTypeFormatModal from "./DataTypeFormatModal";
 // Lazy — pulls in recharts (+ its d3 deps) only when the Quick Chart dialog opens.
 const QuickChartModal = lazy(() => import("./QuickChartModal"));
+
+const isMac = /Macintosh/i.test(navigator.userAgent);
 
 export interface ResultGridHandle {
   scrollToRow: (rowIndex: number) => void;
@@ -651,10 +653,23 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const visualToOriginalRef = useRef(visualToOriginal);
   visualToOriginalRef.current = visualToOriginal;
 
+  // Shared by the ⌘C shortcut and the cell context menu's "Copy selection" items.
+  const copySelection = useCallback((withHeaders: boolean) => {
+    const sel = selectionRangeRef.current;
+    if (!sel) return;
+    const tsv = selectionToTsv(
+      sel, result.columns, (r) => tableRowsRef.current?.[r]?.original, visualToOriginalRef.current, withHeaders,
+    );
+    ClipboardSetText(tsv).then(() => {
+      const count = (Math.abs(sel.endRow - sel.startRow) + 1) * (Math.abs(sel.endCol - sel.startCol) + 1);
+      message.success(`Copied ${count} cells`);
+    });
+  }, [result.columns]);
+
   useEffect(() => {
     if (!featureFlags.multiCellCopy) return;
     const handler = (e: KeyboardEvent) => {
-      const cmd = /Macintosh/i.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
+      const cmd = isMac ? e.metaKey : e.ctrlKey;
       if (!cmd || e.key !== "c") return;
       const sel = selectionRangeRef.current;
       if (!sel) return;
@@ -671,50 +686,11 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       }
 
       e.preventDefault();
-      const { startRow, endRow, startCol, endCol } = sel;
-      const minRow = Math.min(startRow, endRow);
-      const maxRow = Math.max(startRow, endRow);
-      const minCol = Math.min(startCol, endCol);
-      const maxCol = Math.max(startCol, endCol);
-
-      // Escape TSV special characters: wrap in double-quotes if value contains
-      // tab, newline, or double-quote (with internal quotes doubled).
-      const tsvEscape = (v: string) =>
-        v.includes("\t") || v.includes("\n") || v.includes("\r") || v.includes('"')
-          ? `"${v.replace(/"/g, '""')}"` : v;
-
-      // selectionRange columns are *visual* positions; translate each to its
-      // original SELECT index so the copied data follows the on-screen column
-      // arrangement (reorder + pinning) and emits in left-to-right visual order.
-      const vmap = visualToOriginalRef.current;
-      const origCols: number[] = [];
-      for (let c = minCol; c <= maxCol; c++) origCols.push(visualToOriginalIndex(vmap, c));
-
-      const lines: string[] = [];
-      const headers: string[] = [];
-      for (const oc of origCols) headers.push(tsvEscape(result.columns[oc] ?? ""));
-      lines.push(headers.join("\t"));
-
-      const rows = tableRowsRef.current;
-      for (let r = minRow; r <= maxRow; r++) {
-        const row = rows?.[r];
-        if (!row) continue;
-        const orig = row.original;
-        const cells: string[] = [];
-        for (const oc of origCols) {
-          cells.push(tsvEscape(orig[oc] == null ? "" : String(orig[oc])));
-        }
-        lines.push(cells.join("\t"));
-      }
-
-      ClipboardSetText(lines.join("\n")).then(() => {
-        const count = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-        message.success(`Copied ${count} cells`);
-      });
+      copySelection(true);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [featureFlags.multiCellCopy, result.columns]);
+  }, [featureFlags.multiCellCopy, copySelection]);
 
   // ─── Select all ───────────────────────────────────────────────────────────
 
@@ -804,9 +780,12 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
     message.success("Row copied with headers");
   };
 
-  const menuItemEl = (label: string, action: () => void, disabled?: boolean) => (
+  const menuItemEl = (label: string, action: () => void, disabled?: boolean, hint?: string) => (
     <div
       style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 24,
         padding: "6px 14px",
         cursor: disabled ? "default" : "pointer",
         color: disabled ? "var(--text-faint)" : "var(--text)",
@@ -818,6 +797,7 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
       onMouseDown={(e) => { e.stopPropagation(); if (!disabled) action(); }}
     >
       {label}
+      {hint && <span style={{ color: "var(--text-faint)" }}>{hint}</span>}
     </div>
   );
 
@@ -1510,6 +1490,9 @@ function ResultGrid({ result, gridRef, standalone = false }: Props) {
           {menuItemEl("Copy row with headers", copyRowWithHeaders)}
           {featureFlags.multiCellCopy && selectionRange && (
             <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              {menuItemEl("Copy selection", () => { setCtxMenu(null); copySelection(false); })}
+              {menuItemEl("Copy selection with headers", () => { setCtxMenu(null); copySelection(true); }, false, isMac ? "⌘C" : "Ctrl+C")}
               <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
               {menuItemEl("Create Chart...", () => { setCtxMenu(null); setChartModal(true); })}
             </>

@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   defaultColumnOrder,
   reorderColumnOrder,
+  selectionToTsv,
   visualToOriginalIndex,
   columnIdFor,
 } from "./columnOrderUtils";
@@ -85,6 +86,27 @@ describe("visualToOriginalIndex", () => {
 
   it("falls back to the position when out of range", () => {
     expect(visualToOriginalIndex([0, 1], 5)).toBe(5);
+  });
+});
+
+describe("selectionToTsv", () => {
+  const columns = ["A", "B", "C"];
+  const data = [
+    [1, "x\ty", null],
+    [2, 'say "hi"', "z"],
+  ];
+  const rowAt = (r: number) => data[r];
+
+  it("emits the range in visual column order, with and without headers", () => {
+    // Visual order C, A, B; selection dragged right-to-left / bottom-to-top.
+    const sel = { startRow: 1, endRow: 0, startCol: 1, endCol: 0 };
+    expect(selectionToTsv(sel, columns, rowAt, [2, 0, 1], false)).toBe("\t1\nz\t2");
+    expect(selectionToTsv(sel, columns, rowAt, [2, 0, 1], true)).toBe("C\tA\n\t1\nz\t2");
+  });
+
+  it("quotes fields containing tabs or quotes", () => {
+    const sel = { startRow: 0, endRow: 1, startCol: 1, endCol: 1 };
+    expect(selectionToTsv(sel, columns, rowAt, null, false)).toBe('"x\ty"\n"say ""hi"""');
   });
 });
 

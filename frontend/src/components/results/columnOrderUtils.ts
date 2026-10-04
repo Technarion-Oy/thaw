@@ -40,6 +40,35 @@ export function reorderColumnOrder(
 }
 
 /**
+ * Build the clipboard TSV for a cell range. `sel` columns are *visual*
+ * positions, translated through `map` so the output follows the on-screen
+ * column arrangement (reorder + pinning) left to right. Fields containing a
+ * tab, newline, or double-quote are wrapped in double-quotes with internal
+ * quotes doubled, so a paste into a spreadsheet keeps the rows × columns shape.
+ */
+export function selectionToTsv(
+  sel: { startRow: number; endRow: number; startCol: number; endCol: number },
+  columns: string[],
+  rowAt: (rowIndex: number) => unknown[] | undefined,
+  map: number[] | null | undefined,
+  withHeaders: boolean,
+): string {
+  const esc = (v: string) => (/[\t\n\r"]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const origCols: number[] = [];
+  for (let c = Math.min(sel.startCol, sel.endCol); c <= Math.max(sel.startCol, sel.endCol); c++) {
+    origCols.push(visualToOriginalIndex(map, c));
+  }
+  const lines: string[] = [];
+  if (withHeaders) lines.push(origCols.map((oc) => esc(columns[oc] ?? "")).join("\t"));
+  for (let r = Math.min(sel.startRow, sel.endRow); r <= Math.max(sel.startRow, sel.endRow); r++) {
+    const row = rowAt(r);
+    if (!row) continue;
+    lines.push(origCols.map((oc) => esc(row[oc] == null ? "" : String(row[oc]))).join("\t"));
+  }
+  return lines.join("\n");
+}
+
+/**
  * Translate a visual column position to the original SELECT column index using
  * a `visualToOriginal` map (`map[visualPos] = originalIndex`). When `map` is
  * null/undefined (default order, no reorder/pinning) the position is the
