@@ -1,6 +1,6 @@
 # frontend/src/components/schema
 
-> Modal for viewing and editing Snowflake Schema properties.
+> Modals for creating Snowflake Schemas and for viewing and editing their properties.
 
 ## Responsibility
 
@@ -13,12 +13,14 @@ context-menu "Properties" item.
 
 | File | Purpose |
 |------|---------|
+| `CreateSchemaModal.tsx` | `CREATE SCHEMA` form opened from the sidebar database context-menu **Create Schema…** item (issue #988), with the target `db` taken from the right-clicked node. Fields: name (`NameWithReplaceOptions` + `ObjectNameCaseControl`), `OR REPLACE` / `IF NOT EXISTS`, `TRANSIENT`, optional `CLONE` source (a schema of the same database, from `ListUserSchemas(db)`), `WITH MANAGED ACCESS`, `DATA_RETENTION_TIME_IN_DAYS`, comment, and tags (`TagInput`). The statement is assembled client-side by the exported pure `buildCreateSchemaSql(db, cfg)` (there is no backend builder, as with `CreateDatabaseModal`), shown in `SqlPreview`, and run via `ExecDDL`. `onSuccess(schema)` receives the name as Snowflake stores it (upper-cased unless quoted) so the sidebar can reveal the new node. Unit-tested in `CreateSchemaModal.test.ts`. |
 | `SchemaPropertiesModal.tsx` | Loads `GetObjectProperties(db, schema, "SCHEMA", name)` (SHOW SCHEMAS) plus `GetSchemaParameters(db, schema)` (SHOW PARAMETERS, the source for the parameters SHOW SCHEMAS omits). Renders inline-editable Comment, Data retention (days), Max data extension (days), Default DDL collation, a Managed access toggle (`ENABLE`/`DISABLE MANAGED ACCESS`), and a Rename row; a **Tags** section (shared `TagsRow`, current tags read via `GetObjectTagReferences("SCHEMA", …)`); a **Storage & Iceberg** section with live-list `PickerRow`s (External volume, Catalog, Catalog sync) plus Iceberg params (default DDL collation, version default, merge-on-read behavior/enable, base location prefix); a **Notebook & Streamlit** section of `PickerRow`s (notebook compute pool CPU/GPU, Streamlit warehouse); a **Parameters** section of fixed-choice `SelectRow`s (Log level, Trace level, Storage serialization policy, Replace invalid characters, Object visibility, Enable data compaction, Replicable with failover groups) that `SET` on pick / `UNSET` to reset; and a **Danger zone** `SWAP WITH` (sibling-schema picker + confirm dialog). All applied via `AlterSchema(db, schema, clause)`. A **Parameters…** footer button opens the shared `ObjectParametersModal` (`objectType="SCHEMA"`) for the full, searchable, editable parameter list (issue #813). Remaining SHOW SCHEMAS columns render read-only. A **`readOnly`** prop (set by the sidebar for `INFORMATION_SCHEMA`, issue #854) swaps every `EditRow`/`SelectRow`/`PickerRow`/`TagsRow`/Managed-access control for a plain `InfoRow`, hides the **Danger zone**, and opens the `ObjectParametersModal` read-only — Snowflake rejects all DDL on that system schema, so offering edits only surfaces errors. **Deferred** (need backend list IPC or a bespoke editor): `CLASSIFICATION_PROFILE`, `SET/UNSET CONTACT`, `UNSET DCM PROJECT`. |
 | Row components | `EditRow` / `InfoRow` / `SelectRow` / `PickerRow` and the `q1` / `opts` / `paramValue` helpers come from `../shared/PropertyRows.tsx` (shared with `DatabasePropertiesModal`). `PickerRow` is the identifier-valued row: a searchable `Select` populated from a live list loader (`ListExternalVolumes` / `ListIntegrations("CATALOG")` / `ListComputePools` / `ListWarehouses`); sets the picked name double-quoted, or unsets, falling back to showing the current value (unsettable) if the list read fails. |
 
 ## Patterns & integration
 
 **IPC calls:**
+- `ExecDDL(sql)` / `ListUserSchemas(db)` — `CreateSchemaModal` (execute, clone-source list)
 - `GetObjectProperties(db, schema, "SCHEMA", name)` — properties panel data
 - `GetSchemaParameters(db, schema)` — SHOW PARAMETERS fallback for parameters the
   SHOW dump omits
@@ -33,6 +35,14 @@ context-menu "Properties" item.
   INFORMATION_SCHEMA; current schema also filtered out)
 
 ## Gotchas
+
+- `buildCreateSchemaSql` splices `DATA_RETENTION_TIME_IN_DAYS` unquoted, so it only
+  emits the clause for a plain non-negative integer; comment and tag values go
+  through `quoteTextLit`. Each dot-separated part of a tag name is quoted only when
+  it can't be a bare identifier, so `gov.tags.cost_center` still resolves
+  case-insensitively.
+- The clone source is limited to schemas of the target database at the current
+  point in time (no cross-database source, no `AT | BEFORE`).
 
 - Schemas are **two-level** (`<db>.<schema>`), so `AlterSchema` takes `(db,
   schema, clause)` — no third `name`, and it cannot reuse the three-level

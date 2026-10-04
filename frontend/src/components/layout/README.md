@@ -69,6 +69,15 @@ items (**Create Object**, **Show Dropped Objects…**, **Export Data…**, **Imp
 value dump with no ALTER controls (issue #854). Mirrors the backend's `ListUserSchemas` exclusion
 (`internal/app/objects.go`).
 
+### `userDbs` — Create Schema… on the database node
+The database context menu's **Create Schema…** item (issue #988) opens `CreateSchemaModal`
+(`../schema/`) for the right-clicked database via the `createSchemaDb` state. On success the modal
+hands back the stored schema name and the sidebar calls `refreshDatabaseByName(db, { schema })`,
+which expands the database and re-fetches its schema list so the new node is visible. The item is
+disabled for shared / imported databases (e.g. `SNOWFLAKE`): `doLoadDatabases` fills `userDbs` from
+`ListUserDatabases()` (databases with an empty `origin`) alongside the tree. `userDbs` stays `null`
+if that lookup fails, in which case nothing is disabled and Snowflake reports the error instead.
+
 ### Object-kind labels & ordering (generated)
 `KIND_LABEL` and `KIND_ORDER` are **not** declared in `Sidebar.tsx` — they are `OBJECT_KIND_LABEL` /
 `OBJECT_KIND_ORDER` from `src/generated/objectKinds.ts`, generated from the canonical Go registry
