@@ -1,3 +1,10 @@
+## [0.9.1](https://github.com/Technarion-Oy/thaw/compare/v0.9.0...v0.9.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* add missing "Create Schema…" to database context menu ([#989](https://github.com/Technarion-Oy/thaw/issues/989)) ([0dc43c9](https://github.com/Technarion-Oy/thaw/commit/0dc43c9b24440fb39a8d3134d05a30662f572d09)), closes [#988](https://github.com/Technarion-Oy/thaw/issues/988)
+
 # [0.9.0](https://github.com/Technarion-Oy/thaw/compare/v0.8.0...v0.9.0) (2026-10-04)
 
 
