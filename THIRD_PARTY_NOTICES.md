@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (173)
+- [Frontend — npm packages](#frontend--npm-packages) (174)
 
 ## Backend — Go modules
 
@@ -9350,12 +9350,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@types/d3-zoom` | 3.0.8 | MIT |
 | `@types/pegjs` | 0.10.6 | MIT |
 | `@types/react` | 19.3.0 | MIT |
+| `@types/react-dom` | 19.3.0 | MIT |
 | `@types/trusted-types` | 2.0.7 | MIT |
 | `@types/use-sync-external-store` | 0.0.6 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
-| `@xyflow/react` | 12.10.1 | MIT |
-| `@xyflow/system` | 0.0.75 | MIT |
+| `@xyflow/react` | 12.12.0 | MIT |
+| `@xyflow/system` | 0.0.83 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
 | `antd` | 6.6.5 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
@@ -11555,6 +11556,35 @@ SOFTWARE.
     SOFTWARE
 ```
 
+### @types/react-dom
+
+- **Version:** 19.3.0
+- **License:** MIT
+
+```
+    MIT License
+
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE
+```
+
 ### @types/trusted-types
 
 - **Version:** 2.0.7
@@ -11671,7 +11701,7 @@ THE SOFTWARE.
 
 ### @xyflow/react
 
-- **Version:** 12.10.1
+- **Version:** 12.12.0
 - **License:** MIT
 
 ```
@@ -11700,7 +11730,7 @@ SOFTWARE.
 
 ### @xyflow/system
 
-- **Version:** 0.0.75
+- **Version:** 0.0.83
 - **License:** MIT
 
 ```
