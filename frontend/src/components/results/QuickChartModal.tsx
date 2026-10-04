@@ -18,14 +18,15 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import type { LegacyRow as Row } from "@tanstack/react-table/legacy";
+import type { Row } from "@tanstack/react-table";
+import type { ResultGridFeatures } from "../../utils/tableFeatures";
 import type { SelectionRange } from "../../store/gridStore";
 import { visualToOriginalIndex } from "./columnOrderUtils";
 
 type ChartType = "bar" | "line" | "scatter";
 
 interface Props {
-  tableRows: Row<unknown[]>[];
+  tableRows: Row<ResultGridFeatures, unknown[]>[];
   columns: string[];
   selectionRange: SelectionRange;
   /** Maps a visual column position to its original SELECT index. null = default

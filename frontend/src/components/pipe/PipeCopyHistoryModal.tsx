@@ -6,15 +6,12 @@ import {
 } from "antd";
 import { HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
 import {
-  useLegacyTable as useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  type LegacyColumnDef as ColumnDef,
-} from "@tanstack/react-table/legacy";
-import {
+  useTable,
+  type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { GetPipeCopyHistory } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -81,7 +78,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
     });
   }, [result]);
 
-  const columns = useMemo<ColumnDef<unknown[]>[]>(() => {
+  const columns = useMemo<ColumnDef<SortableGridFeatures, unknown[]>[]>(() => {
     if (!result?.columns?.length) return [];
     return result.columns.map((col, colIdx) => ({
       id: `${colIdx}_${col}`,
@@ -93,13 +90,12 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
     }));
   }, [result, initialWidths]);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortableGridFeatures,
     data,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -113,7 +109,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
 
-  const visibleColumns = table.getVisibleLeafColumns();
+  const visibleColumns = table.getAllLeafColumns();
   const pipeRef = `"${db}"."${schema}"."${name}"`;
 
   return (
@@ -294,7 +290,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                         : undefined,
                     }}
                   >
-                    {row.getVisibleCells().map((cell) => (
+                    {row.getAllCells().map((cell) => (
                       <td
                         key={cell.id}
                         style={{

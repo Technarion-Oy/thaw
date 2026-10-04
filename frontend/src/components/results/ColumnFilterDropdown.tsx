@@ -6,7 +6,7 @@ import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } fr
 import { Input, Checkbox, Button, Divider, Select, Space } from "antd";
 import { FilterOutlined } from "@ant-design/icons";
 import type { FilterFn } from "@tanstack/react-table";
-import type { LegacyFeatures } from "@tanstack/react-table/legacy";
+import type { ResultGridFeatures } from "../../utils/tableFeatures";
 
 type ConditionOp = "contains" | "startsWith" | "endsWith" | "equals" | "gt" | "lt" | "gte" | "lte";
 
@@ -24,7 +24,7 @@ export interface ColumnFilterValue {
   condition?: { op: ConditionOp; value: string };
 }
 
-export const columnFilterFn: FilterFn<LegacyFeatures, unknown[]> = (
+export const columnFilterFn: FilterFn<ResultGridFeatures, unknown[]> = (
   row,
   columnId,
   filterValue: ColumnFilterValue,

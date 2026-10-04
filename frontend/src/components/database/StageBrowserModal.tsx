@@ -8,15 +8,12 @@ import {
   InboxOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import {
-  useLegacyTable as useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  type LegacyColumnDef as ColumnDef,
-} from "@tanstack/react-table/legacy";
-import {
+  useTable,
+  type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../wailsjs/go/app/App";
 import { formatBytes } from "../../utils/formatBytes";
@@ -95,7 +92,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
 
   // Column defs are kept stable — checkbox rendering is handled inline in the
   // JSX (outside flexRender) so selection state changes don't rebuild columns.
-  const columns = useMemo<ColumnDef<stage.StageFile>[]>(() => [
+  const columns = useMemo<ColumnDef<SortableGridFeatures, stage.StageFile>[]>(() => [
     {
       id: "checkbox",
       header: "",
@@ -131,13 +128,12 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     },
   ], []);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortableGridFeatures,
     data: files,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -241,7 +237,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     },
   ];
 
-  const visibleColumns = table.getVisibleLeafColumns();
+  const visibleColumns = table.getAllLeafColumns();
 
   return (
     <Modal
@@ -442,7 +438,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
                           : undefined,
                     }}
                   >
-                    {row.getVisibleCells().map((cell) => (
+                    {row.getAllCells().map((cell) => (
                       <td
                         key={cell.id}
                         onContextMenu={(e) => onCellContextMenu(e, row.original)}
