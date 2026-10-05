@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (175)
+- [Frontend — npm packages](#frontend--npm-packages) (177)
 
 ## Backend — Go modules
 
