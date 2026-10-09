@@ -115,7 +115,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `golang.org/x/crypto` | v0.57.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
 | `golang.org/x/mod` | v0.41.0 | BSD-3-Clause |
-| `golang.org/x/net` | v0.59.0 | BSD-3-Clause |
+| `golang.org/x/net` | v0.60.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.35.0 | BSD-3-Clause |
 | `golang.org/x/sync` | v0.23.0 | BSD-3-Clause |
 | `golang.org/x/sys` | v0.48.0 | BSD-3-Clause |
@@ -8788,7 +8788,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/net
 
-- **Version:** v0.59.0
+- **Version:** v0.60.0
 - **License:** BSD-3-Clause
 
 ```
