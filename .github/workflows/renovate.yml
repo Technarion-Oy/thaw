@@ -74,7 +74,7 @@ jobs:
     name: Renovate
     if: github.event_name != 'pull_request'
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
     permissions:
       contents: read
 
@@ -223,7 +223,7 @@ jobs:
     name: Validate config
     if: github.event_name == 'pull_request'
     runs-on: self-hosted
-    container: ubuntu:24.04
+    container: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
     permissions:
       contents: read
 
