@@ -1,3 +1,11 @@
+## [0.9.2](https://github.com/Technarion-Oy/thaw/compare/v0.9.1...v0.9.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* Update go toolchain directive to v1.26.9 [SECURITY] ([#991](https://github.com/Technarion-Oy/thaw/issues/991)) ([ecc916d](https://github.com/Technarion-Oy/thaw/commit/ecc916dd8a1396b8bd711d4fe1bbcceabf627c06))
+* Update module golang.org/x/net to v0.60.0 [SECURITY] ([#992](https://github.com/Technarion-Oy/thaw/issues/992)) ([67afb23](https://github.com/Technarion-Oy/thaw/commit/67afb23d9964d3c4912bcee11866f0831d4db8a6))
+
 ## [0.9.1](https://github.com/Technarion-Oy/thaw/compare/v0.9.0...v0.9.1) (2026-10-04)
 
 
