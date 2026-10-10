@@ -66,8 +66,8 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
 | `github.com/gabriel-vasile/mimetype` | v1.4.7 | MIT |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
-| `github.com/go-git/go-billy/v5` | v5.9.0 | Apache-2.0 |
-| `github.com/go-git/go-git/v5` | v5.19.2 | Apache-2.0 |
+| `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
+| `github.com/go-git/go-git/v5` | v5.19.3 | Apache-2.0 |
 | `github.com/goccy/go-json` | v0.10.5 | MIT |
 | `github.com/godbus/dbus` | v0.0.0-20190726142602-4481cbc300e2 | BSD-2-Clause |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT |
@@ -91,7 +91,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/mtibben/percent` | v0.2.1 | MIT |
 | `github.com/ncruces/go-strftime` | v1.0.0 | MIT |
 | `github.com/pierrec/lz4/v4` | v4.1.22 | BSD-3-Clause |
-| `github.com/pjbgf/sha1cd` | v0.6.0 | Apache-2.0 |
+| `github.com/pjbgf/sha1cd` | v0.7.0 | Apache-2.0 |
 | `github.com/pkg/browser` | v0.0.0-20240102092130-5ac0b6a4141c | BSD-2-Clause |
 | `github.com/pkg/errors` | v0.9.1 | BSD-2-Clause |
 | `github.com/ProtonMail/go-crypto` | v1.1.6 | BSD-3-Clause |
@@ -117,8 +117,8 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `golang.org/x/mod` | v0.41.0 | BSD-3-Clause |
 | `golang.org/x/net` | v0.60.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.35.0 | BSD-3-Clause |
-| `golang.org/x/sync` | v0.23.0 | BSD-3-Clause |
-| `golang.org/x/sys` | v0.48.0 | BSD-3-Clause |
+| `golang.org/x/sync` | v0.24.0 | BSD-3-Clause |
+| `golang.org/x/sys` | v0.49.0 | BSD-3-Clause |
 | `golang.org/x/term` | v0.46.0 | BSD-3-Clause |
 | `golang.org/x/text` | v0.42.0 | BSD-3-Clause |
 | `golang.org/x/time` | v0.15.0 | BSD-3-Clause |
@@ -4957,7 +4957,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### github.com/go-git/go-billy/v5
 
-- **Version:** v5.9.0
+- **Version:** v5.9.2
 - **License:** Apache-2.0
 
 ```
@@ -5166,7 +5166,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### github.com/go-git/go-git/v5
 
-- **Version:** v5.19.2
+- **Version:** v5.19.3
 - **License:** Apache-2.0
 
 ```
@@ -6893,7 +6893,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### github.com/pjbgf/sha1cd
 
-- **Version:** v0.6.0
+- **Version:** v0.7.0
 - **License:** Apache-2.0
 
 ```
@@ -8858,7 +8858,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sync
 
-- **Version:** v0.23.0
+- **Version:** v0.24.0
 - **License:** BSD-3-Clause
 
 ```
@@ -8893,7 +8893,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/sys
 
-- **Version:** v0.48.0
+- **Version:** v0.49.0
 - **License:** BSD-3-Clause
 
 ```
