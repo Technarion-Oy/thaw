@@ -9332,10 +9332,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@standard-schema/spec` | 1.1.0 | MIT |
 | `@standard-schema/utils` | 0.3.0 | MIT |
 | `@tanstack/react-store` | 0.11.2 | MIT |
-| `@tanstack/react-table` | 9.2.4 | MIT |
+| `@tanstack/react-table` | 9.2.6 | MIT |
 | `@tanstack/react-virtual` | 3.14.13 | MIT |
 | `@tanstack/store` | 0.11.2 | MIT |
-| `@tanstack/table-core` | 9.2.4 | MIT |
+| `@tanstack/table-core` | 9.2.6 | MIT |
 | `@tanstack/virtual-core` | 3.17.11 | MIT |
 | `@types/d3-array` | 3.2.2 | MIT |
 | `@types/d3-color` | 3.1.3 | MIT |
@@ -11039,7 +11039,7 @@ SOFTWARE.
 
 ### @tanstack/react-table
 
-- **Version:** 9.2.4
+- **Version:** 9.2.6
 - **License:** MIT
 
 ```
@@ -11126,7 +11126,7 @@ SOFTWARE.
 
 ### @tanstack/table-core
 
-- **Version:** 9.2.4
+- **Version:** 9.2.6
 - **License:** MIT
 
 ```
