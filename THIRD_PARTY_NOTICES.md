@@ -9304,7 +9304,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@rc-component/mini-decimal` | 1.1.0 | MIT |
 | `@rc-component/motion` | 1.3.3 | MIT |
 | `@rc-component/mutate-observer` | 2.0.1 | MIT |
-| `@rc-component/notification` | 2.0.8 | MIT |
+| `@rc-component/notification` | 2.1.1 | MIT |
 | `@rc-component/overflow` | 1.0.1 | MIT |
 | `@rc-component/pagination` | 1.4.0 | MIT |
 | `@rc-component/picker` | 1.12.2 | MIT |
@@ -9361,7 +9361,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@xyflow/react` | 12.12.0 | MIT |
 | `@xyflow/system` | 0.0.83 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
-| `antd` | 6.6.5 | MIT |
+| `antd` | 6.6.6 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
 | `big-integer` | 1.6.52 | Unlicense |
 | `cfb` | 1.2.2 | Apache-2.0 |
@@ -10289,7 +10289,7 @@ SOFTWARE.
 
 ### @rc-component/notification
 
-- **Version:** 2.0.8
+- **Version:** 2.1.1
 - **License:** MIT
 
 ```
@@ -12036,7 +12036,7 @@ SOFTWARE.
 
 ### antd
 
-- **Version:** 6.6.5
+- **Version:** 6.6.6
 - **License:** MIT
 
 ```
