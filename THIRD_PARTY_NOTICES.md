@@ -9416,8 +9416,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `proxy-disposable` | 1.0.0 | MIT |
 | `railroad-diagrams` | 1.0.0 | CC0-1.0 |
 | `randexp` | 0.4.6 | MIT |
-| `react` | 19.3.0 | MIT |
-| `react-dom` | 19.3.0 | MIT |
+| `react` | 19.3.1 | MIT |
+| `react-dom` | 19.3.1 | MIT |
 | `react-is` | 19.3.0 | MIT |
 | `react-redux` | 9.2.0 | MIT |
 | `recharts` | 3.10.1 | MIT |
@@ -14940,7 +14940,7 @@ THE SOFTWARE.
 
 ### react
 
-- **Version:** 19.3.0
+- **Version:** 19.3.1
 - **License:** MIT
 
 ```
@@ -14969,7 +14969,7 @@ SOFTWARE.
 
 ### react-dom
 
-- **Version:** 19.3.0
+- **Version:** 19.3.1
 - **License:** MIT
 
 ```
