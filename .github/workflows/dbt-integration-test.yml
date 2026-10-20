@@ -16,7 +16,7 @@ jobs:
   dbt-roundtrip:
     name: dbt project round-trip
     runs-on: self-hosted
-    container: ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+    container: ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
     permissions:
       contents: read
       checks: write
@@ -73,7 +73,7 @@ jobs:
           2>&1 | go-junit-report -set-exit-code > report-dbt.xml
 
       - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: EnricoMi/publish-unit-test-result-action@7622c5bf3d112a72ab4fa3951c2aa5723d8ab92d # v2
         if: always()
         # Best-effort reporting; the go test step already fails the job on real
         # failures. Don't let a flaky GitHub API throttle (429) fail the build.
