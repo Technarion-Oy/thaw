@@ -1,3 +1,11 @@
+## [0.9.3](https://github.com/Technarion-Oy/thaw/compare/v0.9.2...v0.9.3) (2026-10-25)
+
+
+### Bug Fixes
+
+* Update go toolchain directive to v1.26.10 [SECURITY] ([#1002](https://github.com/Technarion-Oy/thaw/issues/1002)) ([64c3806](https://github.com/Technarion-Oy/thaw/commit/64c38067f98ebc9b68a0bf9b7e5269633b12dda0))
+* Update module github.com/labstack/echo/v4 to v4.16.1 [SECURITY] ([#1003](https://github.com/Technarion-Oy/thaw/issues/1003)) ([18eee34](https://github.com/Technarion-Oy/thaw/commit/18eee3454ccb242ed66d95fc9ed79eecd80de8c8))
+
 ## [0.9.2](https://github.com/Technarion-Oy/thaw/compare/v0.9.1...v0.9.2) (2026-10-10)
 
 
