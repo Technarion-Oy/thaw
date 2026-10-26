@@ -9326,7 +9326,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@rc-component/tree-select` | 1.16.1 | MIT |
 | `@rc-component/trigger` | 3.10.1 | MIT |
 | `@rc-component/upload` | 1.1.1 | MIT |
-| `@rc-component/util` | 1.13.0 | MIT |
+| `@rc-component/util` | 1.14.0 | MIT |
 | `@rc-component/virtual-list` | 1.5.2 | MIT |
 | `@reduxjs/toolkit` | 2.11.2 | MIT |
 | `@standard-schema/spec` | 1.1.0 | MIT |
@@ -9361,7 +9361,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@xyflow/react` | 12.12.0 | MIT |
 | `@xyflow/system` | 0.0.83 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
-| `antd` | 6.6.6 | MIT |
+| `antd` | 6.6.7 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
 | `big-integer` | 1.6.52 | Unlicense |
 | `cfb` | 1.2.2 | Apache-2.0 |
@@ -10864,7 +10864,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### @rc-component/util
 
-- **Version:** 1.13.0
+- **Version:** 1.14.0
 - **License:** MIT
 
 ```
@@ -12036,7 +12036,7 @@ SOFTWARE.
 
 ### antd
 
-- **Version:** 6.6.6
+- **Version:** 6.6.7
 - **License:** MIT
 
 ```
