@@ -9279,8 +9279,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@ant-design/react-slick` | 2.0.0 | MIT |
 | `@babel/runtime` | 7.29.7 | MIT |
 | `@babel/runtime` | 8.0.5 | MIT |
-| `@dagrejs/dagre` | 3.1.1 | MIT |
-| `@dagrejs/graphlib` | 4.0.5 | MIT |
+| `@dagrejs/dagre` | 3.1.3 | MIT |
+| `@dagrejs/graphlib` | 4.0.6 | MIT |
 | `@emotion/hash` | 0.8.0 | MIT |
 | `@emotion/unitless` | 0.7.5 | MIT |
 | `@monaco-editor/loader` | 1.7.0 | MIT |
@@ -9679,7 +9679,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### @dagrejs/dagre
 
-- **Version:** 3.1.1
+- **Version:** 3.1.3
 - **License:** MIT
 
 ```
@@ -9706,7 +9706,7 @@ THE SOFTWARE.
 
 ### @dagrejs/graphlib
 
-- **Version:** 4.0.5
+- **Version:** 4.0.6
 - **License:** MIT
 
 ```
