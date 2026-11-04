@@ -57,7 +57,7 @@ function renderModeOption(option: { value?: string | number | null }) {
   return (
     <div>
       <div>{m?.label}</div>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, whiteSpace: "normal" }}>
         {m?.description}
       </div>
     </div>
@@ -247,8 +247,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
               options={EXECUTION_MODES}
               style={{ width: 150 }}
               disabled={!canStart}
-              popupMatchSelectWidth={false}
-              dropdownStyle={{ minWidth: 320 }}
+              popupMatchSelectWidth={320}
               optionRender={renderModeOption}
             />
           </Form.Item>
@@ -373,8 +372,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
                     onChange={(v) => handleModeChange(s.label, v)}
                     options={EXECUTION_MODES}
                     style={{ width: 130, fontSize: 11 }}
-                    popupMatchSelectWidth={false}
-                    dropdownStyle={{ minWidth: 320 }}
+                    popupMatchSelectWidth={320}
                     optionRender={renderModeOption}
                   />
                   {s.pinnedRole ? ` · role: ${s.pinnedRole}` : ""}
