@@ -179,6 +179,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/dbtproject/SourceLocationPicker.tsx",
         "frontend/src/components/dynamictable/CreateDynamicTableModal.tsx",
         "frontend/src/components/dynamictable/DynamicTablePropertiesModal.tsx",
+        "frontend/src/components/dynamictable/DynamicTableRefreshHistoryModal.tsx",
         "frontend/src/components/eventtable/CreateEventTableModal.tsx",
         "frontend/src/components/eventtable/EventTablePropertiesModal.tsx",
         "frontend/src/components/externalagent/CreateExternalAgentModal.tsx",

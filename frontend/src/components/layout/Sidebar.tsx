@@ -141,6 +141,7 @@ import ModifyGitRepositoryModal from "../gitrepoobj/ModifyGitRepositoryModal";
 import SetGitCommitFilterModal from "../gitrepoobj/SetGitCommitFilterModal";
 import CreateDynamicTableModal from "../dynamictable/CreateDynamicTableModal";
 import DynamicTablePropertiesModal from "../dynamictable/DynamicTablePropertiesModal";
+import DynamicTableRefreshHistoryModal from "../dynamictable/DynamicTableRefreshHistoryModal";
 import CreateExternalTableModal from "../externaltable/CreateExternalTableModal";
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
 import CreateIcebergTableModal from "../icebergtable/CreateIcebergTableModal";
@@ -856,6 +857,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [addDbtProjectVersionModal, setAddDbtProjectVersionModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDynamicTableModal, setCreateDynamicTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [dynamicTablePropsModal, setDynamicTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [dtRefreshHistoryModal, setDtRefreshHistoryModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createExternalTableModal, setCreateExternalTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [externalTablePropsModal, setExternalTablePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createIcebergTableModal, setCreateIcebergTableModal] = useState<{ db: string; schema: string } | null>(null);
@@ -2261,6 +2263,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setCreateDynamicTableModal({ db, schema });
   };
 
+
+  const openDynamicTableRefreshHistory = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setDtRefreshHistoryModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
+  };
 
   const suspendDynamicTable = () => {
     if (!ctxMenu) return;
@@ -4962,6 +4971,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Suspend", <PauseCircleOutlined style={{ fontSize: 12 }} />, suspendDynamicTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeDynamicTable)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
+            menuItem("View Refresh History…", <HistoryOutlined style={{ fontSize: 12 }} />, openDynamicTableRefreshHistory)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
@@ -5589,6 +5600,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={dynamicTablePropsModal.schema}
           name={dynamicTablePropsModal.name}
           onClose={() => setDynamicTablePropsModal(null)}
+        />
+      )}
+
+      {dtRefreshHistoryModal && (
+        <DynamicTableRefreshHistoryModal
+          db={dtRefreshHistoryModal.db}
+          schema={dtRefreshHistoryModal.schema}
+          name={dtRefreshHistoryModal.name}
+          onClose={() => setDtRefreshHistoryModal(null)}
         />
       )}
 

@@ -18,7 +18,7 @@ child task links. Includes reusable sub-components `ScheduleEditor` and `WhenCon
 | `TaskPropertiesModal.tsx` | Properties/settings panel for an existing task. Inline editing of schedule, WHEN condition, notification integrations. Embeds `TaskHistoryModal`, `WhenConditionBuilder`, `ScheduleEditor`. |
 | `ScheduleEditor.tsx` | Reusable schedule editor sub-component. Three modes: none, interval (N minutes/hours/days with Snowflake constraints), cron (5-field expr + timezone). Parses and emits schedule strings. |
 | `WhenConditionBuilder.tsx` | Visual WHEN condition builder. Supports stream-has-data checks, predecessor task return-value predicates, and free-text expressions. Joined with AND/OR. |
-| `TaskHistoryModal.tsx` | Paginated run history table using `GetTaskHistory` (TASK_HISTORY table function). Shows status, query ID, start/end times, error messages. |
+| `TaskHistoryModal.tsx` | Paginated run history table using `GetTaskRunHistory` (TASK_HISTORY table function). Shows status, query ID, start/end times, error messages. |
 | `TaskStatusesModal.tsx` | Bulk status view for all tasks in a schema with live refresh. |
 | `CopyTaskModal.tsx` | Copies an existing task to a new name/schema, optionally with predecessor links. Calls `CopyTask`. |
 | `AddExistingChildModal.tsx` | Adds an existing task as a child (AFTER dependency) of a root task. Calls `AddTaskChild`. |

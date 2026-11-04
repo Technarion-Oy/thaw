@@ -8,10 +8,11 @@ import {
 } from "antd";
 import {
   RetweetOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PauseCircleOutlined, PlayCircleOutlined, SyncOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, SyncOutlined, HistoryOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
+import DynamicTableRefreshHistoryModal from "./DynamicTableRefreshHistoryModal";
 import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
@@ -226,6 +227,7 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
 
@@ -354,6 +356,9 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
             <Button size="small" icon={<PlayCircleOutlined />} loading={busy} onClick={() => runAction("RESUME", "Resume")}>
               Resume
             </Button>
+            <Button size="small" icon={<HistoryOutlined />} onClick={() => setShowHistory(true)}>
+              Refresh History
+            </Button>
           </Space>
 
           <div style={SECTION_HEAD}>Settings</div>
@@ -416,6 +421,9 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
             </>
           )}
         </>
+      )}
+      {showHistory && (
+        <DynamicTableRefreshHistoryModal db={db} schema={schema} name={name} onClose={() => setShowHistory(false)} />
       )}
     </Modal>
   );

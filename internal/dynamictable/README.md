@@ -16,6 +16,8 @@ without a dedicated builder.
 |---|---|
 | `sql.go` | `DynamicTableConfig`, `BuildCreateDynamicTableSql` |
 | `sql_test.go` | Unit tests for the SQL builder |
+| `history.go` | `RefreshHistoryRow`, `BuildRefreshHistorySql`, `GetDynamicTableRefreshHistory` |
+| `history_test.go` | Unit tests for the refresh-history query and row parser |
 | `doc.go` | Package doc + `thaw:domain: Object Browser & Administration` annotation |
 
 ## Key types & functions
@@ -25,6 +27,10 @@ without a dedicated builder.
 | `DynamicTableConfig` | CREATE parameters: name, case sensitivity, `OrReplace`, `IfNotExists`, `Transient`, `TargetLag`, `Scheduler`, `Warehouse`, `InitializationWarehouse`, `RefreshMode`, `Initialize`, `ClusterBy`, `DataRetentionTimeInDays`, `MaxDataExtensionTimeInDays`, comment, `CopyGrants`, `RequireUser`, `RowTimestamp`, `Tags` (`[]snowflake.TagPair`), and the defining `Query` |
 | `snowflake.TagPair` / `snowflake.TagClause` | Shared tag type and `TAG (...)` clause builder (in `internal/snowflake`) — used by every object builder that supports tags |
 | `BuildCreateDynamicTableSql(db, schema, cfg)` | Emits `CREATE [OR REPLACE] [TRANSIENT] DYNAMIC TABLE [IF NOT EXISTS] <fqn> TARGET_LAG=… [SCHEDULER=…] WAREHOUSE=… [INITIALIZATION_WAREHOUSE=…] [REFRESH_MODE=…] [INITIALIZE=…] [CLUSTER BY (…)] [DATA_RETENTION_TIME_IN_DAYS=…] [MAX_DATA_EXTENSION_TIME_IN_DAYS=…] [COMMENT='…'] [COPY GRANTS] [TAG (…)] [REQUIRE USER] [ROW_TIMESTAMP=…] AS <query>;` — optional clauses emitted only when set, in documented order |
+
+| `RefreshHistoryRow` | One `DYNAMIC_TABLE_REFRESH_HISTORY` row: state, state code/message, refresh action/trigger, data timestamp, refresh start/end, rows inserted/deleted, target lag (s), query ID — all strings (RFC3339 timestamps, `""` for NULL) |
+| `BuildRefreshHistorySql(db, schema, name, days)` | `SELECT … FROM TABLE("db".INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(NAME => '"db"."schema"."name"', DATA_TIMESTAMP_START => DATEADD('day', -days, …), RESULT_LIMIT => 10000)) ORDER BY DATA_TIMESTAMP DESC`; `days` clamped to 1..7 |
+| `GetDynamicTableRefreshHistory(ctx, client, db, schema, name, days)` | Runs the query and parses rows by column name |
 
 ## Patterns & integration
 
@@ -43,6 +49,13 @@ without a dedicated builder.
   `GET_DDL` object type `DYNAMIC_TABLE`.
 
 ## Gotchas
+
+- `DYNAMIC_TABLE_REFRESH_HISTORY` only retains refreshes whose `DATA_TIMESTAMP` is within
+  **7 days** (not 14), hence the clamp. Inserted/deleted row counts are not top-level columns —
+  they live in the `STATISTICS` object and are flattened in the SELECT
+  (`STATISTICS:numInsertedRows::NUMBER AS NUMROWS_INSERTED`); failed refreshes leave them NULL.
+- The function needs MONITOR (or OPERATE / ownership) on the table; the Snowflake error is
+  returned unchanged for the UI to show.
 
 The defining `Query` is appended verbatim after `AS`; any trailing semicolons are
 trimmed so the builder controls statement termination. The builder does not parse

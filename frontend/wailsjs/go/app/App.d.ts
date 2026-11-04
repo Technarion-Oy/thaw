@@ -628,6 +628,8 @@ export function GetDefaultFileWatchConfig():Promise<config.FileWatchConfig>;
 
 export function GetDefaultSessionConfig():Promise<config.SessionConfig>;
 
+export function GetDynamicTableRefreshHistory(arg1:string,arg2:string,arg3:string,arg4:number):Promise<Array<dynamictable.RefreshHistoryRow>>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetEditorPrefs():Promise<config.EditorPrefs>;

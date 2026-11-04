@@ -1102,6 +1102,10 @@ export function GetDefaultSessionConfig() {
   return window['go']['app']['App']['GetDefaultSessionConfig']();
 }
 
+export function GetDynamicTableRefreshHistory(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetDynamicTableRefreshHistory'](arg1, arg2, arg3, arg4);
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['app']['App']['GetERDiagramData'](arg1);
 }
