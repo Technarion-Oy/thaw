@@ -291,6 +291,9 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
   `ColumnPropertiesModal`, where Rename / Change Type / Default / Comment / NOT NULL / Masking Policy /
   Tags all live), and **Drop Column…** are gated behind the `columnManagement` feature flag.
   "Insert Column Name" and "Tag References…" are never gated.
+- **Dynamic table actions** — **Properties…**, **Refresh…**, **Suspend**, **Resume**, and
+  **View Refresh History…** (mounts `dynamictable/DynamicTableRefreshHistoryModal`, same wiring as
+  the task **View Run History…** item) are shown for `objKind === "DYNAMIC TABLE"` nodes.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
 - **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively

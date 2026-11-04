@@ -2,7 +2,7 @@
 
 // Package dynamictable builds SQL for Snowflake dynamic table objects —
 // CREATE DYNAMIC TABLE statements and the ALTER clauses used to SUSPEND,
-// RESUME, and REFRESH them.
+// RESUME, and REFRESH them — plus the DYNAMIC_TABLE_REFRESH_HISTORY reader.
 //
 // thaw:domain: Object Browser & Administration
 package dynamictable

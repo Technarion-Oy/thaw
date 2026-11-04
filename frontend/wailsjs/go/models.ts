@@ -1417,6 +1417,40 @@ export namespace dynamictable {
 		    return a;
 		}
 	}
+	export class RefreshHistoryRow {
+	    state: string;
+	    stateCode: string;
+	    stateMessage: string;
+	    refreshAction: string;
+	    refreshTrigger: string;
+	    dataTimestamp: string;
+	    refreshStartTime: string;
+	    refreshEndTime: string;
+	    numRowsInserted: string;
+	    numRowsDeleted: string;
+	    targetLagSec: string;
+	    queryId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RefreshHistoryRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.stateCode = source["stateCode"];
+	        this.stateMessage = source["stateMessage"];
+	        this.refreshAction = source["refreshAction"];
+	        this.refreshTrigger = source["refreshTrigger"];
+	        this.dataTimestamp = source["dataTimestamp"];
+	        this.refreshStartTime = source["refreshStartTime"];
+	        this.refreshEndTime = source["refreshEndTime"];
+	        this.numRowsInserted = source["numRowsInserted"];
+	        this.numRowsDeleted = source["numRowsDeleted"];
+	        this.targetLagSec = source["targetLagSec"];
+	        this.queryId = source["queryId"];
+	    }
+	}
 
 }
 
