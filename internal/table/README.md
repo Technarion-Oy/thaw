@@ -13,7 +13,11 @@ Provides four related capabilities for managing Snowflake tables:
    properties via `SHOW TABLES` (with a `SHOW PARAMETERS` fallback for
    `DEFAULT_DDL_COLLATION`) and returns a typed `TableSettings` struct.
 3. **ALTER TABLE SQL builders** — constructs a single-property `ALTER TABLE SET`
-   statement for any supported table property.
+   statement for any supported table property. Every other `ALTER TABLE` action in
+   the UI (swap, recluster, search optimization, constraints, data metric functions,
+   governance policies, the extra `SET / UNSET` rows, multi-column drop) is built by
+   `frontend/src/components/common/tableClauses.ts` and run through the generic
+   `App.AlterTable` IPC.
 4. **Multi-row INSERT builder** — renders an `INSERT INTO … (cols) VALUES (…), (…)`
    statement from per-column form values for one or more rows, quoting each value
    as a typed literal (or emitting NULL / DEFAULT / a raw expression). Backs the

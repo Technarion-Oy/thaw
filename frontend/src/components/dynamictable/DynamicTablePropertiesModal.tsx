@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tag, Tooltip, Popconfirm,
+  Modal, Spin, Button, Select, Space, Typography, Alert, Tag, Tooltip,
 } from "antd";
 import {
   RetweetOutlined, EditOutlined, CheckOutlined, CloseOutlined,
@@ -12,7 +12,8 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, GetObjectParameters, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
-import { SECTION_HEAD, LABEL_TD, q1, opts, EditRow, SelectRow, PickerRow } from "../shared/PropertyRows";
+import { SECTION_HEAD, LABEL_TD, q1, opts, EditRow, SelectRow, PickerRow, ActionRow } from "../shared/PropertyRows";
+import GovernanceRows from "../common/GovernanceRows";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import DynamicTableRefreshHistoryModal from "./DynamicTableRefreshHistoryModal";
 import * as dtc from "./dynamicTableClauses";
@@ -32,84 +33,6 @@ function targetLagAssign(lag: string): string {
 function days(v: string): string {
   if (!/^\d+$/.test(v.trim())) throw new Error("Enter a whole number of days");
   return v.trim();
-}
-
-// ─── ActionRow ───────────────────────────────────────────────────────────────
-// A row of free-text fields plus action buttons, each turning the field values
-// into one ALTER clause (a builder that throws shows its message inline). Used
-// for the attach/detach-style clauses whose current state SHOW doesn't return
-// (policies, contacts).
-
-interface RowAction {
-  label: string;
-  clause: (v: string[]) => string;
-  danger?: boolean;
-  confirm?: string;
-}
-
-function ActionRow({ label, fields, actions, run }: {
-  label: string;
-  fields: string[];
-  actions: RowAction[];
-  run: (clause: string) => Promise<void>;
-}) {
-  const [vals, setVals] = useState(() => fields.map(() => ""));
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const go = async (a: RowAction) => {
-    setError(null);
-    let clause: string;
-    try {
-      clause = a.clause(vals.map((v) => v.trim()));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return;
-    }
-    setBusy(a.label);
-    try {
-      await run(clause);
-      setVals(fields.map(() => ""));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <tr>
-      <td style={LABEL_TD}>{label}</td>
-      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        <Space direction="vertical" size={4} style={{ width: "100%" }}>
-          <Space wrap>
-            {fields.map((ph, i) => (
-              <Input
-                key={ph}
-                size="small"
-                placeholder={ph}
-                value={vals[i]}
-                onChange={(e) => setVals((vs) => vs.map((v, j) => (j === i ? e.target.value : v)))}
-                style={{ width: 170 }}
-              />
-            ))}
-            {actions.map((a) => {
-              const btn = (
-                <Button key={a.label} size="small" danger={a.danger} loading={busy === a.label}
-                  onClick={a.confirm ? undefined : () => go(a)}>
-                  {a.label}
-                </Button>
-              );
-              return a.confirm
-                ? <Popconfirm key={a.label} title={a.confirm} onConfirm={() => go(a)}>{btn}</Popconfirm>
-                : btn;
-            })}
-          </Space>
-          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
-        </Space>
-      </td>
-    </tr>
-  );
 }
 
 // ─── SelectEditRow ───────────────────────────────────────────────────────────
@@ -477,44 +400,9 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
             </tbody>
           </table>
 
-          {/* Attachments aren't in SHOW DYNAMIC TABLES (they live in POLICY_REFERENCES),
-              so these are attach/detach editors rather than current-value rows.
-              Column-level masking / projection policies, tags and comments are on
+          {/* Column-level masking / projection policies, tags and comments are on
               the column node's context menu. */}
-          <div style={SECTION_HEAD}>Governance</div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <tbody>
-              <ActionRow
-                label="Row Access Policy"
-                fields={["policy", "on columns (a, b)"]}
-                actions={[
-                  { label: "Add", clause: ([p, c]) => dtc.addRowAccessPolicy(p, c) },
-                  { label: "Drop", clause: ([p]) => `DROP ROW ACCESS POLICY ${dtc.sqlIdent(p)}` },
-                  { label: "Drop all", clause: () => "DROP ALL ROW ACCESS POLICIES", danger: true, confirm: "Drop every row access policy on this table?" },
-                ]}
-                run={apply}
-              />
-              <ActionRow
-                label="Aggregation Policy"
-                fields={["policy", "entity key (optional)"]}
-                actions={[
-                  { label: "Set", clause: ([p, k]) => dtc.setAggregationPolicy(p, k, false) },
-                  { label: "Set (force)", clause: ([p, k]) => dtc.setAggregationPolicy(p, k, true) },
-                  { label: "Unset", clause: () => "UNSET AGGREGATION POLICY", danger: true, confirm: "Unset the aggregation policy?" },
-                ]}
-                run={apply}
-              />
-              <ActionRow
-                label="Storage Lifecycle Policy"
-                fields={["policy", "on columns (a, b)"]}
-                actions={[
-                  { label: "Add", clause: ([p, c]) => dtc.addStorageLifecyclePolicy(p, c) },
-                  { label: "Drop", clause: () => "DROP STORAGE LIFECYCLE POLICY", danger: true, confirm: "Drop the storage lifecycle policy?" },
-                ]}
-                run={apply}
-              />
-            </tbody>
-          </table>
+          <GovernanceRows apply={apply} />
 
           <div style={SECTION_HEAD}>Properties</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

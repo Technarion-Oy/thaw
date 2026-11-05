@@ -297,9 +297,17 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
   dynamic tables via `ListObjects`), and **Clustering ▸** / **Search Optimization ▸** submenus are
   shown for `objKind === "DYNAMIC TABLE"` nodes. Columns of a dynamic table get **Comment…**,
   **Policies ▸** (masking / projection set/unset) and **Set / Unset Tag…** (gated by
-  `columnManagement`). All of them go through one helper, `dtAction`, which shows a `modal.confirm`
+  `columnManagement`). All of them go through one helper, `alterAction`, which shows a `modal.confirm`
   (optionally with an `Input` / `Select`), builds the clause with `dynamictable/dynamicTableClauses`
-  (a builder that throws keeps the dialog open) and runs `AlterDynamicTable`.
+  or `common/tableClauses` (a builder that throws keeps the dialog open) and runs `AlterTable` or
+  `AlterDynamicTable` depending on the node's kind (`alterTarget`).
+- **Table `ALTER` actions** — regular `TABLE` nodes reuse `alterAction` for **Swap With…** (sibling
+  tables of the same kind), **Clustering ▸** (Suspend / Resume Recluster), **Search Optimization ▸**
+  (Add… / Drop…), **Constraints ▸** (Add / Drop / Rename) and **Data Metric Functions ▸** (Attach /
+  Detach / Set Schedule / Suspend / Resume). **Drop Column…** also goes through it, with an optional
+  `CASCADE` / `RESTRICT` select. Column nodes (`col:` keys) join the Cmd/Ctrl/Shift multi-selection
+  (`MULTI_SELECT_PREFIXES`, `selectionKind === "col"`); right-clicking a selected column turns the
+  entry into **Drop N Columns…** for the selected columns of that same table (`dropColumnTargets`).
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
 - **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively

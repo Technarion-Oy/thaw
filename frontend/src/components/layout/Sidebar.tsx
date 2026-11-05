@@ -95,7 +95,7 @@ import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "react";
 import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
-import { ListDatabases, ListUserDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterTable, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -145,6 +145,7 @@ import CreateDynamicTableModal from "../dynamictable/CreateDynamicTableModal";
 import DynamicTablePropertiesModal from "../dynamictable/DynamicTablePropertiesModal";
 import DynamicTableRefreshHistoryModal from "../dynamictable/DynamicTableRefreshHistoryModal";
 import * as dtc from "../dynamictable/dynamicTableClauses";
+import * as tblc from "../common/tableClauses";
 import CreateExternalTableModal from "../externaltable/CreateExternalTableModal";
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
 import CreateIcebergTableModal from "../icebergtable/CreateIcebergTableModal";
@@ -487,8 +488,8 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
 }
 
 // Tree-node key prefixes that take part in multi-selection. A selection is
-// always homogeneous (all objects or all databases) — see `selectionKind`.
-const MULTI_SELECT_PREFIXES = ["obj:", "db:"] as const;
+// always homogeneous (all objects, all databases, or all columns) — see `selectionKind`.
+const MULTI_SELECT_PREFIXES = ["obj:", "db:", "col:"] as const;
 const multiSelectPrefix = (key: string): string | null =>
   MULTI_SELECT_PREFIXES.find((p) => key.startsWith(p)) ?? null;
 
@@ -800,8 +801,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // mutually exclusive — the Tree's onSelect replaces the selection when a node
   // of the other kind is picked — so the first key decides for all of them.
   const firstSelectedKey: string | undefined = selectedNodeKeys.values().next().value;
-  const selectionKind: "obj" | "db" | null =
-    firstSelectedKey === undefined ? null : firstSelectedKey.startsWith("db:") ? "db" : "obj";
+  const selectionKind: "obj" | "db" | "col" | null =
+    firstSelectedKey === undefined ? null
+      : firstSelectedKey.startsWith("db:") ? "db" : firstSelectedKey.startsWith("col:") ? "col" : "obj";
   // Which kind of bulk actions the open context menu may offer. A bulk entry acts
   // on the whole selection, so it only belongs on a row that is *in* the
   // selection — right-clicking outside it would put two entries with different
@@ -810,7 +812,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // Membership also pins the node kind: an "obj:" / "db:" key can only appear in
   // a selection of that kind, so no separate ctxMenu.nodeType check is needed to
   // keep object bulk entries off database, schema, column, git and stage rows.
-  const bulkTarget: "obj" | "db" | null =
+  const bulkTarget: "obj" | "db" | "col" | null =
     ctxMenu !== null && selectedNodeKeys.has(ctxMenu.nodeKey) ? selectionKind : null;
   const clearNodeSelection = () => {
     setSelectedNodeKeys(new Set());
@@ -2274,23 +2276,26 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDtRefreshHistoryModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
   };
 
-  // Target of a dynamic-table context-menu action (the obj node, or a column's parent).
-  const dtTarget = () => {
+  // Target of a table / dynamic-table context-menu action (the obj node, or a
+  // column's parent) plus the ALTER IPC for its kind.
+  const alterTarget = () => {
     if (!ctxMenu) return null;
+    const kind = ctxMenu.nodeType === "col" ? ctxMenu.colMeta?.parentKind : ctxMenu.objKind;
+    const alter = kind === "TABLE" ? AlterTable : AlterDynamicTable;
     if (ctxMenu.nodeType === "col") {
       const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
       setCtxMenu(null);
-      return { db, schema, name: table, column };
+      return { db, schema, name: table, column, alter };
     }
     const parts = ctxMenu.nodeKey.split(":");
     setCtxMenu(null);
-    return { db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), column: "" };
+    return { db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), column: "", alter };
   };
 
-  // ponytail: one confirm/prompt for every ALTER DYNAMIC TABLE action. With `input`
+  // ponytail: one confirm/prompt for every ALTER [DYNAMIC] TABLE action. With `input`
   // the dialog carries a text field (or a Select when `options` is given) whose
   // value feeds `clause`; a clause builder that throws keeps the dialog open.
-  const dtAction = (a: {
+  const alterAction = (a: {
     title: string;
     content?: React.ReactNode;
     input?: { placeholder: string; optional?: boolean; options?: { value: string; label: string }[] };
@@ -2299,7 +2304,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     done: string;
     danger?: boolean;
   }) => {
-    const t = dtTarget();
+    const t = alterTarget();
     if (!t) return;
     let value = "";
     modal.confirm({
@@ -2329,7 +2334,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           return Promise.reject();
         }
         try {
-          await AlterDynamicTable(t.db, t.schema, t.name, clause);
+          await t.alter(t.db, t.schema, t.name, clause);
           contextMsg.success(a.done);
           if (t.column) refreshTableColumns(t.db, t.schema, t.name);
         } catch (e) {
@@ -2339,52 +2344,79 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
-  const suspendDynamicTable = () => dtAction({
+  const suspendDynamicTable = () => alterAction({
     title: "Suspend Dynamic Table", content: "Suspend automatic refreshes?",
     clause: () => "SUSPEND", ok: "Suspend", done: "Dynamic table suspended.", danger: true,
   });
-  const resumeDynamicTable = () => dtAction({
+  const resumeDynamicTable = () => alterAction({
     title: "Resume Dynamic Table", content: "Resume automatic refreshes?",
     clause: () => "RESUME", ok: "Resume", done: "Dynamic table resumed.",
   });
-  const refreshDynamicTable = () => dtAction({
+  const refreshDynamicTable = () => alterAction({
     title: "Refresh Dynamic Table", content: "Trigger a manual refresh now?",
     clause: () => "REFRESH", ok: "Refresh", done: "Dynamic table refresh triggered.",
   });
-  const refreshDynamicTableCopySession = () => dtAction({
+  const refreshDynamicTableCopySession = () => alterAction({
     title: "Refresh Dynamic Table (Copy Session)",
     content: "Trigger a manual refresh that runs in a copy of the current session (current role, secondary roles and session parameters)?",
     clause: () => "REFRESH COPY SESSION", ok: "Refresh", done: "Dynamic table refresh triggered.",
   });
-  const swapDynamicTable = async () => {
+  // Swap a TABLE or DYNAMIC TABLE with a sibling of the same kind.
+  const swapTable = async () => {
     if (!ctxMenu) return;
     const [, db, schema, , ...rest] = ctxMenu.nodeKey.split(":");
     const self = rest.join(":");
+    const kind = ctxMenu.objKind ?? "DYNAMIC TABLE";
+    const label = kind.toLowerCase();
     let siblings: string[] = [];
     try {
       siblings = ((await ListObjects(db, schema)) ?? [])
-        .filter((o) => o.kind === "DYNAMIC TABLE" && o.name !== self).map((o) => o.name);
+        .filter((o) => o.kind === kind && o.name !== self).map((o) => o.name);
     } catch { /* fall through to an empty picker */ }
-    dtAction({
-      title: "Swap Dynamic Table",
-      content: `Exchange the names (and contents) of "${self}" and another dynamic table in ${schema}.`,
-      input: { placeholder: "Dynamic table to swap with", options: siblings.map((n) => ({ value: quoteIdent(n), label: n })) },
-      clause: (v) => `SWAP WITH ${v}`, ok: "Swap", done: "Dynamic tables swapped.", danger: true,
+    alterAction({
+      title: kind === "TABLE" ? "Swap Table" : "Swap Dynamic Table",
+      content: `Exchange the names (and contents) of "${self}" and another ${label} in ${schema}.`,
+      input: { placeholder: `${label[0].toUpperCase()}${label.slice(1)} to swap with`, options: siblings.map((n) => ({ value: quoteIdent(n), label: n })) },
+      clause: (v) => `SWAP WITH ${v}`, ok: "Swap", done: "Tables swapped.", danger: true,
     });
   };
-  const setDynamicTableClusterBy = () => dtAction({
+
+  // ─── Base TABLE (obj node) — constraints and data metric functions ─────────
+  const tableConstraint = (op: "ADD" | "DROP" | "RENAME") => () => alterAction({
+    title: { ADD: "Add Constraint", DROP: "Drop Constraint", RENAME: "Rename Constraint" }[op],
+    input: { placeholder: {
+      ADD: "e.g. CONSTRAINT pk PRIMARY KEY (id) · UNIQUE (a, b) · FOREIGN KEY (cid) REFERENCES cust (id)",
+      DROP: "<name> | PRIMARY KEY | UNIQUE (cols) | FOREIGN KEY (cols)  [CASCADE | RESTRICT]",
+      RENAME: "<old name> TO <new name>",
+    }[op] },
+    clause: { ADD: tblc.addConstraint, DROP: tblc.dropConstraint, RENAME: tblc.renameConstraint }[op],
+    ok: { ADD: "Add", DROP: "Drop", RENAME: "Rename" }[op], done: "Constraint updated.", danger: op === "DROP",
+  });
+  const tableDmf = (op: "ADD" | "DROP" | "SUSPEND" | "RESUME") => () => alterAction({
+    title: { ADD: "Attach Data Metric Function", DROP: "Detach Data Metric Function", SUSPEND: "Suspend Data Metric Function", RESUME: "Resume Data Metric Function" }[op],
+    content: op === "ADD" ? "The table needs a DATA_METRIC_SCHEDULE (Properties) before the function runs." : undefined,
+    input: { placeholder: op === "ADD" ? "<function> ON (col, …) [FILTER (…)] [EXECUTE AS ROLE <role>]" : "<function> ON (col, …)" },
+    clause: (v) => op === "ADD" ? tblc.addDataMetricFunction(v) : op === "DROP" ? tblc.dropDataMetricFunction(v) : tblc.modifyDataMetricFunction(v, op),
+    ok: { ADD: "Attach", DROP: "Detach", SUSPEND: "Suspend", RESUME: "Resume" }[op], done: "Data metric function updated.", danger: op === "DROP",
+  });
+  const tableDmfSchedule = () => alterAction({
+    title: "Data Metric Schedule",
+    input: { placeholder: "5 MINUTE · USING CRON 0 8 * * * UTC · TRIGGER_ON_CHANGES (blank to unset)", optional: true },
+    clause: tblc.dataMetricSchedule, ok: "Save", done: "Data metric schedule updated.",
+  });
+  const setDynamicTableClusterBy = () => alterAction({
     title: "Set Clustering Key", input: { placeholder: "Clustering expressions, e.g. region, DATE_TRUNC('day', ts)" },
     clause: dtc.clusterBy, ok: "Set", done: "Clustering key set.",
   });
-  const dropDynamicTableClusterBy = () => dtAction({
+  const dropDynamicTableClusterBy = () => alterAction({
     title: "Drop Clustering Key", content: "Remove the clustering key?",
     clause: () => "DROP CLUSTERING KEY", ok: "Drop", done: "Clustering key dropped.", danger: true,
   });
-  const reclusterDynamicTable = (verb: "SUSPEND" | "RESUME") => () => dtAction({
+  const recluster = (verb: "SUSPEND" | "RESUME") => () => alterAction({
     title: `${verb === "SUSPEND" ? "Suspend" : "Resume"} Recluster`, content: `${verb === "SUSPEND" ? "Suspend" : "Resume"} automatic clustering?`,
     clause: () => `${verb} RECLUSTER`, ok: verb === "SUSPEND" ? "Suspend" : "Resume", done: `Recluster ${verb === "SUSPEND" ? "suspended" : "resumed"}.`,
   });
-  const dynamicTableSearchOpt = (verb: "ADD" | "DROP" | "SUSPEND" | "RESUME") => () => dtAction({
+  const searchOpt = (verb: "ADD" | "DROP" | "SUSPEND" | "RESUME") => () => alterAction({
     title: `${verb[0] + verb.slice(1).toLowerCase()} Search Optimization`,
     content: verb === "ADD" ? "May incur additional storage and compute cost. Leave blank for the whole table." : "Leave blank for the whole table.",
     input: { placeholder: "Optional ON targets, e.g. EQUALITY(c1), SUBSTRING(c2)", optional: true },
@@ -2393,25 +2425,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   });
 
   // Column-level (col node under a DYNAMIC TABLE).
-  const dtColumnComment = () => dtAction({
+  const dtColumnComment = () => alterAction({
     title: "Column Comment", input: { placeholder: "Comment (blank to unset)", optional: true },
     clause: (v, col) => dtc.columnComment(col, v), ok: "Save", done: "Column comment updated.",
   });
-  const dtColumnPolicy = (kind: "MASKING" | "PROJECTION") => () => dtAction({
+  const dtColumnPolicy = (kind: "MASKING" | "PROJECTION") => () => alterAction({
     title: `Set ${kind === "MASKING" ? "Masking" : "Projection"} Policy`,
     input: { placeholder: kind === "MASKING" ? "<policy> [USING (col, cond_col …)] [FORCE]" : "<policy> [FORCE]" },
     clause: (v, col) => kind === "MASKING" ? dtc.columnMaskingPolicy(col, v) : dtc.columnProjectionPolicy(col, v),
     ok: "Set", done: "Policy set.",
   });
-  const dtColumnUnsetPolicy = (kind: "MASKING" | "PROJECTION") => () => dtAction({
+  const dtColumnUnsetPolicy = (kind: "MASKING" | "PROJECTION") => () => alterAction({
     title: `Unset ${kind === "MASKING" ? "Masking" : "Projection"} Policy`, content: "Detach the policy from this column?",
     clause: (_, col) => dtc.unsetColumnPolicy(col, kind), ok: "Unset", done: "Policy unset.", danger: true,
   });
-  const dtColumnSetTag = () => dtAction({
+  const dtColumnSetTag = () => alterAction({
     title: "Set Column Tag", input: { placeholder: "<tag> = <value>" },
     clause: (v, col) => dtc.columnSetTag(col, v), ok: "Set", done: "Tag set.",
   });
-  const dtColumnUnsetTag = () => dtAction({
+  const dtColumnUnsetTag = () => alterAction({
     title: "Unset Column Tag", input: { placeholder: "<tag>" },
     clause: (v, col) => dtc.columnUnsetTag(col, v), ok: "Unset", done: "Tag unset.", danger: true,
   });
@@ -3670,26 +3702,32 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
+  // Multi-selected columns of the right-clicked column's table (just that column
+  // when it isn't part of a column selection).
+  const dropColumnTargets = (): string[] => {
+    if (!ctxMenu) return [];
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    if (bulkTarget !== "col") return [column];
+    const prefix = `col:${db}:${schema}:${table}:`;
+    return Array.from(selectedNodeKeys).filter((k) => k.startsWith(prefix)).map((k) => parseColKey(k).column);
+  };
+
   const dropColumn = () => {
     if (!ctxMenu) return;
-    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
-    setCtxMenu(null);
-
-    modal.confirm({
-      title: `Drop column "${column}"?`,
-      content: `This will permanently remove column "${column}" from ${db}.${schema}.${table}. This action cannot be undone.`,
-      okText: "Drop",
-      okType: "danger",
-      cancelText: "Cancel",
-      onOk: async () => {
-        try {
-          await ExecDDL(await BuildDropColumnSql(db, schema, table, column));
-          message.success(`Dropped column "${column}"`);
-          refreshTableColumns(db, schema, table);
-        } catch (e) {
-          message.error(String(e));
-        }
+    const { db, schema, table } = parseColKey(ctxMenu.nodeKey);
+    const cols = dropColumnTargets();
+    if (cols.length > 1) clearNodeSelection();
+    const list = cols.map((c) => `"${c}"`).join(", ");
+    alterAction({
+      title: cols.length > 1 ? `Drop ${cols.length} columns?` : `Drop column ${list}?`,
+      content: `This will permanently remove ${list} from ${db}.${schema}.${table}. This action cannot be undone.`,
+      // CASCADE / RESTRICT is only documented for a single-column DROP.
+      input: cols.length > 1 ? undefined : {
+        placeholder: "Dependent constraints: default", optional: true,
+        options: [{ value: "CASCADE", label: "CASCADE — also drop dependent foreign keys" }, { value: "RESTRICT", label: "RESTRICT — fail if referenced" }],
       },
+      clause: (v) => tblc.dropColumns(cols, v as "" | "CASCADE" | "RESTRICT"),
+      ok: "Drop", done: cols.length > 1 ? `Dropped ${cols.length} columns.` : `Dropped column ${list}.`, danger: true,
     });
   };
 
@@ -4743,6 +4781,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     </Space>
                   );
                 }
+                if (key.startsWith("col:") && selectedNodeKeys.has(key)) {
+                  return <span style={SELECTED_NODE_STYLE}>{node.title as React.ReactNode}</span>;
+                }
                 return node.title as React.ReactNode;
               }}
             />
@@ -5054,21 +5095,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" && (
             <>
               {menuItem("Refresh (Copy Session)…", <SyncOutlined style={{ fontSize: 12 }} />, refreshDynamicTableCopySession)}
-              {menuItem("Swap With…", <SwapOutlined style={{ fontSize: 12 }} />, swapDynamicTable)}
+              {menuItem("Swap With…", <SwapOutlined style={{ fontSize: 12 }} />, swapTable)}
               {menuItemSub("Clustering", <ClusterOutlined style={{ fontSize: 12 }} />, "dt-clustering", (
                 <>
                   {menuItem("Set Clustering Key…", <EditOutlined style={{ fontSize: 12 }} />, setDynamicTableClusterBy)}
                   {menuItem("Drop Clustering Key…", <DeleteOutlined style={{ fontSize: 12 }} />, dropDynamicTableClusterBy)}
-                  {menuItem("Suspend Recluster", <PauseCircleOutlined style={{ fontSize: 12 }} />, reclusterDynamicTable("SUSPEND"))}
-                  {menuItem("Resume Recluster", <PlayCircleOutlined style={{ fontSize: 12 }} />, reclusterDynamicTable("RESUME"))}
+                  {menuItem("Suspend Recluster", <PauseCircleOutlined style={{ fontSize: 12 }} />, recluster("SUSPEND"))}
+                  {menuItem("Resume Recluster", <PlayCircleOutlined style={{ fontSize: 12 }} />, recluster("RESUME"))}
                 </>
               ))}
               {menuItemSub("Search Optimization", <SearchOutlined style={{ fontSize: 12 }} />, "dt-searchopt", (
                 <>
-                  {menuItem("Add…", <PlusOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("ADD"))}
-                  {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("DROP"))}
-                  {menuItem("Suspend…", <PauseCircleOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("SUSPEND"))}
-                  {menuItem("Resume…", <PlayCircleOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("RESUME"))}
+                  {menuItem("Add…", <PlusOutlined style={{ fontSize: 12 }} />, searchOpt("ADD"))}
+                  {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12 }} />, searchOpt("DROP"))}
+                  {menuItem("Suspend…", <PauseCircleOutlined style={{ fontSize: 12 }} />, searchOpt("SUSPEND"))}
+                  {menuItem("Resume…", <PlayCircleOutlined style={{ fontSize: 12 }} />, searchOpt("RESUME"))}
                 </>
               ))}
             </>
@@ -5267,6 +5308,36 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {/* Structure actions live at the top level (no submenu). */}
               {menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
               {menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
+              {menuItem("Swap With…", <SwapOutlined style={{ fontSize: 12 }} />, swapTable)}
+              {/* Cluster By / Drop Clustering Key stay in Properties. */}
+              {menuItemSub("Clustering", <ClusterOutlined style={{ fontSize: 12 }} />, "table-clustering", (
+                <>
+                  {menuItem("Suspend Recluster", <PauseCircleOutlined style={{ fontSize: 12 }} />, recluster("SUSPEND"))}
+                  {menuItem("Resume Recluster", <PlayCircleOutlined style={{ fontSize: 12 }} />, recluster("RESUME"))}
+                </>
+              ))}
+              {menuItemSub("Search Optimization", <SearchOutlined style={{ fontSize: 12 }} />, "table-searchopt", (
+                <>
+                  {menuItem("Add…", <PlusOutlined style={{ fontSize: 12 }} />, searchOpt("ADD"))}
+                  {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12 }} />, searchOpt("DROP"))}
+                </>
+              ))}
+              {menuItemSub("Constraints", <KeyOutlined style={{ fontSize: 12 }} />, "table-constraints", (
+                <>
+                  {menuItem("Add Constraint…", <PlusOutlined style={{ fontSize: 12 }} />, tableConstraint("ADD"))}
+                  {menuItem("Drop Constraint…", <DeleteOutlined style={{ fontSize: 12 }} />, tableConstraint("DROP"))}
+                  {menuItem("Rename Constraint…", <EditOutlined style={{ fontSize: 12 }} />, tableConstraint("RENAME"))}
+                </>
+              ))}
+              {menuItemSub("Data Metric Functions", <DashboardOutlined style={{ fontSize: 12 }} />, "table-dmf", (
+                <>
+                  {menuItem("Attach…", <PlusOutlined style={{ fontSize: 12 }} />, tableDmf("ADD"))}
+                  {menuItem("Detach…", <DeleteOutlined style={{ fontSize: 12 }} />, tableDmf("DROP"))}
+                  {menuItem("Set Schedule…", <ClockCircleOutlined style={{ fontSize: 12 }} />, tableDmfSchedule)}
+                  {menuItem("Suspend…", <PauseCircleOutlined style={{ fontSize: 12 }} />, tableDmf("SUSPEND"))}
+                  {menuItem("Resume…", <PlayCircleOutlined style={{ fontSize: 12 }} />, tableDmf("RESUME"))}
+                </>
+              ))}
               {menuItem("View Definition", null, viewDefinition)}
               {menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
             </>
@@ -5362,7 +5433,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
                 {menuItem("Properties…", <EditOutlined style={{ fontSize: 12 }} />, openColumnProperties, undefined, disabled, reason)}
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-                {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
+                {menuItem(dropColumnTargets().length > 1 ? `Drop ${dropColumnTargets().length} Columns…` : "Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
               </>
             );
           })()}
