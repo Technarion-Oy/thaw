@@ -4,37 +4,22 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tag, Tooltip,
+  Modal, Spin, Button, Input, Select, Space, Typography, Alert, Tag, Tooltip, Popconfirm,
 } from "antd";
 import {
   RetweetOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, SyncOutlined, HistoryOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, GetObjectParameters, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
+import { SECTION_HEAD, LABEL_TD, q1, opts, EditRow, SelectRow, PickerRow } from "../shared/PropertyRows";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import DynamicTableRefreshHistoryModal from "./DynamicTableRefreshHistoryModal";
+import * as dtc from "./dynamicTableClauses";
 import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const SECTION_HEAD: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  letterSpacing: "0.05em", textTransform: "uppercase",
-  margin: "20px 0 8px",
-};
-
-const LABEL_TD: React.CSSProperties = {
-  padding: "6px 12px 6px 0", color: "var(--text-muted)",
-  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle",
-  width: 220,
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
 
 // TARGET_LAG accepts either a string literal ('1 minute') or the bare keyword
 // DOWNSTREAM. Render the clause accordingly.
@@ -44,46 +29,51 @@ function targetLagAssign(lag: string): string {
   return `SET TARGET_LAG = ${q1(t)}`;
 }
 
-// ─── EditRow ─────────────────────────────────────────────────────────────────
-
-interface EditRowProps {
-  label: string;
-  value: string;
-  canUnset?: boolean;
-  onSave: (val: string) => Promise<void>;
-  onUnset?: () => Promise<void>;
+function days(v: string): string {
+  if (!/^\d+$/.test(v.trim())) throw new Error("Enter a whole number of days");
+  return v.trim();
 }
 
-function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
+// ─── ActionRow ───────────────────────────────────────────────────────────────
+// A row of free-text fields plus action buttons, each turning the field values
+// into one ALTER clause (a builder that throws shows its message inline). Used
+// for the attach/detach-style clauses whose current state SHOW doesn't return
+// (policies, contacts).
+
+interface RowAction {
+  label: string;
+  clause: (v: string[]) => string;
+  danger?: boolean;
+  confirm?: string;
+}
+
+function ActionRow({ label, fields, actions, run }: {
+  label: string;
+  fields: string[];
+  actions: RowAction[];
+  run: (clause: string) => Promise<void>;
+}) {
+  const [vals, setVals] = useState(() => fields.map(() => ""));
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const save = async () => {
-    setSaving(true);
+  const go = async (a: RowAction) => {
     setError(null);
+    let clause: string;
     try {
-      await onSave(draft);
-      setEditing(false);
+      clause = a.clause(vals.map((v) => v.trim()));
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
+      setError(e instanceof Error ? e.message : String(e));
+      return;
     }
-  };
-
-  const unset = async () => {
-    if (!onUnset) return;
-    setSaving(true);
-    setError(null);
+    setBusy(a.label);
     try {
-      await onUnset();
-      setEditing(false);
+      await run(clause);
+      setVals(fields.map(() => ""));
     } catch (e) {
       setError(String(e));
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
   };
 
@@ -91,44 +81,32 @@ function EditRow({ label, value, canUnset, onSave, onUnset }: EditRowProps) {
     <tr>
       <td style={LABEL_TD}>{label}</td>
       <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
-        {editing ? (
-          <Space direction="vertical" size={4} style={{ width: "100%" }}>
-            <Space>
+        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+          <Space wrap>
+            {fields.map((ph, i) => (
               <Input
+                key={ph}
                 size="small"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                style={{ width: 280 }}
-                onPressEnter={save}
+                placeholder={ph}
+                value={vals[i]}
+                onChange={(e) => setVals((vs) => vs.map((v, j) => (j === i ? e.target.value : v)))}
+                style={{ width: 170 }}
               />
-              <Tooltip title="Save">
-                <Button size="small" icon={<CheckOutlined />} type="primary" onClick={save} loading={saving} />
-              </Tooltip>
-              {canUnset && onUnset && (
-                <Tooltip title="Unset (remove)">
-                  <Button size="small" onClick={unset} loading={saving}>Unset</Button>
-                </Tooltip>
-              )}
-              <Tooltip title="Cancel">
-                <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditing(false); setDraft(value); setError(null); }} />
-              </Tooltip>
-            </Space>
-            {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+            ))}
+            {actions.map((a) => {
+              const btn = (
+                <Button key={a.label} size="small" danger={a.danger} loading={busy === a.label}
+                  onClick={a.confirm ? undefined : () => go(a)}>
+                  {a.label}
+                </Button>
+              );
+              return a.confirm
+                ? <Popconfirm key={a.label} title={a.confirm} onConfirm={() => go(a)}>{btn}</Popconfirm>
+                : btn;
+            })}
           </Space>
-        ) : (
-          <Space>
-            <span style={{ color: "var(--text)" }}>{value || <Text type="secondary">(not set)</Text>}</span>
-            <Tooltip title="Edit">
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined style={{ fontSize: 11 }} />}
-                onClick={() => { setDraft(value); setEditing(true); }}
-                style={{ color: "var(--text-muted)" }}
-              />
-            </Tooltip>
-          </Space>
-        )}
+          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+        </Space>
       </td>
     </tr>
   );
@@ -230,6 +208,8 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
   const [showHistory, setShowHistory] = useState(false);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [params, setParams] = useState<snowflake.SessionParam[]>([]);
+  const [rowBusy, setRowBusy] = useState(false);
 
   useEffect(() => {
     setLoadingWarehouses(true);
@@ -244,6 +224,10 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
     setError(null);
     try {
       const props = await GetObjectProperties(db, schema, "DYNAMIC TABLE", name);
+      // SHOW PARAMETERS IN TABLE also covers dynamic tables; best-effort — the
+      // rows below still edit fine (showing "not set") if it fails.
+      const ps = await GetObjectParameters("TABLE", [db, schema, name]).catch(() => []);
+      setParams(ps ?? []);
       setRows(props ?? []);
     } catch (e) {
       setError(String(e));
@@ -275,6 +259,22 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
     }
   };
 
+  const param = (key: string) => params.find((p) => p.key.toUpperCase() === key)?.value ?? "";
+
+  // Shared by every Settings / Governance row: run the clause, then reload.
+  const apply = async (clause: string) => {
+    await AlterDynamicTable(db, schema, name, clause);
+    await reload();
+  };
+  // SelectRow / PickerRow handlers are fire-and-forget, so surface errors in the banner.
+  const applyRow = (clause: string) => {
+    setRowBusy(true);
+    setActionError(null);
+    apply(clause)
+      .catch((e) => setActionError(String(e)))
+      .finally(() => setRowBusy(false));
+  };
+
   const saveComment = async (comment: string) => {
     if (comment.trim() === "") {
       await AlterDynamicTable(db, schema, name, "UNSET COMMENT");
@@ -299,9 +299,21 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
   const warehouse = find("warehouse");
   const definingQuery = find("text");
   const schedulingState = find("scheduling_state");
+  const initWarehouse = find("initialization_warehouse");
+  const scheduler = find("scheduler");
+  // SHOW reports the key as LINEAR(a, b); edit just the expression list.
+  const clusterKey = find("cluster_by").replace(/^LINEAR\((.*)\)$/is, "$1");
+  const frozenWhere = find("immutable_where");
+  const executeAs = find("execute_as_user");
+  const rowTimestamp = find("row_timestamp");
+  const retention = param("DATA_RETENTION_TIME_IN_DAYS");
+  const maxExt = param("MAX_DATA_EXTENSION_TIME_IN_DAYS");
+  const collation = param("DEFAULT_DDL_COLLATION");
+  const logLevel = param("LOG_LEVEL");
 
   // Keys handled by the editable Settings section or rendered elsewhere.
-  const handledKeys = new Set(["comment", "target_lag", "warehouse", "text"]);
+  const handledKeys = new Set(["comment", "target_lag", "warehouse", "text", "initialization_warehouse",
+    "scheduler", "cluster_by", "immutable_where", "execute_as_user", "row_timestamp"]);
 
   return (
     <Modal
@@ -372,6 +384,79 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
                 loading={loadingWarehouses}
                 onSave={saveWarehouse}
               />
+              <PickerRow
+                label="Initialization Warehouse"
+                value={initWarehouse}
+                load={ListWarehouses}
+                busy={rowBusy}
+                onSet={(wh) => applyRow(`SET INITIALIZATION_WAREHOUSE = ${quoteIdent(wh)}`)}
+                onUnset={() => applyRow("UNSET INITIALIZATION_WAREHOUSE")}
+              />
+              <SelectRow
+                label="Scheduler"
+                value={scheduler}
+                options={opts("ENABLE", "DISABLE")}
+                busy={rowBusy}
+                onSet={(v) => applyRow(`SET SCHEDULER = ${v}`)}
+              />
+              <EditRow
+                label="Cluster By"
+                value={clusterKey}
+                canUnset={clusterKey !== ""}
+                onSave={(v) => apply(dtc.clusterBy(v))}
+                onUnset={() => apply("DROP CLUSTERING KEY")}
+              />
+              <EditRow
+                label="Data Retention (days)"
+                value={retention}
+                canUnset
+                onSave={(v) => apply(`SET DATA_RETENTION_TIME_IN_DAYS = ${days(v)}`)}
+                onUnset={() => apply("UNSET DATA_RETENTION_TIME_IN_DAYS")}
+              />
+              <EditRow
+                label="Max Data Extension (days)"
+                value={maxExt}
+                canUnset
+                onSave={(v) => apply(`SET MAX_DATA_EXTENSION_TIME_IN_DAYS = ${days(v)}`)}
+                onUnset={() => apply("UNSET MAX_DATA_EXTENSION_TIME_IN_DAYS")}
+              />
+              <EditRow
+                label="Default DDL Collation"
+                value={collation}
+                canUnset
+                onSave={(v) => apply(v.trim() ? `SET DEFAULT_DDL_COLLATION = ${q1(v.trim())}` : "UNSET DEFAULT_DDL_COLLATION")}
+                onUnset={() => apply("UNSET DEFAULT_DDL_COLLATION")}
+              />
+              <SelectRow
+                label="Log Level"
+                value={logLevel}
+                options={opts("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF")}
+                busy={rowBusy}
+                onSet={(v) => applyRow(`SET LOG_LEVEL = ${q1(v)}`)}
+                onUnset={() => applyRow("UNSET LOG_LEVEL")}
+              />
+              <EditRow
+                label="Frozen Where"
+                value={frozenWhere}
+                canUnset={frozenWhere !== ""}
+                onSave={(v) => apply(v.trim() ? `SET FROZEN WHERE (${v.trim()})` : "UNSET FROZEN WHERE")}
+                onUnset={() => apply("UNSET FROZEN WHERE")}
+              />
+              <EditRow
+                label="Execute As User"
+                value={executeAs}
+                canUnset={executeAs !== ""}
+                onSave={(v) => apply(v.trim() ? dtc.executeAsUser(v) : "UNSET EXECUTE AS USER")}
+                onUnset={() => apply("UNSET EXECUTE AS USER")}
+              />
+              <SelectRow
+                label="Row Timestamp"
+                value={rowTimestamp}
+                options={opts("TRUE", "FALSE")}
+                busy={rowBusy}
+                onSet={(v) => applyRow(`SET ROW_TIMESTAMP = ${v}`)}
+                onUnset={() => applyRow("UNSET ROW_TIMESTAMP")}
+              />
               <EditRow
                 label="Comment"
                 value={comment}
@@ -380,6 +465,54 @@ export default function DynamicTablePropertiesModal({ db, schema, name, onClose 
                 onUnset={() => saveComment("")}
               />
               <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+              <ActionRow
+                label="Contact"
+                fields={["purpose (e.g. SUPPORT)", "contact name"]}
+                actions={[
+                  { label: "Set", clause: ([p, c]) => dtc.setContact(p, c) },
+                  { label: "Unset", clause: ([p]) => `UNSET CONTACT ${dtc.contactPurpose(p)}` },
+                ]}
+                run={apply}
+              />
+            </tbody>
+          </table>
+
+          {/* Attachments aren't in SHOW DYNAMIC TABLES (they live in POLICY_REFERENCES),
+              so these are attach/detach editors rather than current-value rows.
+              Column-level masking / projection policies, tags and comments are on
+              the column node's context menu. */}
+          <div style={SECTION_HEAD}>Governance</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <ActionRow
+                label="Row Access Policy"
+                fields={["policy", "on columns (a, b)"]}
+                actions={[
+                  { label: "Add", clause: ([p, c]) => dtc.addRowAccessPolicy(p, c) },
+                  { label: "Drop", clause: ([p]) => `DROP ROW ACCESS POLICY ${dtc.sqlIdent(p)}` },
+                  { label: "Drop all", clause: () => "DROP ALL ROW ACCESS POLICIES", danger: true, confirm: "Drop every row access policy on this table?" },
+                ]}
+                run={apply}
+              />
+              <ActionRow
+                label="Aggregation Policy"
+                fields={["policy", "entity key (optional)"]}
+                actions={[
+                  { label: "Set", clause: ([p, k]) => dtc.setAggregationPolicy(p, k, false) },
+                  { label: "Set (force)", clause: ([p, k]) => dtc.setAggregationPolicy(p, k, true) },
+                  { label: "Unset", clause: () => "UNSET AGGREGATION POLICY", danger: true, confirm: "Unset the aggregation policy?" },
+                ]}
+                run={apply}
+              />
+              <ActionRow
+                label="Storage Lifecycle Policy"
+                fields={["policy", "on columns (a, b)"]}
+                actions={[
+                  { label: "Add", clause: ([p, c]) => dtc.addStorageLifecyclePolicy(p, c) },
+                  { label: "Drop", clause: () => "DROP STORAGE LIFECYCLE POLICY", danger: true, confirm: "Drop the storage lifecycle policy?" },
+                ]}
+                run={apply}
+              />
             </tbody>
           </table>
 
