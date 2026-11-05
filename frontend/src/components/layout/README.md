@@ -293,7 +293,13 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
   "Insert Column Name" and "Tag References…" are never gated.
 - **Dynamic table actions** — **Properties…**, **Refresh…**, **Suspend**, **Resume**, and
   **View Refresh History…** (mounts `dynamictable/DynamicTableRefreshHistoryModal`, same wiring as
-  the task **View Run History…** item) are shown for `objKind === "DYNAMIC TABLE"` nodes.
+  the task **View Run History…** item), **Refresh (Copy Session)…**, **Swap With…** (sibling
+  dynamic tables via `ListObjects`), and **Clustering ▸** / **Search Optimization ▸** submenus are
+  shown for `objKind === "DYNAMIC TABLE"` nodes. Columns of a dynamic table get **Comment…**,
+  **Policies ▸** (masking / projection set/unset) and **Set / Unset Tag…** (gated by
+  `columnManagement`). All of them go through one helper, `dtAction`, which shows a `modal.confirm`
+  (optionally with an `Input` / `Select`), builds the clause with `dynamictable/dynamicTableClauses`
+  (a builder that throws keeps the dialog open) and runs `AlterDynamicTable`.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
 - **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively

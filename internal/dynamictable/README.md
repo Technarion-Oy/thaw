@@ -5,10 +5,13 @@
 ## Responsibility
 
 Builds the `CREATE DYNAMIC TABLE` DDL from a structured config. The lifecycle
-commands (`SUSPEND`, `RESUME`, `REFRESH`, `SET`/`UNSET`, `RENAME TO`) are simple
-enough that they are issued as free-form `ALTER DYNAMIC TABLE <fqn> <clause>`
-statements directly from `internal/app/dynamictable.go` (`App.AlterDynamicTable`)
-without a dedicated builder.
+commands (`SUSPEND`, `RESUME`, `REFRESH [COPY SESSION]`, `SWAP WITH`, clustering,
+search optimization, `SET`/`UNSET` properties, policy attach/detach, column
+`ALTER COLUMN …` actions, `RENAME TO`) are issued as free-form
+`ALTER DYNAMIC TABLE <fqn> <clause>` statements through `App.AlterDynamicTable`
+(`internal/app/dynamictable.go`). The clause text is built on the frontend in
+`frontend/src/components/dynamictable/dynamicTableClauses.ts` (validated
+identifiers, unit-tested), so no Go builder or extra IPC is needed.
 
 ## Key files
 

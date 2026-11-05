@@ -31,6 +31,8 @@ import {
   DownloadOutlined,
   UploadOutlined,
   SearchOutlined,
+  SwapOutlined,
+  ClusterOutlined,
   CaretRightFilled,
   CaretDownFilled,
   CopyOutlined,
@@ -142,6 +144,7 @@ import SetGitCommitFilterModal from "../gitrepoobj/SetGitCommitFilterModal";
 import CreateDynamicTableModal from "../dynamictable/CreateDynamicTableModal";
 import DynamicTablePropertiesModal from "../dynamictable/DynamicTablePropertiesModal";
 import DynamicTableRefreshHistoryModal from "../dynamictable/DynamicTableRefreshHistoryModal";
+import * as dtc from "../dynamictable/dynamicTableClauses";
 import CreateExternalTableModal from "../externaltable/CreateExternalTableModal";
 import ExternalTablePropertiesModal from "../externaltable/ExternalTablePropertiesModal";
 import CreateIcebergTableModal from "../icebergtable/CreateIcebergTableModal";
@@ -2271,72 +2274,147 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setDtRefreshHistoryModal({ db: parts[1], schema: parts[2], name: parts.slice(4).join(":") });
   };
 
-  const suspendDynamicTable = () => {
-    if (!ctxMenu) return;
+  // Target of a dynamic-table context-menu action (the obj node, or a column's parent).
+  const dtTarget = () => {
+    if (!ctxMenu) return null;
+    if (ctxMenu.nodeType === "col") {
+      const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+      setCtxMenu(null);
+      return { db, schema, name: table, column };
+    }
     const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
     setCtxMenu(null);
+    return { db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), column: "" };
+  };
+
+  // ponytail: one confirm/prompt for every ALTER DYNAMIC TABLE action. With `input`
+  // the dialog carries a text field (or a Select when `options` is given) whose
+  // value feeds `clause`; a clause builder that throws keeps the dialog open.
+  const dtAction = (a: {
+    title: string;
+    content?: React.ReactNode;
+    input?: { placeholder: string; optional?: boolean; options?: { value: string; label: string }[] };
+    clause: (value: string, column: string) => string;
+    ok: string;
+    done: string;
+    danger?: boolean;
+  }) => {
+    const t = dtTarget();
+    if (!t) return;
+    let value = "";
     modal.confirm({
-      title: "Suspend Dynamic Table",
-      content: `Suspend automatic refreshes for "${name}"?`,
-      okText: "Suspend",
-      okButtonProps: { danger: true },
+      title: a.title,
+      width: a.input ? 480 : undefined,
+      content: (
+        <div>
+          {a.content}
+          {a.input && (
+            <div style={{ marginTop: a.content ? 8 : 0 }}>
+              {a.input.options
+                ? <Select style={{ width: "100%" }} showSearch placeholder={a.input.placeholder} options={a.input.options} onChange={(v: string) => { value = v; }} />
+                : <Input autoFocus placeholder={a.input.placeholder} onChange={(e) => { value = e.target.value; }} />}
+            </div>
+          )}
+        </div>
+      ),
+      okText: a.ok,
+      okButtonProps: a.danger ? { danger: true } : undefined,
       onOk: async () => {
+        let clause: string;
         try {
-          await AlterDynamicTable(db, schema, name, "SUSPEND");
-          contextMsg.success(`Dynamic table "${name}" suspended.`);
+          if (a.input && !a.input.optional && !value.trim()) throw new Error("A value is required.");
+          clause = a.clause(value, t.column);
         } catch (e) {
-          contextMsg.error(`Failed to suspend dynamic table: ${String(e)}`);
+          contextMsg.error(String(e instanceof Error ? e.message : e));
+          return Promise.reject();
+        }
+        try {
+          await AlterDynamicTable(t.db, t.schema, t.name, clause);
+          contextMsg.success(a.done);
+          if (t.column) refreshTableColumns(t.db, t.schema, t.name);
+        } catch (e) {
+          contextMsg.error(`${a.title} failed: ${String(e)}`);
         }
       },
     });
   };
 
-  const resumeDynamicTable = () => {
+  const suspendDynamicTable = () => dtAction({
+    title: "Suspend Dynamic Table", content: "Suspend automatic refreshes?",
+    clause: () => "SUSPEND", ok: "Suspend", done: "Dynamic table suspended.", danger: true,
+  });
+  const resumeDynamicTable = () => dtAction({
+    title: "Resume Dynamic Table", content: "Resume automatic refreshes?",
+    clause: () => "RESUME", ok: "Resume", done: "Dynamic table resumed.",
+  });
+  const refreshDynamicTable = () => dtAction({
+    title: "Refresh Dynamic Table", content: "Trigger a manual refresh now?",
+    clause: () => "REFRESH", ok: "Refresh", done: "Dynamic table refresh triggered.",
+  });
+  const refreshDynamicTableCopySession = () => dtAction({
+    title: "Refresh Dynamic Table (Copy Session)",
+    content: "Trigger a manual refresh that runs in a copy of the current session (current role, secondary roles and session parameters)?",
+    clause: () => "REFRESH COPY SESSION", ok: "Refresh", done: "Dynamic table refresh triggered.",
+  });
+  const swapDynamicTable = async () => {
     if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    modal.confirm({
-      title: "Resume Dynamic Table",
-      content: `Resume automatic refreshes for "${name}"?`,
-      okText: "Resume",
-      onOk: async () => {
-        try {
-          await AlterDynamicTable(db, schema, name, "RESUME");
-          contextMsg.success(`Dynamic table "${name}" resumed.`);
-        } catch (e) {
-          contextMsg.error(`Failed to resume dynamic table: ${String(e)}`);
-        }
-      },
+    const [, db, schema, , ...rest] = ctxMenu.nodeKey.split(":");
+    const self = rest.join(":");
+    let siblings: string[] = [];
+    try {
+      siblings = ((await ListObjects(db, schema)) ?? [])
+        .filter((o) => o.kind === "DYNAMIC TABLE" && o.name !== self).map((o) => o.name);
+    } catch { /* fall through to an empty picker */ }
+    dtAction({
+      title: "Swap Dynamic Table",
+      content: `Exchange the names (and contents) of "${self}" and another dynamic table in ${schema}.`,
+      input: { placeholder: "Dynamic table to swap with", options: siblings.map((n) => ({ value: quoteIdent(n), label: n })) },
+      clause: (v) => `SWAP WITH ${v}`, ok: "Swap", done: "Dynamic tables swapped.", danger: true,
     });
   };
+  const setDynamicTableClusterBy = () => dtAction({
+    title: "Set Clustering Key", input: { placeholder: "Clustering expressions, e.g. region, DATE_TRUNC('day', ts)" },
+    clause: dtc.clusterBy, ok: "Set", done: "Clustering key set.",
+  });
+  const dropDynamicTableClusterBy = () => dtAction({
+    title: "Drop Clustering Key", content: "Remove the clustering key?",
+    clause: () => "DROP CLUSTERING KEY", ok: "Drop", done: "Clustering key dropped.", danger: true,
+  });
+  const reclusterDynamicTable = (verb: "SUSPEND" | "RESUME") => () => dtAction({
+    title: `${verb === "SUSPEND" ? "Suspend" : "Resume"} Recluster`, content: `${verb === "SUSPEND" ? "Suspend" : "Resume"} automatic clustering?`,
+    clause: () => `${verb} RECLUSTER`, ok: verb === "SUSPEND" ? "Suspend" : "Resume", done: `Recluster ${verb === "SUSPEND" ? "suspended" : "resumed"}.`,
+  });
+  const dynamicTableSearchOpt = (verb: "ADD" | "DROP" | "SUSPEND" | "RESUME") => () => dtAction({
+    title: `${verb[0] + verb.slice(1).toLowerCase()} Search Optimization`,
+    content: verb === "ADD" ? "May incur additional storage and compute cost. Leave blank for the whole table." : "Leave blank for the whole table.",
+    input: { placeholder: "Optional ON targets, e.g. EQUALITY(c1), SUBSTRING(c2)", optional: true },
+    clause: (v) => dtc.searchOptimization(verb, v), ok: verb[0] + verb.slice(1).toLowerCase(),
+    done: "Search optimization updated.", danger: verb === "DROP",
+  });
 
-  const refreshDynamicTable = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const name = parts.slice(4).join(":");
-    setCtxMenu(null);
-    modal.confirm({
-      title: "Refresh Dynamic Table",
-      content: `Trigger a manual refresh of "${name}" now?`,
-      okText: "Refresh",
-      onOk: async () => {
-        try {
-          await AlterDynamicTable(db, schema, name, "REFRESH");
-          contextMsg.success(`Dynamic table "${name}" refresh triggered.`);
-        } catch (e) {
-          contextMsg.error(`Failed to refresh dynamic table: ${String(e)}`);
-        }
-      },
-    });
-  };
+  // Column-level (col node under a DYNAMIC TABLE).
+  const dtColumnComment = () => dtAction({
+    title: "Column Comment", input: { placeholder: "Comment (blank to unset)", optional: true },
+    clause: (v, col) => dtc.columnComment(col, v), ok: "Save", done: "Column comment updated.",
+  });
+  const dtColumnPolicy = (kind: "MASKING" | "PROJECTION") => () => dtAction({
+    title: `Set ${kind === "MASKING" ? "Masking" : "Projection"} Policy`,
+    input: { placeholder: kind === "MASKING" ? "<policy> [USING (col, cond_col …)] [FORCE]" : "<policy> [FORCE]" },
+    clause: (v, col) => kind === "MASKING" ? dtc.columnMaskingPolicy(col, v) : dtc.columnProjectionPolicy(col, v),
+    ok: "Set", done: "Policy set.",
+  });
+  const dtColumnUnsetPolicy = (kind: "MASKING" | "PROJECTION") => () => dtAction({
+    title: `Unset ${kind === "MASKING" ? "Masking" : "Projection"} Policy`, content: "Detach the policy from this column?",
+    clause: (_, col) => dtc.unsetColumnPolicy(col, kind), ok: "Unset", done: "Policy unset.", danger: true,
+  });
+  const dtColumnSetTag = () => dtAction({
+    title: "Set Column Tag", input: { placeholder: "<tag> = <value>" },
+    clause: (v, col) => dtc.columnSetTag(col, v), ok: "Set", done: "Tag set.",
+  });
+  const dtColumnUnsetTag = () => dtAction({
+    title: "Unset Column Tag", input: { placeholder: "<tag>" },
+    clause: (v, col) => dtc.columnUnsetTag(col, v), ok: "Unset", done: "Tag unset.", danger: true,
+  });
 
   const openCreateExternalTable = () => {
     if (!ctxMenu) return;
@@ -4973,6 +5051,28 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Resume", <PlayCircleOutlined style={{ fontSize: 12 }} />, resumeDynamicTable)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" &&
             menuItem("View Refresh History…", <HistoryOutlined style={{ fontSize: 12 }} />, openDynamicTableRefreshHistory)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DYNAMIC TABLE" && (
+            <>
+              {menuItem("Refresh (Copy Session)…", <SyncOutlined style={{ fontSize: 12 }} />, refreshDynamicTableCopySession)}
+              {menuItem("Swap With…", <SwapOutlined style={{ fontSize: 12 }} />, swapDynamicTable)}
+              {menuItemSub("Clustering", <ClusterOutlined style={{ fontSize: 12 }} />, "dt-clustering", (
+                <>
+                  {menuItem("Set Clustering Key…", <EditOutlined style={{ fontSize: 12 }} />, setDynamicTableClusterBy)}
+                  {menuItem("Drop Clustering Key…", <DeleteOutlined style={{ fontSize: 12 }} />, dropDynamicTableClusterBy)}
+                  {menuItem("Suspend Recluster", <PauseCircleOutlined style={{ fontSize: 12 }} />, reclusterDynamicTable("SUSPEND"))}
+                  {menuItem("Resume Recluster", <PlayCircleOutlined style={{ fontSize: 12 }} />, reclusterDynamicTable("RESUME"))}
+                </>
+              ))}
+              {menuItemSub("Search Optimization", <SearchOutlined style={{ fontSize: 12 }} />, "dt-searchopt", (
+                <>
+                  {menuItem("Add…", <PlusOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("ADD"))}
+                  {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("DROP"))}
+                  {menuItem("Suspend…", <PauseCircleOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("SUSPEND"))}
+                  {menuItem("Resume…", <PlayCircleOutlined style={{ fontSize: 12 }} />, dynamicTableSearchOpt("RESUME"))}
+                </>
+              ))}
+            </>
+          )}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
@@ -5234,6 +5334,26 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Insert Column Name", <CodeOutlined style={{ fontSize: 12 }} />, insertColumnName)}
           {ctxMenu.nodeType === "col" &&
             menuItem("Tag References…", <TagsOutlined style={{ fontSize: 12 }} />, openColumnTagReferences)}
+          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "DYNAMIC TABLE" && (() => {
+            const disabled = !featureFlags.columnManagement;
+            const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
+            return (
+              <>
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Comment…", <EditOutlined style={{ fontSize: 12 }} />, dtColumnComment, undefined, disabled, reason)}
+                {menuItemSub("Policies", <SafetyOutlined style={{ fontSize: 12 }} />, "dt-col-policies", (
+                  <>
+                    {menuItem("Set Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, dtColumnPolicy("MASKING"), undefined, disabled, reason)}
+                    {menuItem("Unset Masking Policy…", <EyeInvisibleOutlined style={{ fontSize: 12 }} />, dtColumnUnsetPolicy("MASKING"), undefined, disabled, reason)}
+                    {menuItem("Set Projection Policy…", <ColumnWidthOutlined style={{ fontSize: 12 }} />, dtColumnPolicy("PROJECTION"), undefined, disabled, reason)}
+                    {menuItem("Unset Projection Policy…", <ColumnWidthOutlined style={{ fontSize: 12 }} />, dtColumnUnsetPolicy("PROJECTION"), undefined, disabled, reason)}
+                  </>
+                ))}
+                {menuItem("Set Tag…", <TagsOutlined style={{ fontSize: 12 }} />, dtColumnSetTag, undefined, disabled, reason)}
+                {menuItem("Unset Tag…", <TagsOutlined style={{ fontSize: 12 }} />, dtColumnUnsetTag, undefined, disabled, reason)}
+              </>
+            );
+          })()}
           {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (() => {
             const disabled = !featureFlags.columnManagement;
             const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
