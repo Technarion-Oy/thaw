@@ -78,6 +78,20 @@ export function dropConstraint(v: string): string {
   return `DROP CONSTRAINT ${sqlIdent(target, 1)}${mode}`;
 }
 
+/**
+ * `<name> | PRIMARY KEY (cols) | UNIQUE (cols) | FOREIGN KEY (cols)` followed by
+ * `[NOT] ENFORCED`, `VALIDATE | NOVALIDATE`, `RELY | NORELY` → ALTER …
+ */
+export function alterConstraint(v: string): string {
+  const m = /^(.*?)((?:\s+(?:NOT\s+ENFORCED|ENFORCED|VALIDATE|NOVALIDATE|RELY|NORELY))+)$/is.exec(v.trim());
+  if (!m) throw new Error("Expected: <constraint> [NOT] ENFORCED | VALIDATE | NOVALIDATE | RELY | NORELY");
+  const target = m[1].trim();
+  const props = m[2].trim().toUpperCase().replace(/\s+/g, " ");
+  const key = /^(PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\s*\(([^)]*)\)$/i.exec(target);
+  if (key) return `ALTER ${key[1].toUpperCase().replace(/\s+/g, " ")} (${sqlIdentList(key[2])}) ${props}`;
+  return `ALTER CONSTRAINT ${sqlIdent(target, 1)} ${props}`;
+}
+
 /** `<old> [TO] <new>` → RENAME CONSTRAINT … */
 export function renameConstraint(v: string): string {
   const m = new RegExp(String.raw`^(${PART})\s+(?:TO\s+)?(${PART})$`, "i").exec(v.trim());
@@ -87,22 +101,55 @@ export function renameConstraint(v: string): string {
 
 // ─── Data metric functions ───────────────────────────────────────────────────
 
-/** `<function> ON (cols)` — parsed once, reused by every DMF action. */
+/**
+ * `<function> ON (cols [, TABLE <t>(cols)])` — parsed once, reused by every DMF
+ * action. The optional TABLE part is for multi-table DMFs (e.g. referential checks).
+ */
 function dmfTarget(v: string): { fn: string; on: string; rest: string } {
-  const m = new RegExp(String.raw`^(${IDENT})\s+ON\s*\(([^)]*)\)(.*)$`, "is").exec(v.trim());
-  if (!m) throw new Error("Expected: <function> ON (col, …)");
-  return { fn: m[1], on: `ON (${cols(m[2])})`, rest: m[3].trim() };
+  const m = new RegExp(
+    String.raw`^(${IDENT})\s+ON\s*\(([^(),]*(?:,[^(),]*)*?)(?:,?\s*TABLE\s+(${IDENT})\s*\(([^)]*)\))?\s*\)(.*)$`, "is",
+  ).exec(v.trim());
+  if (!m) throw new Error("Expected: <function> ON (col, … [, TABLE <table>(col, …)])");
+  const tbl = m[3] ? `${m[2].trim() ? ", " : ""}TABLE ${m[3]}(${sqlIdentList(m[4])})` : "";
+  return { fn: m[1], on: `ON (${cols(m[2])}${tbl})`, rest: m[5].trim() };
 }
 
-/** `<function> ON (cols) [FILTER (pred)] [EXECUTE AS ROLE r]` → ADD DATA METRIC FUNCTION … */
+// Trailing DMF clauses are passed through (like CHECK / FILTER expressions) but
+// must start with a known keyword and contain no statement separator.
+function dmfTail(rest: string, allowed: RegExp, expected: string): string {
+  if (!rest) return "";
+  if (rest.includes(";")) throw new Error("Semicolons are not allowed");
+  if (!allowed.test(rest)) throw new Error(`Expected ${expected} after ON (…)`);
+  return ` ${rest}`;
+}
+
+/**
+ * `<function> ON (cols) [WITHIN GROUP (…) [GROUP LIMIT n]] [FILTER (…)]
+ * [EXPECTATION name (expr), …] [EXECUTE AS ROLE r] [ANOMALY_DETECTION = …] [SENSITIVITY = …]`
+ * → ADD DATA METRIC FUNCTION …
+ */
 export function addDataMetricFunction(v: string): string {
   const { fn, on, rest } = dmfTarget(v);
-  const m = new RegExp(String.raw`^(?:FILTER\s*\((.*?)\))?\s*(?:EXECUTE\s+AS\s+ROLE\s+(${PART}))?$`, "is").exec(rest);
-  if (!m) throw new Error("Only FILTER (…) and EXECUTE AS ROLE <role> may follow ON (…)");
-  if (m[1]?.includes(";")) throw new Error("Semicolons are not allowed");
-  const filter = m[1] !== undefined ? ` FILTER (${m[1].trim()})` : "";
-  const role = m[2] ? ` EXECUTE AS ROLE ${m[2]}` : "";
-  return `ADD DATA METRIC FUNCTION ${fn} ${on}${filter}${role}`;
+  const tail = dmfTail(rest, /^(WITHIN\s+GROUP|FILTER|EXPECTATION|EXECUTE\s+AS\s+ROLE|ANOMALY_DETECTION|SENSITIVITY)\b/i,
+    "WITHIN GROUP, FILTER, EXPECTATION, EXECUTE AS ROLE, ANOMALY_DETECTION or SENSITIVITY");
+  return `ADD DATA METRIC FUNCTION ${fn} ${on}${tail}`;
+}
+
+/**
+ * `<function> ON (cols) SUSPEND | RESUME | {ADD|MODIFY} EXPECTATION … | DROP EXPECTATION … | FILTER ([pred])`
+ * or `<function> SET <props>` → MODIFY DATA METRIC FUNCTION …
+ */
+export function modifyDataMetricFunctionAction(v: string): string {
+  const set = new RegExp(String.raw`^(${IDENT})\s+SET\s+(.+)$`, "is").exec(v.trim());
+  if (set) {
+    if (set[2].includes(";")) throw new Error("Semicolons are not allowed");
+    return `MODIFY DATA METRIC FUNCTION ${set[1]} SET ${set[2].trim()}`;
+  }
+  const { fn, on, rest } = dmfTarget(v);
+  if (!rest) throw new Error("Add an action: SUSPEND, RESUME, ADD/MODIFY/DROP EXPECTATION or FILTER (…)");
+  const tail = dmfTail(rest, /^(SUSPEND|RESUME|ADD\s+EXPECTATION|MODIFY\s+EXPECTATION|DROP\s+EXPECTATION|FILTER)\b/i,
+    "SUSPEND, RESUME, ADD/MODIFY/DROP EXPECTATION or FILTER (…)");
+  return `MODIFY DATA METRIC FUNCTION ${fn} ${on}${tail}`;
 }
 
 export function dropDataMetricFunction(v: string): string {
@@ -124,6 +171,10 @@ export function dataMetricSchedule(v: string): string {
 }
 
 // ─── Governance (table-only) ─────────────────────────────────────────────────
+
+/** Atomic swap: DROP ROW ACCESS POLICY <old>, ADD ROW ACCESS POLICY <new> ON (cols). */
+export const replaceRowAccessPolicy = (oldPolicy: string, newPolicy: string, cols: string) =>
+  `DROP ROW ACCESS POLICY ${sqlIdent(oldPolicy)}, ADD ROW ACCESS POLICY ${sqlIdent(newPolicy)} ON (${sqlIdentList(cols)})`;
 
 export const setJoinPolicy = (policy: string, force: boolean) =>
   `SET JOIN POLICY ${sqlIdent(policy)}${force ? " FORCE" : ""}`;

@@ -8,7 +8,7 @@
 
 import { SECTION_HEAD, ActionRow } from "../shared/PropertyRows";
 import * as dtc from "../dynamictable/dynamicTableClauses";
-import { setJoinPolicy } from "./tableClauses";
+import { setJoinPolicy, replaceRowAccessPolicy } from "./tableClauses";
 
 export default function GovernanceRows({ apply, joinPolicy }: {
   apply: (clause: string) => Promise<void>;
@@ -28,6 +28,13 @@ export default function GovernanceRows({ apply, joinPolicy }: {
               { label: "Drop", clause: ([p]) => `DROP ROW ACCESS POLICY ${dtc.sqlIdent(p)}` },
               { label: "Drop all", clause: () => "DROP ALL ROW ACCESS POLICIES", danger: true, confirm: "Drop every row access policy on this table?" },
             ]}
+            run={apply}
+          />
+          {/* DROP …, ADD … in one statement so the table is never unprotected. */}
+          <ActionRow
+            label="Replace Row Access Policy"
+            fields={["current policy", "new policy", "on columns (a, b)"]}
+            actions={[{ label: "Replace", clause: ([o, n, c]) => replaceRowAccessPolicy(o, n, c), confirm: "Swap the row access policy?" }]}
             run={apply}
           />
           <ActionRow

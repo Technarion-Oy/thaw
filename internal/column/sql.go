@@ -36,6 +36,13 @@ type AddColumnConfig struct {
 	// Collation & comment
 	Collation string `json:"collation"`
 	Comment   string `json:"comment"`
+	// Governance: [WITH] MASKING POLICY p [USING (col, cond…)], [WITH]
+	// PROJECTION POLICY p, [WITH] TAG (…). Policy names are typed references
+	// (bare or "quoted", up to db.schema.name); MaskingUsing is a comma list.
+	MaskingPolicy    string              `json:"maskingPolicy"`
+	MaskingUsing     string              `json:"maskingUsing"`
+	ProjectionPolicy string              `json:"projectionPolicy"`
+	Tags             []snowflake.TagPair `json:"tags"`
 }
 
 // tableRef returns a fully-quoted DB.SCHEMA.TABLE reference.
@@ -46,9 +53,8 @@ func tableRef(db, schema, table string) string {
 
 // BuildAddColumnSql constructs an ALTER TABLE ... ADD COLUMN statement.
 //
-// It always returns a nil error; the error result exists for IPC symmetry with
-// the other builders and to leave room for future validation without changing
-// the Wails-bound signature.
+// It returns an error only when a typed policy name or USING column is not a
+// valid identifier.
 func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, error) {
 	colName := cfg.Name
 	if colName == "" {
@@ -130,6 +136,36 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 				parts = append(parts, ref)
 			}
 		}
+	}
+
+	if p := strings.TrimSpace(cfg.MaskingPolicy); p != "" {
+		ref, err := snowflake.RenderQualifiedName("masking policy", p, 3)
+		if err != nil {
+			return "", err
+		}
+		clause := "WITH MASKING POLICY " + ref
+		if u := strings.TrimSpace(cfg.MaskingUsing); u != "" {
+			var cols []string
+			for _, c := range strings.Split(u, ",") {
+				rc, err := snowflake.RenderQualifiedName("USING column", c, 1)
+				if err != nil {
+					return "", err
+				}
+				cols = append(cols, rc)
+			}
+			clause += " USING (" + strings.Join(cols, ", ") + ")"
+		}
+		parts = append(parts, clause)
+	}
+	if p := strings.TrimSpace(cfg.ProjectionPolicy); p != "" {
+		ref, err := snowflake.RenderQualifiedName("projection policy", p, 3)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, "WITH PROJECTION POLICY "+ref)
+	}
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
+		parts = append(parts, "WITH "+tc)
 	}
 
 	if c := strings.TrimSpace(cfg.Comment); c != "" {

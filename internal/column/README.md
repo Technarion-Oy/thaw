@@ -18,7 +18,7 @@ Owns every SQL string for mutating table columns via `ALTER TABLE`. No column DD
 
 ### Config type
 
-`AddColumnConfig` — mirrors the frontend's `AddColumnModal` form fields; maps cleanly to the Wails-generated TypeScript model. Fields cover name, data type, value mode (`none` / `default` / `autoincrement` / `computed`), identity parameters, inline constraint (UNIQUE / PRIMARY KEY / FOREIGN KEY), collation, and comment.
+`AddColumnConfig` — mirrors the frontend's `AddColumnModal` form fields; maps cleanly to the Wails-generated TypeScript model. Fields cover name, data type, value mode (`none` / `default` / `autoincrement` / `computed`), identity parameters, inline constraint (UNIQUE / PRIMARY KEY / FOREIGN KEY), collation, comment, and governance (`MaskingPolicy` + optional `MaskingUsing` column list, `ProjectionPolicy`, `Tags` — rendered as `WITH MASKING POLICY … [USING (…)]`, `WITH PROJECTION POLICY …`, `WITH TAG (…)`).
 
 ### SQL builders
 
@@ -36,7 +36,7 @@ Owns every SQL string for mutating table columns via `ALTER TABLE`. No column DD
 | `BuildSetColumnMaskingPolicySql(db, schema, table, column, policyDb, policySchema, policyName)` | `ALTER TABLE ... ALTER COLUMN ... SET MASKING POLICY <policy>;` |
 | `BuildUnsetColumnMaskingPolicySql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... UNSET MASKING POLICY;` |
 
-All builders return a semicolon-terminated string. `BuildAddColumnSql` also returns an `error` for IPC signature symmetry, though it currently always returns `nil`.
+All builders return a semicolon-terminated string. `BuildAddColumnSql` also returns an `error`: a typed masking / projection policy name or `USING` column that is not a valid identifier (`snowflake.RenderQualifiedName`) is rejected.
 
 ## Patterns & integration
 

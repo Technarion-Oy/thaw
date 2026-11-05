@@ -26,6 +26,8 @@ interface Props {
   error: string | null;
   onClose: () => void;
   tableContext?: TableContext;
+  /** Called after a Table Settings change so the caller can re-fetch `rows` (and drop stale caches). */
+  onChanged?: () => void;
 }
 
 // ── Table-level settings section ──────────────────────────────────────────────
@@ -46,20 +48,20 @@ interface PropDef {
   label: string;
   type:  "text" | "number" | "boolean";
   hint?: string;
-  unset?: string; // boolean rows: the UNSET clause that resets to the inherited default
+  unset?: string; // the UNSET clause that resets the property (Reset button)
 }
 
 const PROP_DEFS: PropDef[] = [
-  { key: "comment",               label: "Comment",                  type: "text"    },
+  { key: "comment",               label: "Comment",                  type: "text",    unset: "UNSET COMMENT" },
   { key: "clusterBy",             label: "Cluster By",               type: "text",    hint: "Comma-separated column expressions. Clear to drop clustering key." },
   { key: "enableSchemaEvolution", label: "Enable Schema Evolution",  type: "boolean", unset: "UNSET ENABLE_SCHEMA_EVOLUTION" },
   { key: "changeTracking",        label: "Change Tracking",          type: "boolean", unset: "UNSET CHANGE_TRACKING" },
-  { key: "dataRetentionDays",     label: "Data Retention (days)",    type: "number"  },
-  { key: "maxDataExtensionDays",  label: "Max Data Extension (days)",type: "number"  },
-  { key: "defaultDDLCollation",   label: "Default DDL Collation",    type: "text"    },
+  { key: "dataRetentionDays",     label: "Data Retention (days)",    type: "number",  unset: "UNSET DATA_RETENTION_TIME_IN_DAYS" },
+  { key: "maxDataExtensionDays",  label: "Max Data Extension (days)",type: "number",  unset: "UNSET MAX_DATA_EXTENSION_TIME_IN_DAYS" },
+  { key: "defaultDDLCollation",   label: "Default DDL Collation",    type: "text",    unset: "UNSET DEFAULT_DDL_COLLATION" },
 ];
 
-function TableSettingsSection({ db, schema, table, rows }: { db: string; schema: string; table: string; rows: snowflake.PropertyPair[] | null }) {
+function TableSettingsSection({ db, schema, table, rows, onChanged }: { db: string; schema: string; table: string; rows: snowflake.PropertyPair[] | null; onChanged?: () => void }) {
   const [settings, setSettings]   = useState<table.TableSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editKey, setEditKey]     = useState<PropKey | null>(null);
@@ -70,7 +72,11 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
   const [rowBusy, setRowBusy]     = useState(false);
   // ERROR_LOGGING / ROW_TIMESTAMP aren't documented SHOW TABLES columns; show them
   // if present, else whatever was last set here (so Unset appears after a set).
-  const showVal = (k: string) => rows?.find((r) => r.key.toLowerCase() === k)?.value ?? "";
+  // SHOW TABLES reports these as ON / OFF; the Select offers TRUE / FALSE.
+  const showVal = (k: string) => {
+    const v = (rows?.find((r) => r.key.toLowerCase() === k)?.value ?? "").toUpperCase();
+    return v === "ON" ? "TRUE" : v === "OFF" ? "FALSE" : v;
+  };
   const [errorLoggingSet, setErrorLogging] = useState<string | null>(null);
   const [rowTimestampSet, setRowTimestamp] = useState<string | null>(null);
   const errorLogging = errorLoggingSet ?? showVal("error_logging");
@@ -89,6 +95,7 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
   const apply = async (clause: string) => {
     await AlterTable(db, schema, table, clause);
     reload();
+    onChanged?.();
   };
   // SelectRow handlers are fire-and-forget, so surface errors as a toast.
   const applyRow = (clause: string, after?: () => void) => {
@@ -114,9 +121,16 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
   const saveEdit = async (def: PropDef) => {
     setSaving(true);
     try {
-      await AlterTableProperty(db, schema, table, def.key, editVal);
+      // A blank text value clears the property (SET COMMENT = '' would store an
+      // empty string; UNSET resets collation to the inherited default).
+      if (def.type === "text" && def.unset && editVal.trim() === "" && def.key !== "clusterBy") {
+        await AlterTable(db, schema, table, def.unset);
+      } else {
+        await AlterTableProperty(db, schema, table, def.key, editVal);
+      }
       setSettings((prev) => prev ? { ...prev, [def.key]: def.type === "number" ? parseInt(editVal, 10) : editVal } : prev);
       setEditKey(null);
+      onChanged?.();
       message.success(`${def.label} updated`);
     } catch (e) {
       message.error(String(e));
@@ -128,6 +142,7 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
   const toggleBool = async (def: PropDef, checked: boolean) => {
     await AlterTableProperty(db, schema, table, def.key, checked ? "TRUE" : "FALSE");
     setSettings((prev) => prev ? { ...prev, [def.key]: checked } : prev);
+    onChanged?.();
     message.success(`${def.label} ${checked ? "enabled" : "disabled"}`);
   };
 
@@ -218,6 +233,12 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
                           onClick={() => startEdit(def.key, strVal)}
                           style={{ flexShrink: 0, color: "var(--text-faint)" }}
                         />
+                        {def.unset && strVal !== "" && (
+                          <Button size="small" type="text" loading={rowBusy} title="Unset (reset to the inherited default)"
+                            onClick={() => applyRow(def.unset!)} style={{ flexShrink: 0, color: "var(--text-faint)" }}>
+                            Reset
+                          </Button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -273,7 +294,7 @@ function TableSettingsSection({ db, schema, table, rows }: { db: string; schema:
   );
 }
 
-export default function PropertiesModal({ title, rows, error, onClose, tableContext }: Props) {
+export default function PropertiesModal({ title, rows, error, onClose, tableContext, onChanged }: Props) {
   const loading = rows === null && !error;
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
@@ -381,7 +402,7 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
           </div>
         )}
 
-        {tableContext && <TableSettingsSection {...tableContext} rows={rows} />}
+        {tableContext && <TableSettingsSection {...tableContext} rows={rows} onChanged={onChanged} />}
       </div>
     </Modal>
   );

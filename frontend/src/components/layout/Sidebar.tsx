@@ -32,6 +32,7 @@ import {
   UploadOutlined,
   SearchOutlined,
   SwapOutlined,
+  SettingOutlined,
   ClusterOutlined,
   CaretRightFilled,
   CaretDownFilled,
@@ -2382,22 +2383,28 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   // ─── Base TABLE (obj node) — constraints and data metric functions ─────────
-  const tableConstraint = (op: "ADD" | "DROP" | "RENAME") => () => alterAction({
-    title: { ADD: "Add Constraint", DROP: "Drop Constraint", RENAME: "Rename Constraint" }[op],
+  const tableConstraint = (op: "ADD" | "DROP" | "RENAME" | "ALTER") => () => alterAction({
+    title: { ADD: "Add Constraint", DROP: "Drop Constraint", RENAME: "Rename Constraint", ALTER: "Alter Constraint" }[op],
     input: { placeholder: {
       ADD: "e.g. CONSTRAINT pk PRIMARY KEY (id) · UNIQUE (a, b) · FOREIGN KEY (cid) REFERENCES cust (id)",
       DROP: "<name> | PRIMARY KEY | UNIQUE (cols) | FOREIGN KEY (cols)  [CASCADE | RESTRICT]",
       RENAME: "<old name> TO <new name>",
+      ALTER: "<name> | PRIMARY KEY (cols) …  [NOT] ENFORCED · VALIDATE | NOVALIDATE · RELY | NORELY",
     }[op] },
-    clause: { ADD: tblc.addConstraint, DROP: tblc.dropConstraint, RENAME: tblc.renameConstraint }[op],
-    ok: { ADD: "Add", DROP: "Drop", RENAME: "Rename" }[op], done: "Constraint updated.", danger: op === "DROP",
+    clause: { ADD: tblc.addConstraint, DROP: tblc.dropConstraint, RENAME: tblc.renameConstraint, ALTER: tblc.alterConstraint }[op],
+    ok: { ADD: "Add", DROP: "Drop", RENAME: "Rename", ALTER: "Alter" }[op], done: "Constraint updated.", danger: op === "DROP",
   });
   const tableDmf = (op: "ADD" | "DROP" | "SUSPEND" | "RESUME") => () => alterAction({
     title: { ADD: "Attach Data Metric Function", DROP: "Detach Data Metric Function", SUSPEND: "Suspend Data Metric Function", RESUME: "Resume Data Metric Function" }[op],
     content: op === "ADD" ? "The table needs a DATA_METRIC_SCHEDULE (Properties) before the function runs." : undefined,
-    input: { placeholder: op === "ADD" ? "<function> ON (col, …) [FILTER (…)] [EXECUTE AS ROLE <role>]" : "<function> ON (col, …)" },
+    input: { placeholder: op === "ADD" ? "<function> ON (col, …) [WITHIN GROUP (…)] [FILTER (…)] [EXPECTATION n (expr)] [EXECUTE AS ROLE <role>]" : "<function> ON (col, …)" },
     clause: (v) => op === "ADD" ? tblc.addDataMetricFunction(v) : op === "DROP" ? tblc.dropDataMetricFunction(v) : tblc.modifyDataMetricFunction(v, op),
     ok: { ADD: "Attach", DROP: "Detach", SUSPEND: "Suspend", RESUME: "Resume" }[op], done: "Data metric function updated.", danger: op === "DROP",
+  });
+  const tableDmfModify = () => alterAction({
+    title: "Modify Data Metric Function",
+    input: { placeholder: "<function> ON (col, …) ADD | MODIFY | DROP EXPECTATION … · FILTER (…)   or   <function> SET <prop> = <value>" },
+    clause: tblc.modifyDataMetricFunctionAction, ok: "Modify", done: "Data metric function updated.",
   });
   const tableDmfSchedule = () => alterAction({
     title: "Data Metric Schedule",
@@ -5327,6 +5334,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Add Constraint…", <PlusOutlined style={{ fontSize: 12 }} />, tableConstraint("ADD"))}
                   {menuItem("Drop Constraint…", <DeleteOutlined style={{ fontSize: 12 }} />, tableConstraint("DROP"))}
                   {menuItem("Rename Constraint…", <EditOutlined style={{ fontSize: 12 }} />, tableConstraint("RENAME"))}
+                  {menuItem("Alter Constraint…", <SettingOutlined style={{ fontSize: 12 }} />, tableConstraint("ALTER"))}
                 </>
               ))}
               {menuItemSub("Data Metric Functions", <DashboardOutlined style={{ fontSize: 12 }} />, "table-dmf", (
@@ -5336,6 +5344,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   {menuItem("Set Schedule…", <ClockCircleOutlined style={{ fontSize: 12 }} />, tableDmfSchedule)}
                   {menuItem("Suspend…", <PauseCircleOutlined style={{ fontSize: 12 }} />, tableDmf("SUSPEND"))}
                   {menuItem("Resume…", <PlayCircleOutlined style={{ fontSize: 12 }} />, tableDmf("RESUME"))}
+                  {menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, tableDmfModify)}
                 </>
               ))}
               {menuItem("View Definition", null, viewDefinition)}
@@ -6935,6 +6944,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           error={propsModal.error}
           onClose={() => setPropsModal(null)}
           tableContext={propsModal.tableContext}
+          onChanged={() => {
+            const t = propsModal.tableContext;
+            if (!t) return;
+            // Drop the hover-tooltip DDL (cached for DDL_CACHE_TTL) and re-read the
+            // SHOW rows so the change (e.g. a new comment) is visible right away.
+            ddlCache.delete(`obj:${t.db}:${t.schema}:TABLE:${t.table}`);
+            GetObjectProperties(t.db, t.schema, "TABLE", t.table)
+              .then((rows) => setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null))
+              .catch(() => {});
+          }}
         />
       )}
 
