@@ -6,9 +6,13 @@ import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutline
 import { ConfirmSwitch } from "./ConfirmSwitch";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { snowflake, table } from "../../../wailsjs/go/models";
-import { GetTableSettings, AlterTableProperty, AlterTable } from "../../../wailsjs/go/app/App";
+import { GetTableSettings, AlterTableProperty, AlterTable, GetObjectParameters } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
+import { q1, opts, EditRow, SelectRow, ActionRow } from "../shared/PropertyRows";
+import * as dtc from "../dynamictable/dynamicTableClauses";
+import { dataMetricSchedule } from "./tableClauses";
+import GovernanceRows from "./GovernanceRows";
 
 interface TableContext {
   db: string;
@@ -22,6 +26,8 @@ interface Props {
   error: string | null;
   onClose: () => void;
   tableContext?: TableContext;
+  /** Called after a Table Settings change so the caller can re-fetch `rows` (and drop stale caches). */
+  onChanged?: () => void;
 }
 
 // ── Table-level settings section ──────────────────────────────────────────────
@@ -42,30 +48,63 @@ interface PropDef {
   label: string;
   type:  "text" | "number" | "boolean";
   hint?: string;
+  unset?: string; // the UNSET clause that resets the property (Reset button)
 }
 
 const PROP_DEFS: PropDef[] = [
-  { key: "comment",               label: "Comment",                  type: "text"    },
+  { key: "comment",               label: "Comment",                  type: "text",    unset: "UNSET COMMENT" },
   { key: "clusterBy",             label: "Cluster By",               type: "text",    hint: "Comma-separated column expressions. Clear to drop clustering key." },
-  { key: "enableSchemaEvolution", label: "Enable Schema Evolution",  type: "boolean" },
-  { key: "changeTracking",        label: "Change Tracking",          type: "boolean" },
-  { key: "dataRetentionDays",     label: "Data Retention (days)",    type: "number"  },
-  { key: "maxDataExtensionDays",  label: "Max Data Extension (days)",type: "number"  },
-  { key: "defaultDDLCollation",   label: "Default DDL Collation",    type: "text"    },
+  { key: "enableSchemaEvolution", label: "Enable Schema Evolution",  type: "boolean", unset: "UNSET ENABLE_SCHEMA_EVOLUTION" },
+  { key: "changeTracking",        label: "Change Tracking",          type: "boolean", unset: "UNSET CHANGE_TRACKING" },
+  { key: "dataRetentionDays",     label: "Data Retention (days)",    type: "number",  unset: "UNSET DATA_RETENTION_TIME_IN_DAYS" },
+  { key: "maxDataExtensionDays",  label: "Max Data Extension (days)",type: "number",  unset: "UNSET MAX_DATA_EXTENSION_TIME_IN_DAYS" },
+  { key: "defaultDDLCollation",   label: "Default DDL Collation",    type: "text",    unset: "UNSET DEFAULT_DDL_COLLATION" },
 ];
 
-function TableSettingsSection({ db, schema, table }: { db: string; schema: string; table: string }) {
+function TableSettingsSection({ db, schema, table, rows, onChanged }: { db: string; schema: string; table: string; rows: snowflake.PropertyPair[] | null; onChanged?: () => void }) {
   const [settings, setSettings]   = useState<table.TableSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editKey, setEditKey]     = useState<PropKey | null>(null);
   const [editVal, setEditVal]     = useState<string>("");
   const [saving, setSaving]       = useState(false);
 
-  useEffect(() => {
+  const [params, setParams]       = useState<snowflake.SessionParam[]>([]);
+  const [rowBusy, setRowBusy]     = useState(false);
+  // ERROR_LOGGING / ROW_TIMESTAMP aren't documented SHOW TABLES columns; show them
+  // if present, else whatever was last set here (so Unset appears after a set).
+  // SHOW TABLES reports these as ON / OFF; the Select offers TRUE / FALSE.
+  const showVal = (k: string) => {
+    const v = (rows?.find((r) => r.key.toLowerCase() === k)?.value ?? "").toUpperCase();
+    return v === "ON" ? "TRUE" : v === "OFF" ? "FALSE" : v;
+  };
+  const [errorLoggingSet, setErrorLogging] = useState<string | null>(null);
+  const [rowTimestampSet, setRowTimestamp] = useState<string | null>(null);
+  const errorLogging = errorLoggingSet ?? showVal("error_logging");
+  const rowTimestamp = rowTimestampSet ?? showVal("row_timestamp");
+
+  const reload = () => {
     GetTableSettings(db, schema, table)
       .then(setSettings)
       .catch((e) => setLoadError(String(e)));
-  }, [db, schema, table]);
+    // Best-effort: the rows below still edit fine (showing "not set") if it fails.
+    GetObjectParameters("TABLE", [db, schema, table]).then((ps) => setParams(ps ?? [])).catch(() => {});
+  };
+  useEffect(reload, [db, schema, table]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const param = (key: string) => params.find((p) => p.key.toUpperCase() === key)?.value ?? "";
+  const apply = async (clause: string) => {
+    await AlterTable(db, schema, table, clause);
+    reload();
+    onChanged?.();
+  };
+  // SelectRow handlers are fire-and-forget, so surface errors as a toast.
+  const applyRow = (clause: string, after?: () => void) => {
+    setRowBusy(true);
+    apply(clause)
+      .then(() => { after?.(); message.success("Table updated"); })
+      .catch((e) => message.error(String(e)))
+      .finally(() => setRowBusy(false));
+  };
 
   const objTags = useObjectTags({
     kind: "TABLE", db, schema, name: table,
@@ -82,9 +121,16 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
   const saveEdit = async (def: PropDef) => {
     setSaving(true);
     try {
-      await AlterTableProperty(db, schema, table, def.key, editVal);
+      // A blank text value clears the property (SET COMMENT = '' would store an
+      // empty string; UNSET resets collation to the inherited default).
+      if (def.type === "text" && def.unset && editVal.trim() === "" && def.key !== "clusterBy") {
+        await AlterTable(db, schema, table, def.unset);
+      } else {
+        await AlterTableProperty(db, schema, table, def.key, editVal);
+      }
       setSettings((prev) => prev ? { ...prev, [def.key]: def.type === "number" ? parseInt(editVal, 10) : editVal } : prev);
       setEditKey(null);
+      onChanged?.();
       message.success(`${def.label} updated`);
     } catch (e) {
       message.error(String(e));
@@ -96,6 +142,7 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
   const toggleBool = async (def: PropDef, checked: boolean) => {
     await AlterTableProperty(db, schema, table, def.key, checked ? "TRUE" : "FALSE");
     setSettings((prev) => prev ? { ...prev, [def.key]: checked } : prev);
+    onChanged?.();
     message.success(`${def.label} ${checked ? "enabled" : "disabled"}`);
   };
 
@@ -132,10 +179,18 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
                   {/* Value / editor */}
                   <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
                     {def.type === "boolean" ? (
-                      <ConfirmSwitch
-                        checked={Boolean(rawVal)}
-                        onConfirm={(checked) => toggleBool(def, checked)}
-                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <ConfirmSwitch
+                          checked={Boolean(rawVal)}
+                          onConfirm={(checked) => toggleBool(def, checked)}
+                        />
+                        {def.unset && (
+                          <Button size="small" type="text" loading={rowBusy} title="Unset (reset to the inherited default)"
+                            onClick={() => applyRow(def.unset!)} style={{ color: "var(--text-faint)" }}>
+                            Reset
+                          </Button>
+                        )}
+                      </div>
                     ) : isEditing ? (
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {def.type === "number" ? (
@@ -178,21 +233,68 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
                           onClick={() => startEdit(def.key, strVal)}
                           style={{ flexShrink: 0, color: "var(--text-faint)" }}
                         />
+                        {def.unset && strVal !== "" && (
+                          <Button size="small" type="text" loading={rowBusy} title="Unset (reset to the inherited default)"
+                            onClick={() => applyRow(def.unset!)} style={{ flexShrink: 0, color: "var(--text-faint)" }}>
+                            Reset
+                          </Button>
+                        )}
                       </div>
                     )}
                   </td>
                 </tr>
               );
             })}
+            <SelectRow
+              label="Error Logging"
+              value={errorLogging}
+              options={opts("TRUE", "FALSE")}
+              busy={rowBusy}
+              onSet={(v) => applyRow(`SET ERROR_LOGGING = ${v}`, () => setErrorLogging(v))}
+              onUnset={() => applyRow("UNSET ERROR_LOGGING", () => setErrorLogging(""))}
+            />
+            <SelectRow
+              label="Row Timestamp"
+              value={rowTimestamp}
+              options={opts("TRUE", "FALSE")}
+              busy={rowBusy}
+              onSet={(v) => applyRow(`SET ROW_TIMESTAMP = ${v}`, () => setRowTimestamp(v))}
+              onUnset={() => applyRow("UNSET ROW_TIMESTAMP", () => setRowTimestamp(""))}
+            />
+            <EditRow
+              label="Iceberg Default DDL Collation"
+              value={param("ICEBERG_DEFAULT_DDL_COLLATION")}
+              canUnset
+              onSave={(v) => apply(v.trim() ? `SET ICEBERG_DEFAULT_DDL_COLLATION = ${q1(v.trim())}` : "UNSET ICEBERG_DEFAULT_DDL_COLLATION")}
+              onUnset={() => apply("UNSET ICEBERG_DEFAULT_DDL_COLLATION")}
+            />
+            <EditRow
+              label="Data Metric Schedule"
+              value={param("DATA_METRIC_SCHEDULE")}
+              canUnset
+              onSave={(v) => apply(dataMetricSchedule(v))}
+              onUnset={() => apply("UNSET DATA_METRIC_SCHEDULE")}
+            />
             <TagsRow tags={objTags.tags} nameOptions={objTags.nameOptions} onSetTag={objTags.setTag} onUnsetTag={objTags.unsetTag} />
+            {/* SET / UNSET CONTACT can't share a statement with other properties. */}
+            <ActionRow
+              label="Contact"
+              fields={["purpose (e.g. SUPPORT)", "contact name"]}
+              actions={[
+                { label: "Set", clause: ([p, c]) => dtc.setContact(p, c) },
+                { label: "Unset", clause: ([p]) => `UNSET CONTACT ${dtc.contactPurpose(p)}` },
+              ]}
+              run={apply}
+            />
           </tbody>
         </table>
       )}
+      {settings && <GovernanceRows apply={apply} joinPolicy />}
     </div>
   );
 }
 
-export default function PropertiesModal({ title, rows, error, onClose, tableContext }: Props) {
+export default function PropertiesModal({ title, rows, error, onClose, tableContext, onChanged }: Props) {
   const loading = rows === null && !error;
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
@@ -300,7 +402,7 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
           </div>
         )}
 
-        {tableContext && <TableSettingsSection {...tableContext} />}
+        {tableContext && <TableSettingsSection {...tableContext} rows={rows} onChanged={onChanged} />}
       </div>
     </Modal>
   );

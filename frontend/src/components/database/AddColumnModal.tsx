@@ -10,13 +10,17 @@ import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListUserSchemas
 import { column, snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
+import TagInput from "../shared/TagInput";
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
 // ADD COLUMN SQL is built by the backend (internal/column); this UI only
-// collects the config that maps onto column.AddColumnConfig.
-const DEFAULTS: column.AddColumnConfig = {
+// collects the config that maps onto column.AddColumnConfig. Plain data shape:
+// the generated class carries a convertValues method (nested tags array) that an
+// object literal can't satisfy, so cast only at the IPC boundary.
+type ColCfg = Omit<column.AddColumnConfig, "convertValues">;
+const DEFAULTS: ColCfg = {
   name: "",
   caseSensitive: false,
   ifNotExists: false,
@@ -34,9 +38,15 @@ const DEFAULTS: column.AddColumnConfig = {
   fkSchema: "",
   fkTableName: "",
   fkColumn: "",
+  checkExpr: "",
+  constraintProps: "",
   collation: "",
   comment: "",
-};
+  maskingPolicy: "",
+  maskingUsing: "",
+  projectionPolicy: "",
+  tags: [],
+}
 
 interface Props {
   db: string;
@@ -47,7 +57,7 @@ interface Props {
 }
 
 export default function AddColumnModal({ db, schema, table, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<column.AddColumnConfig>({ ...DEFAULTS, fkDb: db, fkSchema: schema });
+  const [cfg, setCfg] = useState<ColCfg>({ ...DEFAULTS, fkDb: db, fkSchema: schema });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
@@ -67,9 +77,9 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     let stale = false;
     clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(() => {
-      BuildAddColumnSql(db, schema, table, cfg)
+      BuildAddColumnSql(db, schema, table, cfg as column.AddColumnConfig)
         .then((sql) => { if (!stale) setPreview(sql); })
-        .catch(() => { if (!stale) setPreview(""); });
+        .catch((e) => { if (!stale) setPreview(`-- ${String(e)}`); });
     }, 200);
     return () => { stale = true; clearTimeout(previewTimer.current); };
   }, [db, schema, table, cfg]);
@@ -125,13 +135,14 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
       .catch(() => setFkColumns([]));
   }, [cfg.constraintKind, cfg.fkDb, cfg.fkSchema, cfg.fkTableName]);
 
-  const set = <K extends keyof column.AddColumnConfig>(key: K, value: column.AddColumnConfig[K]) =>
+  const set = <K extends keyof ColCfg>(key: K, value: ColCfg[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const canSubmit =
     cfg.name.trim() !== "" &&
     (cfg.valueMode === "computed" ? cfg.computedExpr.trim() !== "" : cfg.dataType.trim() !== "") &&
     (cfg.constraintKind !== "foreign_key" || cfg.fkTableName.trim() !== "") &&
+    (cfg.constraintKind !== "check" || cfg.checkExpr.trim() !== "") &&
     // Default mode requires a value, else the clause is silently dropped.
     (cfg.valueMode !== "default" || cfg.defaultValue.trim() !== "") &&
     // AUTOINCREMENT is only valid for numeric data types.
@@ -144,7 +155,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     try {
       // Build fresh from the live cfg rather than executing the debounced
       // `preview` string, which can lag the form by up to 200 ms.
-      const sql = await BuildAddColumnSql(db, schema, table, cfg);
+      const sql = await BuildAddColumnSql(db, schema, table, cfg as column.AddColumnConfig);
       await ExecDDL(sql);
       onSuccess?.();
       onClose();
@@ -345,6 +356,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
             <Radio value="unique">UNIQUE</Radio>
             <Radio value="primary_key">PRIMARY KEY</Radio>
             <Radio value="foreign_key">FOREIGN KEY</Radio>
+            <Radio value="check">CHECK</Radio>
           </Radio.Group>
         </Form.Item>
 
@@ -411,6 +423,26 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
           </div>
         )}
 
+        {cfg.constraintKind === "check" && (
+          <Form.Item label="Check expression" required style={{ marginBottom: 8 }}>
+            <Input
+              value={cfg.checkExpr}
+              onChange={(e) => set("checkExpr", e.target.value)}
+              placeholder="qty > 0"
+            />
+          </Form.Item>
+        )}
+
+        {cfg.constraintKind !== "none" && (
+          <Form.Item label="Constraint properties (optional)" style={{ marginBottom: 8 }}>
+            <Input
+              value={cfg.constraintProps}
+              onChange={(e) => set("constraintProps", e.target.value)}
+              placeholder="NOT ENFORCED RELY"
+            />
+          </Form.Item>
+        )}
+
         <Form.Item label="Collation" style={{ marginBottom: 8 }}>
           <Select
             showSearch
@@ -424,6 +456,22 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
         </Form.Item>
         </>
         )}
+
+        {divider("Governance")}
+
+        {/* ADD COLUMN … [WITH] MASKING POLICY / PROJECTION POLICY / TAG. Names are
+            validated by the backend builder (bare or "quoted", up to db.schema.name). */}
+        <Form.Item label="Masking Policy" style={{ marginBottom: 12 }}>
+          <Space.Compact style={{ width: "100%" }}>
+            <Input value={cfg.maskingPolicy} onChange={(e) => set("maskingPolicy", e.target.value)} placeholder="db.schema.policy (optional)" />
+            <Input value={cfg.maskingUsing} disabled={!cfg.maskingPolicy.trim()} onChange={(e) => set("maskingUsing", e.target.value)}
+              placeholder="USING columns: this_col, cond_col (optional)" />
+          </Space.Compact>
+        </Form.Item>
+        <Form.Item label="Projection Policy" style={{ marginBottom: 12 }}>
+          <Input value={cfg.projectionPolicy} onChange={(e) => set("projectionPolicy", e.target.value)} placeholder="db.schema.policy (optional)" />
+        </Form.Item>
+        <TagInput tags={cfg.tags ?? []} onChange={(t) => set("tags", t as snowflake.TagPair[])} itemStyle={{ marginBottom: 12 }} />
 
         {divider("Options")}
 
