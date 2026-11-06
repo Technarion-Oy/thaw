@@ -29,6 +29,18 @@ export function dropColumns(columns: string[], mode: "" | "CASCADE" | "RESTRICT"
   return `DROP COLUMN ${columns.map(qcol).join(", ")}${mode ? ` ${mode}` : ""}`;
 }
 
+/** `<name> <type> AS (<expr>)` → ADD COLUMN … (external tables: every column is a virtual column). */
+// ponytail: the type is a single token with optional (args); multi-word types (DOUBLE PRECISION) are rejected.
+export function addExternalColumn(v: string): string {
+  const m = new RegExp(String.raw`^(${PART})\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)\s+AS\s*\((.*)\)$`, "is").exec(v.trim());
+  if (!m) throw new Error("Expected: <name> <type> AS (<expr>)");
+  if (m[3].includes(";")) throw new Error("Semicolons are not allowed");
+  return `ADD COLUMN ${sqlIdent(m[1], 1)} ${m[2].replace(/\s+/g, "")} AS (${m[3].trim()})`;
+}
+
+/** Sidebar column (canonical case, quoted) → RENAME COLUMN "<col>" TO <new>. */
+export const renameColumn = (col: string, newName: string) => `RENAME COLUMN ${qcol(col)} TO ${sqlIdent(newName, 1)}`;
+
 // ─── Constraints ─────────────────────────────────────────────────────────────
 
 const CONSTRAINT_PROPS = /^(?:\s+(?:NOT\s+)?(?:ENFORCED|DEFERRABLE)|\s+INITIALLY\s+(?:DEFERRED|IMMEDIATE)|\s+(?:ENABLE|DISABLE|VALIDATE|NOVALIDATE|RELY|NORELY))*$/i;
@@ -50,12 +62,13 @@ export function addConstraint(v: string): string {
     return `ADD ${name}CHECK (${chk[1].trim()})`;
   }
 
+  // The FOREIGN KEY keyword is optional when REFERENCES follows: `(cid) REFERENCES t (id)`.
   const m = new RegExp(
-    String.raw`^(PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\s*\(([^)]*)\)(?:\s+REFERENCES\s+(${IDENT})\s*(?:\(([^)]*)\))?)?(.*)$`,
+    String.raw`^(PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)?\s*\(([^)]*)\)(?:\s+REFERENCES\s+(${IDENT})\s*(?:\(([^)]*)\))?)?(.*)$`,
     "is",
   ).exec(body);
-  if (!m) throw new Error("Expected: [CONSTRAINT <name>] PRIMARY KEY | UNIQUE | FOREIGN KEY (cols) [REFERENCES <table> (cols)]");
-  const kind = m[1].toUpperCase().replace(/\s+/g, " ");
+  if (!m || (!m[1] && !m[3])) throw new Error("Expected: [CONSTRAINT <name>] PRIMARY KEY | UNIQUE | [FOREIGN KEY] (cols) [REFERENCES <table> (cols)]");
+  const kind = (m[1] ?? "FOREIGN KEY").toUpperCase().replace(/\s+/g, " ");
   if (kind === "FOREIGN KEY" && !m[3]) throw new Error("A foreign key needs REFERENCES <table> (cols)");
   if (kind !== "FOREIGN KEY" && m[3]) throw new Error("REFERENCES only applies to a foreign key");
   if (!CONSTRAINT_PROPS.test(m[5])) throw new Error(`Unrecognised constraint properties: ${m[5].trim()}`);

@@ -572,6 +572,8 @@ export namespace column {
 	    fkSchema: string;
 	    fkTableName: string;
 	    fkColumn: string;
+	    checkExpr: string;
+	    constraintProps: string;
 	    collation: string;
 	    comment: string;
 	    maskingPolicy: string;
@@ -602,6 +604,8 @@ export namespace column {
 	        this.fkSchema = source["fkSchema"];
 	        this.fkTableName = source["fkTableName"];
 	        this.fkColumn = source["fkColumn"];
+	        this.checkExpr = source["checkExpr"];
+	        this.constraintProps = source["constraintProps"];
 	        this.collation = source["collation"];
 	        this.comment = source["comment"];
 	        this.maskingPolicy = source["maskingPolicy"];

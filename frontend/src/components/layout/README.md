@@ -308,6 +308,13 @@ listing in Snowflake (see `internal/snowflake/README.md`) and are out of scope.
   `CASCADE` / `RESTRICT` select. Column nodes (`col:` keys) join the Cmd/Ctrl/Shift multi-selection
   (`MULTI_SELECT_PREFIXES`, `selectionKind === "col"`); right-clicking a selected column turns the
   entry into **Drop N Columns…** for the selected columns of that same table (`dropColumnTargets`).
+- **External table column actions** — `EXTERNAL TABLE` nodes get **Add Column…** (`ALTER TABLE …
+  ADD COLUMN <name> <type> AS (<expr>)` via `tableClauses.addExternalColumn`) and their columns get
+  **Rename Column…** (`tableClauses.renameColumn`) and **Drop Column…** / **Drop N Columns…** (the
+  shared `dropColumn`, without the CASCADE / RESTRICT select — the external-table grammar has none).
+  All three go through `alterAction` (`alterTarget` routes every non-dynamic kind to `AlterTable`)
+  and are gated by `columnManagement`; `refreshTableColumns` takes the node kind so the right
+  `obj:` node is re-fetched afterwards.
 - **`removeNode`** surgically deletes a file/object node from the tree after DROP so the parent
   directory stays expanded without a full refresh.
 - **`refreshDatabaseByName(db, reveal?)` preserves the open path AND scroll position.** Naively

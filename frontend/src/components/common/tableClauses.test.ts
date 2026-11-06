@@ -11,10 +11,22 @@ describe("tableClauses", () => {
     expect(() => c.dropColumns([])).toThrow();
   });
 
+  it("adds and renames external-table columns", () => {
+    expect(c.addExternalColumn("c1 VARCHAR AS (value:c1::varchar)")).toBe("ADD COLUMN c1 VARCHAR AS (value:c1::varchar)");
+    expect(c.addExternalColumn('"Amt" NUMBER (10, 2) as (value:amt::number(10,2))')).toBe('ADD COLUMN "Amt" NUMBER(10,2) AS (value:amt::number(10,2))');
+    expect(() => c.addExternalColumn("c1 VARCHAR")).toThrow();
+    expect(() => c.addExternalColumn("c1 VARCHAR AS (1); DROP TABLE t; (1)")).toThrow();
+    expect(c.renameColumn("A", "b")).toBe('RENAME COLUMN "A" TO b');
+    expect(c.renameColumn('a"b', '"B c"')).toBe('RENAME COLUMN "a""b" TO "B c"');
+    expect(() => c.renameColumn("A", "b c")).toThrow();
+  });
+
   it("adds constraints", () => {
     expect(c.addConstraint("primary key (id)")).toBe("ADD PRIMARY KEY (id)");
     expect(c.addConstraint("CONSTRAINT uq UNIQUE (a, b) not enforced rely")).toBe("ADD CONSTRAINT uq UNIQUE (a, b) NOT ENFORCED RELY");
     expect(c.addConstraint("foreign key (cid) references db.s.cust (id)")).toBe("ADD FOREIGN KEY (cid) REFERENCES db.s.cust (id)");
+    expect(c.addConstraint("CONSTRAINT fk (cid) references cust (id)")).toBe("ADD CONSTRAINT fk FOREIGN KEY (cid) REFERENCES cust (id)");
+    expect(() => c.addConstraint("(a, b)")).toThrow();
     expect(c.addConstraint("CONSTRAINT ck CHECK (x > 0)")).toBe("ADD CONSTRAINT ck CHECK (x > 0)");
     expect(() => c.addConstraint("CHECK (x > 0)")).toThrow();
     expect(() => c.addConstraint("FOREIGN KEY (a)")).toThrow();

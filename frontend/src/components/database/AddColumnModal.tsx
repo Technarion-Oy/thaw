@@ -38,6 +38,8 @@ const DEFAULTS: ColCfg = {
   fkSchema: "",
   fkTableName: "",
   fkColumn: "",
+  checkExpr: "",
+  constraintProps: "",
   collation: "",
   comment: "",
   maskingPolicy: "",
@@ -140,6 +142,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     cfg.name.trim() !== "" &&
     (cfg.valueMode === "computed" ? cfg.computedExpr.trim() !== "" : cfg.dataType.trim() !== "") &&
     (cfg.constraintKind !== "foreign_key" || cfg.fkTableName.trim() !== "") &&
+    (cfg.constraintKind !== "check" || cfg.checkExpr.trim() !== "") &&
     // Default mode requires a value, else the clause is silently dropped.
     (cfg.valueMode !== "default" || cfg.defaultValue.trim() !== "") &&
     // AUTOINCREMENT is only valid for numeric data types.
@@ -353,6 +356,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
             <Radio value="unique">UNIQUE</Radio>
             <Radio value="primary_key">PRIMARY KEY</Radio>
             <Radio value="foreign_key">FOREIGN KEY</Radio>
+            <Radio value="check">CHECK</Radio>
           </Radio.Group>
         </Form.Item>
 
@@ -417,6 +421,26 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
               />
             </Form.Item>
           </div>
+        )}
+
+        {cfg.constraintKind === "check" && (
+          <Form.Item label="Check expression" required style={{ marginBottom: 8 }}>
+            <Input
+              value={cfg.checkExpr}
+              onChange={(e) => set("checkExpr", e.target.value)}
+              placeholder="qty > 0"
+            />
+          </Form.Item>
+        )}
+
+        {cfg.constraintKind !== "none" && (
+          <Form.Item label="Constraint properties (optional)" style={{ marginBottom: 8 }}>
+            <Input
+              value={cfg.constraintProps}
+              onChange={(e) => set("constraintProps", e.target.value)}
+              placeholder="NOT ENFORCED RELY"
+            />
+          </Form.Item>
         )}
 
         <Form.Item label="Collation" style={{ marginBottom: 8 }}>

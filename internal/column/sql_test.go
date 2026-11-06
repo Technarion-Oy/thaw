@@ -137,6 +137,45 @@ func TestBuildAddColumnSql_ForeignKeyWithoutTableDropsClause(t *testing.T) {
 	assertNotContains(t, sql, "REFERENCES")
 }
 
+func TestBuildAddColumnSql_Check(t *testing.T) {
+	cfg := AddColumnConfig{Name: "QTY", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "check", ConstraintName: "chk_qty", CheckExpr: " qty > 0 "}
+	sql, err := BuildAddColumnSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, sql, `ALTER TABLE "DB"."SC"."T" ADD COLUMN QTY NUMBER CONSTRAINT "chk_qty" CHECK (qty > 0);`)
+}
+
+func TestBuildAddColumnSql_CheckRejectsSemicolon(t *testing.T) {
+	cfg := AddColumnConfig{Name: "QTY", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "check", CheckExpr: "qty > 0; DROP TABLE T"}
+	if _, err := BuildAddColumnSql("DB", "SC", "T", cfg); err == nil {
+		t.Error("expected error for semicolon in CHECK expression")
+	}
+}
+
+func TestBuildAddColumnSql_ConstraintProps(t *testing.T) {
+	cfg := AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "primary_key", ConstraintProps: "  not   enforced\trely "}
+	sql, err := BuildAddColumnSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, sql, `ALTER TABLE "DB"."SC"."T" ADD COLUMN ID NUMBER PRIMARY KEY NOT ENFORCED RELY;`)
+
+	// Props are dropped when no constraint is emitted.
+	cfg = AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "none", ConstraintProps: "RELY"}
+	sql, _ = BuildAddColumnSql("DB", "SC", "T", cfg)
+	assertNotContains(t, sql, "RELY")
+}
+
+func TestBuildAddColumnSql_ConstraintPropsRejected(t *testing.T) {
+	for _, props := range []string{"RELY; DROP TABLE T", "ENFORCED FOO", "NOT RELY", "INITIALLY"} {
+		cfg := AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "unique", ConstraintProps: props}
+		if _, err := BuildAddColumnSql("DB", "SC", "T", cfg); err == nil {
+			t.Errorf("expected error for constraint properties %q", props)
+		}
+	}
+}
+
 func TestBuildAddColumnSql_CollationEscaped(t *testing.T) {
 	cfg := AddColumnConfig{Name: "C", DataType: "VARCHAR", ValueMode: "none", ConstraintKind: "none", Collation: "en-ci"}
 	sql, _ := BuildAddColumnSql("DB", "SC", "T", cfg)

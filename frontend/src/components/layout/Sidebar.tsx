@@ -2281,16 +2281,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // column's parent) plus the ALTER IPC for its kind.
   const alterTarget = () => {
     if (!ctxMenu) return null;
-    const kind = ctxMenu.nodeType === "col" ? ctxMenu.colMeta?.parentKind : ctxMenu.objKind;
-    const alter = kind === "TABLE" ? AlterTable : AlterDynamicTable;
+    const kind = (ctxMenu.nodeType === "col" ? ctxMenu.colMeta?.parentKind : ctxMenu.objKind) ?? "TABLE";
+    // EXTERNAL TABLE column actions are plain `ALTER TABLE` clauses too.
+    const alter = kind === "DYNAMIC TABLE" ? AlterDynamicTable : AlterTable;
     if (ctxMenu.nodeType === "col") {
       const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
       setCtxMenu(null);
-      return { db, schema, name: table, column, alter };
+      return { db, schema, name: table, column, kind, alter };
     }
     const parts = ctxMenu.nodeKey.split(":");
     setCtxMenu(null);
-    return { db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), column: "", alter };
+    return { db: parts[1], schema: parts[2], name: parts.slice(4).join(":"), column: "", kind, alter };
   };
 
   // ponytail: one confirm/prompt for every ALTER [DYNAMIC] TABLE action. With `input`
@@ -2304,6 +2305,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     ok: string;
     done: string;
     danger?: boolean;
+    /** Re-fetch the table's columns afterwards even from an obj node (column actions do so anyway). */
+    columns?: boolean;
   }) => {
     const t = alterTarget();
     if (!t) return;
@@ -2337,7 +2340,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         try {
           await t.alter(t.db, t.schema, t.name, clause);
           contextMsg.success(a.done);
-          if (t.column) refreshTableColumns(t.db, t.schema, t.name);
+          if (t.column || a.columns) refreshTableColumns(t.db, t.schema, t.name, t.kind);
         } catch (e) {
           contextMsg.error(`${a.title} failed: ${String(e)}`);
         }
@@ -2381,6 +2384,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       clause: (v) => `SWAP WITH ${v}`, ok: "Swap", done: "Tables swapped.", danger: true,
     });
   };
+
+  // ─── EXTERNAL TABLE — virtual columns (ALTER TABLE … ADD / RENAME COLUMN) ──
+  const addExternalTableColumn = () => alterAction({
+    title: "Add Column",
+    input: { placeholder: "<name> <type> AS (<expr>) — e.g. c1 VARCHAR AS (value:c1::varchar)" },
+    clause: tblc.addExternalColumn, ok: "Add", done: "Column added.", columns: true,
+  });
+  const renameExternalTableColumn = () => alterAction({
+    title: "Rename Column", input: { placeholder: "New column name" },
+    clause: (v, col) => tblc.renameColumn(col, v), ok: "Rename", done: "Column renamed.",
+  });
 
   // ─── Base TABLE (obj node) — constraints and data metric functions ─────────
   const tableConstraint = (op: "ADD" | "DROP" | "RENAME" | "ALTER") => () => alterAction({
@@ -3680,11 +3694,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // ── Column context menu handlers ──────────────────────────────────────────
 
   // Refresh only the columns of a specific table (surgical — no full DB refresh).
-  const refreshTableColumns = (db: string, schema: string, table: string) => {
-    // The "TABLE" kind is hardcoded because every caller is a column ALTER
-    // action, which Snowflake only permits on tables (never views). If this is
-    // ever reused for view columns, the obj: key prefix must use the right kind.
-    const tableKey = `obj:${db}:${schema}:TABLE:${table}`;
+  const refreshTableColumns = (db: string, schema: string, table: string, kind = "TABLE") => {
+    // `kind` is the obj: key segment (TABLE, DYNAMIC TABLE, EXTERNAL TABLE, …).
+    const tableKey = `obj:${db}:${schema}:${kind}:${table}`;
     setTreeData((prev) => clearNodeChildren(prev, tableKey));
   };
 
@@ -3723,13 +3735,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (!ctxMenu) return;
     const { db, schema, table } = parseColKey(ctxMenu.nodeKey);
     const cols = dropColumnTargets();
+    // External tables have no CASCADE / RESTRICT in the grammar.
+    const external = ctxMenu.colMeta?.parentKind === "EXTERNAL TABLE";
     if (cols.length > 1) clearNodeSelection();
     const list = cols.map((c) => `"${c}"`).join(", ");
     alterAction({
       title: cols.length > 1 ? `Drop ${cols.length} columns?` : `Drop column ${list}?`,
       content: `This will permanently remove ${list} from ${db}.${schema}.${table}. This action cannot be undone.`,
       // CASCADE / RESTRICT is only documented for a single-column DROP.
-      input: cols.length > 1 ? undefined : {
+      input: cols.length > 1 || external ? undefined : {
         placeholder: "Dependent constraints: default", optional: true,
         options: [{ value: "CASCADE", label: "CASCADE — also drop dependent foreign keys" }, { value: "RESTRICT", label: "RESTRICT — fail if referenced" }],
       },
@@ -5125,6 +5139,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, refreshExternalTable)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "EXTERNAL TABLE" &&
+            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, addExternalTableColumn, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "ICEBERG TABLE" &&
@@ -5442,6 +5458,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
                 {menuItem("Properties…", <EditOutlined style={{ fontSize: 12 }} />, openColumnProperties, undefined, disabled, reason)}
                 <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem(dropColumnTargets().length > 1 ? `Drop ${dropColumnTargets().length} Columns…` : "Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
+              </>
+            );
+          })()}
+          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "EXTERNAL TABLE" && (() => {
+            const disabled = !featureFlags.columnManagement;
+            const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
+            return (
+              <>
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, renameExternalTableColumn, undefined, disabled, reason)}
                 {menuItem(dropColumnTargets().length > 1 ? `Drop ${dropColumnTargets().length} Columns…` : "Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
               </>
             );
