@@ -404,6 +404,8 @@ export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
 
+export function ClearOpenFormState():Promise<void>;
+
 export function ClearQueryLog():Promise<void>;
 
 export function ClearQueryResult(arg1:string):Promise<void>;
@@ -1277,6 +1279,8 @@ export function UpdateEditorTabSQL(arg1:string,arg2:string):Promise<void>;
 export function UpdateLogPrefs(arg1:config.LogPrefs):Promise<void>;
 
 export function UpdateMCPSessionMode(arg1:string,arg2:string):Promise<mcp.SessionInfo>;
+
+export function UpdateOpenFormState(arg1:mcp.OpenFormState):Promise<void>;
 
 export function UpdateQueryResult(arg1:string,arg2:Array<string>,arg3:number,arg4:boolean,arg5:Array<any>,arg6:string):Promise<void>;
 

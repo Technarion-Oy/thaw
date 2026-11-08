@@ -654,6 +654,10 @@ export function ClearObjectCacheForDatabase(arg1) {
   return window['go']['app']['App']['ClearObjectCacheForDatabase'](arg1);
 }
 
+export function ClearOpenFormState() {
+  return window['go']['app']['App']['ClearOpenFormState']();
+}
+
 export function ClearQueryLog() {
   return window['go']['app']['App']['ClearQueryLog']();
 }
@@ -2400,6 +2404,10 @@ export function UpdateLogPrefs(arg1) {
 
 export function UpdateMCPSessionMode(arg1, arg2) {
   return window['go']['app']['App']['UpdateMCPSessionMode'](arg1, arg2);
+}
+
+export function UpdateOpenFormState(arg1) {
+  return window['go']['app']['App']['UpdateOpenFormState'](arg1);
 }
 
 export function UpdateQueryResult(arg1, arg2, arg3, arg4, arg5, arg6) {

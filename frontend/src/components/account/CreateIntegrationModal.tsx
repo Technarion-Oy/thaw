@@ -16,6 +16,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import { useMcpFormSync } from "../shared/useMcpFormSync";
 
 const { TextArea } = Input;
 
@@ -651,6 +652,8 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const gitTlsCertificates    = Form.useWatch("tlsCertificates",    form) as string[] | undefined;
   const enabledVal            = Form.useWatch("enabled",            form) as boolean  | undefined;
   const commentVal            = Form.useWatch("comment",            form) as string   | undefined;
+
+  useMcpFormSync("create-integration", form, { kind, provider: provider ?? source ?? subtype ?? secType });
 
   const isGitHttps = kind === "API" && provider === "git_https_api";
   const postCreateMsg = postCreateHint(kind, provider ?? "");

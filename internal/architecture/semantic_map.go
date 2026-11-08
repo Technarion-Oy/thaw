@@ -375,6 +375,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/settings/MCPSessionsModal.tsx",
+        "frontend/src/components/shared/useMcpFormSync.ts",
         "frontend/src/components/toolbar/MCPIndicator.tsx",
         "frontend/src/hooks/useEditorContextSync.ts",
         "frontend/src/store/mcpStore.ts"
