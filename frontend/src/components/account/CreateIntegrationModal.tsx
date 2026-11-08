@@ -25,6 +25,31 @@ interface Props {
   onSuccess: () => void;
 }
 
+// ── Field help ─────────────────────────────────────────────────────────────────
+
+const AZURE_TENANT_TIP =
+  "Azure portal → Microsoft Entra ID → Overview → Tenant ID (a GUID, e.g. a123b4c5-1234-123a-a12b-1a23b45678c9). Maps to AZURE_TENANT_ID.";
+
+/** The manual cloud-side step a provider needs after CREATE, or null. */
+function postCreateHint(kind: string, provider: string): string | null {
+  const desc = "After creating, run DESCRIBE INTEGRATION and ";
+  if (kind === "STORAGE") {
+    if (provider === "S3" || provider === "S3GOV")
+      return desc + "add STORAGE_AWS_IAM_USER_ARN and STORAGE_AWS_EXTERNAL_ID to the IAM role's trust policy — Snowflake can't assume the role until you do.";
+    if (provider === "AZURE")
+      return desc + "open AZURE_CONSENT_URL to grant consent, then give AZURE_MULTI_TENANT_APP_NAME a Storage Blob Data role on the container(s).";
+    if (provider === "GCS")
+      return desc + "grant STORAGE_GCP_SERVICE_ACCOUNT access to the bucket(s) in Cloud Storage IAM.";
+  }
+  if (kind === "API") {
+    if (provider === "aws_api_gateway" || provider === "aws_private_api_gateway")
+      return desc + "add API_AWS_IAM_USER_ARN and API_AWS_EXTERNAL_ID to the IAM role's trust policy.";
+    if (provider === "azure_api_management")
+      return desc + "open AZURE_CONSENT_URL to grant the Snowflake app consent in your tenant.";
+  }
+  return null;
+}
+
 // ── Form sections ──────────────────────────────────────────────────────────────
 
 function StorageForm({ provider }: { provider: string }) {
@@ -32,43 +57,43 @@ function StorageForm({ provider }: { provider: string }) {
     <>
       {provider === "S3" || provider === "S3GOV" ? (
         <>
-          <Form.Item name="awsRoleArn" label="AWS Role ARN" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="awsRoleArn" label="AWS Role ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → IAM → Roles → your role → ARN. Format: arn:aws:iam::123456789012:role/snowflake_access. Maps to STORAGE_AWS_ROLE_ARN.">
             <Input placeholder="arn:aws:iam::123456789:role/my-role" />
           </Form.Item>
-          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. s3://bucket/path/">
+          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. s3://bucket/path/" tooltip="S3 URLs (s3://bucket/prefix/) the role may access; s3gov:// for GovCloud. Use * to allow any bucket the role can reach. Maps to STORAGE_ALLOWED_LOCATIONS.">
             <TextArea rows={3} placeholder="s3://my-bucket/path/" />
           </Form.Item>
-          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional">
+          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional" tooltip="Sub-paths of the allowed locations to deny, same URL format. Maps to STORAGE_BLOCKED_LOCATIONS.">
             <TextArea rows={2} placeholder="s3://my-bucket/blocked/" />
           </Form.Item>
-          <Form.Item name="awsExternalId" label="AWS External ID">
+          <Form.Item name="awsExternalId" label="AWS External ID" tooltip="Optional; Snowflake generates one if blank. Set it to reuse an existing trust policy condition. Shown by DESCRIBE INTEGRATION as STORAGE_AWS_EXTERNAL_ID.">
             <Input />
           </Form.Item>
-          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked">
+          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked" tooltip="Route traffic over AWS PrivateLink / Azure Private Link instead of the public internet. Requires Business Critical edition and a provisioned private endpoint. Maps to USE_PRIVATELINK_ENDPOINT.">
             <Switch size="small" />
           </Form.Item>
         </>
       ) : provider === "GCS" ? (
         <>
-          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. gcs://bucket/path/">
+          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. gcs://bucket/path/" tooltip="Cloud Storage → Buckets → bucket name, written as gcs://bucket/prefix/. Use * for any bucket. Maps to STORAGE_ALLOWED_LOCATIONS.">
             <TextArea rows={3} placeholder="gcs://my-bucket/path/" />
           </Form.Item>
-          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional">
+          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional" tooltip="Sub-paths of the allowed locations to deny, same URL format. Maps to STORAGE_BLOCKED_LOCATIONS.">
             <TextArea rows={2} />
           </Form.Item>
         </>
       ) : provider === "AZURE" ? (
         <>
-          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]} tooltip={AZURE_TENANT_TIP}>
             <Input />
           </Form.Item>
-          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. azure://account.blob.core.windows.net/container/">
+          <Form.Item name="allowedLocations" label="Allowed Locations" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated, e.g. azure://account.blob.core.windows.net/container/" tooltip="Storage account → Containers, written as azure://<account>.blob.core.windows.net/<container>/<path>/. Maps to STORAGE_ALLOWED_LOCATIONS.">
             <TextArea rows={3} placeholder="azure://account.blob.core.windows.net/container/" />
           </Form.Item>
-          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional">
+          <Form.Item name="blockedLocations" label="Blocked Locations" help="Optional" tooltip="Sub-paths of the allowed locations to deny, same URL format. Maps to STORAGE_BLOCKED_LOCATIONS.">
             <TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked">
+          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked" tooltip="Route traffic over AWS PrivateLink / Azure Private Link instead of the public internet. Requires Business Critical edition and a provisioned private endpoint. Maps to USE_PRIVATELINK_ENDPOINT.">
             <Switch size="small" />
           </Form.Item>
         </>
@@ -200,28 +225,28 @@ function ApiForm({ provider, gitAuthMode, secretOptions, loadingSecrets }: {
   }
   return (
     <>
-      <Form.Item name="allowedPrefixes" label="API Allowed Prefixes" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated">
+      <Form.Item name="allowedPrefixes" label="API Allowed Prefixes" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated" tooltip="Full invoke URL(s) of the gateway, e.g. https://xyz.execute-api.us-west-2.amazonaws.com/prod/ (AWS), https://my-apim.azure-api.net/ (Azure) or https://my-gw-abc.uc.gateway.dev/ (Google). Maps to API_ALLOWED_PREFIXES.">
         <TextArea rows={3} />
       </Form.Item>
       {(provider === "aws_api_gateway" || provider === "aws_private_api_gateway") && (
         <>
-          <Form.Item name="awsRoleArn" label="API AWS Role ARN" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="awsRoleArn" label="API AWS Role ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → IAM → Roles → the role API Gateway trusts → ARN. Format: arn:aws:iam::123456789012:role/snowflake_api. Maps to API_AWS_ROLE_ARN.">
             <Input />
           </Form.Item>
-          <Form.Item name="apiKey" label="API Key (optional)">
+          <Form.Item name="apiKey" label="API Key (optional)" tooltip="AWS: API Gateway → API Keys. Azure: API Management → Subscriptions → primary key. Sent as the x-api-key header. Maps to API_KEY.">
             <Input />
           </Form.Item>
         </>
       )}
       {provider === "azure_api_management" && (
         <>
-          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]} tooltip={AZURE_TENANT_TIP}>
             <Input />
           </Form.Item>
-          <Form.Item name="azureAdAppId" label="Azure AD Application ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureAdAppId" label="Azure AD Application ID" rules={[{ required: true, message: "Required" }]} tooltip="Entra ID → App registrations → the app protecting your API Management instance → Application (client) ID (GUID). Maps to AZURE_AD_APPLICATION_ID.">
             <Input />
           </Form.Item>
-          <Form.Item name="apiKey" label="API Key (optional)">
+          <Form.Item name="apiKey" label="API Key (optional)" tooltip="AWS: API Gateway → API Keys. Azure: API Management → Subscriptions → primary key. Sent as the x-api-key header. Maps to API_KEY.">
             <Input />
           </Form.Item>
           <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
@@ -231,7 +256,7 @@ function ApiForm({ provider, gitAuthMode, secretOptions, loadingSecrets }: {
       )}
       {provider === "google_api_gateway" && (
         <>
-          <Form.Item name="googleAudience" label="Google Audience" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="googleAudience" label="Google Audience" rules={[{ required: true, message: "Required" }]} tooltip="API Gateway → your gateway → Managed service name, e.g. my-api-abc123.apigateway.my-project.cloud.goog. Maps to GOOGLE_AUDIENCE.">
             <Input />
           </Form.Item>
           <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
@@ -248,13 +273,13 @@ function CatalogForm({ source }: { source: string }) {
     <>
       {source === "GLUE" && (
         <>
-          <Form.Item name="glueAwsRoleArn" label="Glue AWS Role ARN" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="glueAwsRoleArn" label="Glue AWS Role ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → IAM → Roles → role with Glue Data Catalog access → ARN. Format: arn:aws:iam::123456789012:role/snowflake_glue. Maps to GLUE_AWS_ROLE_ARN.">
             <Input />
           </Form.Item>
-          <Form.Item name="glueCatalogId" label="Glue Catalog ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="glueCatalogId" label="Glue Catalog ID" rules={[{ required: true, message: "Required" }]} tooltip="Your 12-digit AWS account ID (account menu, top right of the AWS console), e.g. 123456789012. Maps to GLUE_CATALOG_ID.">
             <Input />
           </Form.Item>
-          <Form.Item name="glueRegion" label="Glue Region (optional)">
+          <Form.Item name="glueRegion" label="Glue Region (optional)" tooltip="AWS region of the Glue Data Catalog, e.g. us-west-2. Defaults to the Snowflake account region. Maps to GLUE_REGION.">
             <Input />
           </Form.Item>
           <Form.Item name="catalogNamespace" label="Catalog Namespace (optional)">
@@ -354,44 +379,44 @@ function NotificationForm({ subtype }: { subtype: string }) {
     <>
       {subtype === "AZURE_STORAGE_QUEUE_INBOUND" && (
         <>
-          <Form.Item name="azureQueueUri" label="Azure Storage Queue URI" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureQueueUri" label="Azure Storage Queue URI" rules={[{ required: true, message: "Required" }]} tooltip="Storage account → Queues → your queue → URL, e.g. https://myaccount.queue.core.windows.net/myqueue. Maps to AZURE_STORAGE_QUEUE_PRIMARY_URI.">
             <Input />
           </Form.Item>
-          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]} tooltip={AZURE_TENANT_TIP}>
             <Input />
           </Form.Item>
-          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked">
+          <Form.Item name="usePrivatelink" label="Use PrivateLink Endpoint" valuePropName="checked" tooltip="Route traffic over AWS PrivateLink / Azure Private Link instead of the public internet. Requires Business Critical edition and a provisioned private endpoint. Maps to USE_PRIVATELINK_ENDPOINT.">
             <Switch size="small" />
           </Form.Item>
         </>
       )}
       {subtype === "GCP_PUBSUB_INBOUND" && (
-        <Form.Item name="gcpSubName" label="GCP Pub/Sub Subscription Name" rules={[{ required: true, message: "Required" }]}>
+        <Form.Item name="gcpSubName" label="GCP Pub/Sub Subscription Name" rules={[{ required: true, message: "Required" }]} tooltip="Pub/Sub → Subscriptions → Subscription name, format projects/<project>/subscriptions/<subscription>. Maps to GCP_PUBSUB_SUBSCRIPTION_NAME.">
           <Input />
         </Form.Item>
       )}
       {subtype === "AWS_SNS_OUTBOUND" && (
         <>
-          <Form.Item name="awsSnsTopicArn" label="AWS SNS Topic ARN" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="awsSnsTopicArn" label="AWS SNS Topic ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → SNS → Topics → your topic → ARN. Format: arn:aws:sns:us-west-2:123456789012:my_topic. Maps to AWS_SNS_TOPIC_ARN.">
             <Input />
           </Form.Item>
-          <Form.Item name="awsSnsRoleArn" label="AWS SNS Role ARN" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="awsSnsRoleArn" label="AWS SNS Role ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → IAM → Roles → role allowed to sns:Publish to the topic → ARN. Maps to AWS_SNS_ROLE_ARN.">
             <Input />
           </Form.Item>
         </>
       )}
       {subtype === "AZURE_EVENT_GRID_OUTBOUND" && (
         <>
-          <Form.Item name="azureTopicEndpoint" label="Azure Event Grid Topic Endpoint" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureTopicEndpoint" label="Azure Event Grid Topic Endpoint" rules={[{ required: true, message: "Required" }]} tooltip="Event Grid topic → Overview → Topic Endpoint, e.g. https://my-topic.westus2-1.eventgrid.azure.net/api/events. Maps to AZURE_EVENT_GRID_TOPIC_ENDPOINT.">
             <Input />
           </Form.Item>
-          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="azureTenantId" label="Azure Tenant ID" rules={[{ required: true, message: "Required" }]} tooltip={AZURE_TENANT_TIP}>
             <Input />
           </Form.Item>
         </>
       )}
       {subtype === "GCP_PUBSUB_OUTBOUND" && (
-        <Form.Item name="gcpTopicName" label="GCP Pub/Sub Topic Name" rules={[{ required: true, message: "Required" }]}>
+        <Form.Item name="gcpTopicName" label="GCP Pub/Sub Topic Name" rules={[{ required: true, message: "Required" }]} tooltip="Pub/Sub → Topics → Topic name, format projects/<project>/topics/<topic>. Maps to GCP_PUBSUB_TOPIC_NAME.">
           <Input />
         </Form.Item>
       )}
@@ -439,7 +464,7 @@ function SecurityForm({ secType }: { secType: string }) {
           <Form.Item noStyle shouldUpdate={(p, c) => p.authType !== c.authType}>
             {({ getFieldValue }) =>
               getFieldValue("authType") === "AWS_IAM" ? (
-                <Form.Item name="awsRoleArn" label="AWS Role ARN" rules={[{ required: true, message: "Required" }]}>
+                <Form.Item name="awsRoleArn" label="AWS Role ARN" rules={[{ required: true, message: "Required" }]} tooltip="AWS console → IAM → Roles → your role → ARN. Format: arn:aws:iam::123456789012:role/snowflake_auth. Maps to AWS_ROLE_ARN.">
                   <Input />
                 </Form.Item>
               ) : (
@@ -629,6 +654,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const commentVal            = Form.useWatch("comment",            form) as string   | undefined;
 
   const isGitHttps = kind === "API" && provider === "git_https_api";
+  const postCreateMsg = postCreateHint(kind, provider ?? "");
 
   // Live SQL preview for git_https_api — debounced call to Go backend
   const [sqlPreview, setSqlPreview] = useState("");
@@ -860,6 +886,10 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
           )}
           {kind === "NOTIFICATION"     && <NotificationForm subtype={subtype ?? "EMAIL"} />}
           {kind === "SECURITY"         && <SecurityForm secType={secType ?? "OAUTH_PARTNER"} />}
+
+          {postCreateMsg && (
+            <Alert type="info" showIcon message={postCreateMsg} style={{ marginBottom: 12, fontSize: 12 }} />
+          )}
 
           <Form.Item name="comment" label="Comment (optional)">
             <Input />
