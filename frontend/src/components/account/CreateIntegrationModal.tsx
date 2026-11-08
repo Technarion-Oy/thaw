@@ -15,7 +15,7 @@ import {
   ListSecretsInAccount,
 } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
-import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
 const { TextArea } = Input;
 
@@ -30,22 +30,21 @@ interface Props {
 const AZURE_TENANT_TIP =
   "Azure portal → Microsoft Entra ID → Overview → Tenant ID (a GUID, e.g. a123b4c5-1234-123a-a12b-1a23b45678c9). Maps to AZURE_TENANT_ID.";
 
-/** The manual cloud-side step a provider needs after CREATE, or null. */
+/** The manual cloud-side step a provider needs after CREATE (follows "run DESCRIBE INTEGRATION and"), or null. */
 function postCreateHint(kind: string, provider: string): string | null {
-  const desc = "After creating, run DESCRIBE INTEGRATION and ";
   if (kind === "STORAGE") {
     if (provider === "S3" || provider === "S3GOV")
-      return desc + "add STORAGE_AWS_IAM_USER_ARN and STORAGE_AWS_EXTERNAL_ID to the IAM role's trust policy — Snowflake can't assume the role until you do.";
+      return "add STORAGE_AWS_IAM_USER_ARN and STORAGE_AWS_EXTERNAL_ID to the IAM role's trust policy — Snowflake can't assume the role until you do.";
     if (provider === "AZURE")
-      return desc + "open AZURE_CONSENT_URL to grant consent, then give AZURE_MULTI_TENANT_APP_NAME a Storage Blob Data role on the container(s).";
+      return "open AZURE_CONSENT_URL to grant consent, then give AZURE_MULTI_TENANT_APP_NAME a Storage Blob Data role on the container(s).";
     if (provider === "GCS")
-      return desc + "grant STORAGE_GCP_SERVICE_ACCOUNT access to the bucket(s) in Cloud Storage IAM.";
+      return "grant STORAGE_GCP_SERVICE_ACCOUNT access to the bucket(s) in Cloud Storage IAM.";
   }
   if (kind === "API") {
     if (provider === "aws_api_gateway" || provider === "aws_private_api_gateway")
-      return desc + "add API_AWS_IAM_USER_ARN and API_AWS_EXTERNAL_ID to the IAM role's trust policy.";
+      return "add API_AWS_IAM_USER_ARN and API_AWS_EXTERNAL_ID to the IAM role's trust policy.";
     if (provider === "azure_api_management")
-      return desc + "open AZURE_CONSENT_URL to grant the Snowflake app consent in your tenant.";
+      return "open AZURE_CONSENT_URL to grant the Snowflake app consent in your tenant.";
   }
   return null;
 }
@@ -888,7 +887,18 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
           {kind === "SECURITY"         && <SecurityForm secType={secType ?? "OAUTH_PARTNER"} />}
 
           {postCreateMsg && (
-            <Alert type="info" showIcon message={postCreateMsg} style={{ marginBottom: 12, fontSize: 12 }} />
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12, fontSize: 12 }}
+              message={<>
+                After creating, run{" "}
+                <Typography.Text code copyable>
+                  {`DESCRIBE INTEGRATION ${nameValue.trim() ? identToken(nameValue.trim(), caseSensitive) : "<name>"};`}
+                </Typography.Text>{" "}
+                and {postCreateMsg}
+              </>}
+            />
           )}
 
           <Form.Item name="comment" label="Comment (optional)">
