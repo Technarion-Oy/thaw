@@ -379,12 +379,12 @@ body,
     0 9px 28px 8px rgba(0, 0, 0, 0.05));
   min-width: 260px;
 }
-.ant-modal .ant-modal-content {
+.ant-modal .ant-modal-container {
   box-shadow: none;
 }
 /* Header + the content's top padding band are the drag handle, so they show the
    move cursor; body and footer opt back out so their contents feel normal. */
-.ant-modal .ant-modal-content {
+.ant-modal .ant-modal-container {
   cursor: move;
 }
 .ant-modal-body,

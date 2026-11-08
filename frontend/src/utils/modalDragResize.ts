@@ -77,13 +77,13 @@ function onMouseDown(e: MouseEvent) {
   const modal = target.closest(".ant-modal") as HTMLElement | null;
   if (!modal) return;
   // Drag handle = the title bar, plus the content's top padding band. antd puts
-  // ~20px top padding on `.ant-modal-content` with none on the header, so the
+  // ~20px top padding on `.ant-modal-container` with none on the header, so the
   // very top edge lands on the content element, not the header. Restrict the
   // content-as-handle to that top band (above the body) so nothing lower — the
   // body, footer, or the resize grip in the corner — is mistaken for a drag.
   const headerEl = target.closest(".ant-modal-header") as HTMLElement | null;
   if (!headerEl) {
-    if (!target.classList.contains("ant-modal-content")) return;
+    if (!target.classList.contains("ant-modal-container")) return;
     const body = target.querySelector(".ant-modal-body");
     if (body && e.clientY >= body.getBoundingClientRect().top) return;
   }
@@ -92,7 +92,7 @@ function onMouseDown(e: MouseEvent) {
   // focus-trap/`[tabindex]` divs that are ANCESTORS of the header, so an
   // unbounded `closest(INTERACTIVE)` matches those and blocks every drag — only
   // a control the handle actually contains should count.
-  const handle = headerEl ?? (modal.querySelector(".ant-modal-content") as HTMLElement | null);
+  const handle = headerEl ?? (modal.querySelector(".ant-modal-container") as HTMLElement | null);
   const hit = target.closest(INTERACTIVE);
   if (hit && handle && hit !== handle && handle.contains(hit)) return;
 
