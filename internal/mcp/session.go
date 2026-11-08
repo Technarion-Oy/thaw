@@ -73,6 +73,7 @@ func (s *session) start() error {
 
 	s.server = buildServer(s.client, s.mode, s.cfg, s.editorCtx, s.mgr.emit, s.fnStore, s.nb)
 	registerERDesignerStateTools(s.server, s.mgr.emit, s.mgr.erDesignerState)
+	registerOpenFormTools(s.server, s.mgr.emit, s.mgr.openForm)
 	sse := mcpsdk.NewSSEHandler(func(*http.Request) *mcpsdk.Server {
 		s.mu.Lock()
 		srv := s.server

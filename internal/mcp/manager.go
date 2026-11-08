@@ -72,6 +72,7 @@ type Manager struct {
 	sessions        map[string]*session
 	editorCtx       *EditorContextStore
 	erDesignerState *ERDesignerStateStore
+	openForm        *OpenFormStateStore
 	emit            func(string, interface{}) // Wails event emitter; nil when running outside the app (tests)
 	fnStore         *fnmeta.Store             // local function metadata cache; nil until set via SetFnStore
 	nb              NotebookBackend           // notebook/Snowpark backend; nil until set via SetNotebookBackend
@@ -86,6 +87,7 @@ func NewManager(emit func(string, interface{})) *Manager {
 		sessions:        make(map[string]*session),
 		editorCtx:       NewEditorContextStore(),
 		erDesignerState: NewERDesignerStateStore(),
+		openForm:        NewOpenFormStateStore(),
 		emit:            emit,
 	}
 }
@@ -100,6 +102,12 @@ func (m *Manager) EditorContext() *EditorContextStore {
 // read from this store; the frontend pushes state into it via App IPC methods.
 func (m *Manager) ERDesignerState() *ERDesignerStateStore {
 	return m.erDesignerState
+}
+
+// OpenForm returns the shared open-form state store (get_open_form /
+// fill_open_form); the frontend pushes state into it via App IPC methods.
+func (m *Manager) OpenForm() *OpenFormStateStore {
+	return m.openForm
 }
 
 // SetFnStore sets the function metadata store on the manager so new MCP

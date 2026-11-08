@@ -3147,6 +3147,24 @@ export namespace mcp {
 		    return a;
 		}
 	}
+	export class OpenFormState {
+	    form: string;
+	    kind?: string;
+	    provider?: string;
+	    fields: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenFormState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.form = source["form"];
+	        this.kind = source["kind"];
+	        this.provider = source["provider"];
+	        this.fields = source["fields"];
+	    }
+	}
 	export class SessionInfo {
 	    label: string;
 	    port: number;

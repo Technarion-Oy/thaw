@@ -1430,3 +1430,11 @@ body,
   flex-shrink: 0;
   width: 12px;
 }
+
+/* ── MCP fill_open_form: field just filled by the AI (useMcpFormSync) ─────── */
+.ant-form-item.mcp-ai-filled {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--accent),
+    0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+  transition: box-shadow 0.3s ease;
+}

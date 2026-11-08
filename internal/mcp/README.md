@@ -27,6 +27,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `workspace_tools.go` | `registerWorkspaceTools(srv, workspaceRoot)` — local filesystem and git read-only tools (`git_status`, `git_list_branches`, `git_get_head_file`, `git_diff_lines`, `list_directory`, `read_file`, `search_files`); delegates to `gitrepo`, `filesystem`, and `sqleditor` packages; no Snowflake client needed; **only registered when `WorkspaceRoot` is set** in `SessionConfig`; all path inputs are validated against the workspace root using `filesystem.ValidateInsideOrEqual` (symlink-resolving defense-in-depth), except `git_get_head_file` which uses `filesystem.ValidatePathOrAncestorInsideOrEqual` so it can return HEAD content for files deleted from the working tree |
 | `context.go` | `EditorContextStore` — concurrency-safe in-memory store for per-tab editor SQL and result summaries; `ResultSummary` and `QueryHistoryEntry` types |
 | `er_designer_state.go` | `ERDesignerStateStore` — concurrency-safe in-memory cache for the open ER designer's state (database, tables, columns); `ERDesignerState`, `ERDesignerTableOut`, `ERDesignerColumnOut` types. Frontend pushes state via IPC; `get_er_designer_state` reads from it |
+| `form_state.go` | `OpenFormStateStore` + `OpenFormState{form, kind, provider, fields}` — cache of the create dialog the user has open (pushed by the frontend `useMcpFormSync` hook via IPC); `registerOpenFormTools` wires `get_open_form` / `fill_open_form` (emit+store-gated, every execution mode); `isSensitiveField`/`maskValue` mask secret-like values; `FillOpenFormPayload` type. Tests in `form_state_test.go` |
 | `editor_tools.go` | `registerEditorTools` — editor context tools (`get_current_editor_sql`, `get_query_results_summary`, `get_query_history`); bridges frontend editor state to MCP clients |
 | `tab_tools.go` | `registerTabTools` — tab-delivery tool (`open_sql_tab`); formats SQL with user prefs, runs diagnostics, emits `mcp:open-sql-tab` Wails event. Registered when `emit` is non-nil. `OpenSqlTabPayload` type, `loadEditorPrefs` helper |
 | `notebook_tools.go` | `registerNotebookTools` — notebook/Snowpark tools (`read_notebook`, `get_notebook_completions`, `check_python_syntax`, `open_notebook_tab`); `NotebookBackend` interface (dependency-injected from `App` via adapter), MCP-local type duplicates (`NotebookCompletion`, `NotebookSyntaxError`), `OpenNotebookTabPayload` type, `buildNbformat` helper. `read_notebook` is workspace-gated; kernel tools are backend-gated; `open_notebook_tab` is emit-gated |
@@ -69,6 +70,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `NewManager(emit)` | Empty registry with initialized `EditorContextStore` and `ERDesignerStateStore`. `emit` is an optional Wails event emitter for tab-delivery tools; pass `nil` in tests. Safe for concurrent use. |
 | `EditorContext()` | Returns the shared `*EditorContextStore`; MCP tools read, frontend pushes state via App IPC. |
 | `ERDesignerState()` | Returns the shared `*ERDesignerStateStore`; `get_er_designer_state` reads, frontend pushes state via App IPC. |
+| `OpenForm()` | Returns the shared `*OpenFormStateStore`; `get_open_form` / `fill_open_form` read it, frontend pushes state via App IPC. |
 | `SetFnStore(store)` | Sets the function metadata store (`*fnmeta.Store`) on the manager. New sessions started after this call will expose function/procedure lookup tools. Called from `App.startup` after the fnStore is opened. |
 | `SetNotebookBackend(nb)` | Sets the notebook/Snowpark backend (`NotebookBackend`) on the manager. New sessions started after this call will expose notebook tools (`get_notebook_completions`, `check_python_syntax`). Called from `App.startup` after the `snowparkSvc` is created. |
 | `Start(label, connLabel, mode, port, client, cfg)` | Starts a session under a unique `label`; `port == 0` auto-assigns from `9100`. Takes ownership of `client`. Applies `SessionConfig` (role/warehouse pinning, secondary roles). |
@@ -336,6 +338,8 @@ All workspace tools that accept a directory or file path validate the input agai
 | `open_er_designer` | Emit-gated | Fetch live ER data, merge AI-generated tables, open the ER designer | Emits `mcp:open-er-designer` Wails event with `{database, merged, baseline}` |
 | `get_er_designer_state` | erState-gated | Read current tables/columns/FKs from the open designer | None (reads from `ERDesignerStateStore` cache) |
 | `modify_er_designer` | Emit+erState-gated | Push AI table modifications into the open designer; returns a change-delta summary | Emits `mcp:modify-er-designer` Wails event with `{tables}`; updates the `ERDesignerStateStore` cache in place |
+| `get_open_form` | Emit-gated, all modes | Read which create dialog is open, its kind/provider, and field values (secret/password/apiKey/token values masked) | None (reads from `OpenFormStateStore`) |
+| `fill_open_form` | Emit-gated, all modes | Fill fields of the open dialog; returns the changed-field delta | Emits `mcp:fill-form` with `{form, fields}`; merges into the `OpenFormStateStore` cache |
 
 `open_er_designer` enables the "AI scaffolds, human refines" workflow: the AI generates tables from natural language and delivers them onto the interactive ER canvas. The `mergeAITables` function merges AI tables into the live schema — matching tables (by uppercase `SCHEMA.NAME`) are replaced, new tables are appended, untouched live tables are preserved. The frontend receives both the merged data (for display) and the baseline (original live schema for diff SQL generation). The user reviews the visual model and the generated SQL diff before applying.
 
@@ -364,6 +368,16 @@ The ER designer's table state lives in `ERDesigner.tsx` (React `useState`), whil
 1. **`ERDesignerStateStore`** (`er_designer_state.go`) — a `sync.RWMutex`-protected cache owned by `Manager`, initialized in `NewManager()`. Holds `ERDesignerState` (database + `[]ERDesignerTableOut`), or nil when the designer is closed.
 2. **App IPC methods** (`internal/app/erdesigner.go`) — two thin delegators (`UpdateERDesignerState`, `ClearERDesignerState`) that write into `Manager.ERDesignerState()`.
 3. **Frontend sync** (`ERDesigner.tsx`) — pushes state on mount, on debounced (300ms) `tables` changes, and clears on unmount. Listens for `mcp:modify-er-designer` Wails events and merges AI tables via `mergeAITablesIntoDesigner`.
+
+### Form sync (`get_open_form` / `fill_open_form`)
+
+A generic version of the ER designer bridge for any Ant Design create dialog, so an AI client can fill the form the user has open instead of the user copy-pasting values from the chat. The user still reviews and clicks **Create** — nothing is executed.
+
+1. **`OpenFormStateStore`** (`form_state.go`) — one slot (`OpenFormState{form, kind, provider, fields}`), the most recently pushed dialog; nil when none is open.
+2. **App IPC** (`internal/app/openform.go`) — `UpdateOpenFormState(state)` / `ClearOpenFormState()`.
+3. **Frontend hook** (`frontend/src/components/shared/useMcpFormSync.ts`) — `useMcpFormSync(formId, form, {kind, provider})` pushes `form.getFieldsValue(true)` on mount and on change (debounced 300 ms), clears on unmount, and applies `mcp:fill-form` events whose `form` matches via `form.setFieldsValue`, briefly highlighting the filled fields (`.mcp-ai-filled`).
+
+Field names equal the json tags of the matching `integrations.*Params` struct, so `fill_open_form` takes the same keys as `build_*_integration_sql` — the tool description tells the AI to self-check with that builder first. `fill_open_form` merges into the cache immediately (same reason as `modify_er_designer`) and returns only the fields whose value actually changed, with sensitive values masked. Adopted by `CreateIntegrationModal` (`formId: "create-integration"`); other dialogs opt in with one hook call.
 
 ## Patterns & integration
 
