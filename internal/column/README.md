@@ -18,13 +18,13 @@ Owns every SQL string for mutating table columns via `ALTER TABLE`. No column DD
 
 ### Config type
 
-`AddColumnConfig` — mirrors the frontend's `AddColumnModal` form fields; maps cleanly to the Wails-generated TypeScript model. Fields cover name, data type, value mode (`none` / `default` / `autoincrement` / `computed`), identity parameters, inline constraint (UNIQUE / PRIMARY KEY / FOREIGN KEY), collation, and comment.
+`AddColumnConfig` — mirrors the frontend's `AddColumnModal` form fields; maps cleanly to the Wails-generated TypeScript model. Fields cover name, data type, value mode (`none` / `default` / `autoincrement` / `computed`), identity parameters, inline constraint (UNIQUE / PRIMARY KEY / FOREIGN KEY / CHECK `(<expr>)` via `CheckExpr`, plus optional trailing `ConstraintProps` such as `NOT ENFORCED RELY`), collation, comment, and governance (`MaskingPolicy` + optional `MaskingUsing` column list, `ProjectionPolicy`, `Tags` — rendered as `WITH MASKING POLICY … [USING (…)]`, `WITH PROJECTION POLICY …`, `WITH TAG (…)`).
 
 ### SQL builders
 
 | Function | Emits |
 |---|---|
-| `BuildAddColumnSql(db, schema, table, cfg AddColumnConfig)` | `ALTER TABLE ... ADD COLUMN [IF NOT EXISTS] ...;` |
+| `BuildAddColumnSql(db, schema, table, cfg AddColumnConfig)` | `ALTER TABLE ... ADD COLUMN [IF NOT EXISTS] ... [NOT NULL] [CONSTRAINT n] {UNIQUE \| PRIMARY KEY \| REFERENCES t [(c)] \| CHECK (expr)} [<constraint_properties>] ...;` |
 | `BuildDropColumnSql(db, schema, table, column)` | `ALTER TABLE ... DROP COLUMN ...;` |
 | `BuildRenameColumnSql(db, schema, table, old, new, caseSensitive)` | `ALTER TABLE ... RENAME COLUMN ... TO ...;` |
 | `BuildSetNotNullSql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL;` |
@@ -36,7 +36,7 @@ Owns every SQL string for mutating table columns via `ALTER TABLE`. No column DD
 | `BuildSetColumnMaskingPolicySql(db, schema, table, column, policyDb, policySchema, policyName)` | `ALTER TABLE ... ALTER COLUMN ... SET MASKING POLICY <policy>;` |
 | `BuildUnsetColumnMaskingPolicySql(db, schema, table, column)` | `ALTER TABLE ... ALTER COLUMN ... UNSET MASKING POLICY;` |
 
-All builders return a semicolon-terminated string. `BuildAddColumnSql` also returns an `error` for IPC signature symmetry, though it currently always returns `nil`.
+All builders return a semicolon-terminated string. `BuildAddColumnSql` also returns an `error`: a typed masking / projection policy name or `USING` column that is not a valid identifier (`snowflake.RenderQualifiedName`) is rejected, as is a `CheckExpr` containing `;` or a `ConstraintProps` value outside the `[NOT] ENFORCED`, `[NOT] DEFERRABLE`, `INITIALLY DEFERRED | IMMEDIATE`, `ENABLE | DISABLE`, `VALIDATE | NOVALIDATE`, `RELY | NORELY` keyword set (same set as `CONSTRAINT_PROPS` in `frontend/src/components/common/tableClauses.ts`). `ConstraintProps` is uppercased, whitespace-normalised and emitted only when a constraint clause is emitted.
 
 ## Patterns & integration
 
@@ -50,4 +50,4 @@ The altering actions (Rename, Change Type, Default, Comment, Set/Drop NOT NULL, 
 
 Collation (`COLLATE`) is emitted between the data type and `DEFAULT`/`AUTOINCREMENT` clauses to match Snowflake's column-definition grammar and `GET_DDL` output. It is skipped entirely for computed (`AS (expr)`) columns, where it is not valid.
 
-Inline constraints (`NOT NULL`, `CONSTRAINT`, `UNIQUE`, `PRIMARY KEY`, `REFERENCES`) are also skipped for computed columns.
+Inline constraints (`NOT NULL`, `CONSTRAINT`, `UNIQUE`, `PRIMARY KEY`, `REFERENCES`, `CHECK`, constraint properties) are also skipped for computed columns.

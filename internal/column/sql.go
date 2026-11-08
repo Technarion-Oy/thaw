@@ -4,6 +4,7 @@ package column
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"thaw/internal/snowflake"
@@ -27,16 +28,32 @@ type AddColumnConfig struct {
 	IdentityOrder string `json:"identityOrder"` // "ORDER" | "NOORDER" | ""
 	// Inline constraint
 	NotNull        bool   `json:"notNull"`
-	ConstraintKind string `json:"constraintKind"` // "none" | "unique" | "primary_key" | "foreign_key"
+	ConstraintKind string `json:"constraintKind"` // "none" | "unique" | "primary_key" | "foreign_key" | "check"
 	ConstraintName string `json:"constraintName"`
 	FkDb           string `json:"fkDb"`
 	FkSchema       string `json:"fkSchema"`
 	FkTableName    string `json:"fkTableName"`
 	FkColumn       string `json:"fkColumn"`
+	CheckExpr      string `json:"checkExpr"` // CHECK (<expr>), emitted verbatim
+	// Trailing constraint properties, e.g. "NOT ENFORCED RELY"; validated
+	// against constraintPropsRe and emitted only when a constraint is emitted.
+	ConstraintProps string `json:"constraintProps"`
 	// Collation & comment
 	Collation string `json:"collation"`
 	Comment   string `json:"comment"`
+	// Governance: [WITH] MASKING POLICY p [USING (col, cond…)], [WITH]
+	// PROJECTION POLICY p, [WITH] TAG (…). Policy names are typed references
+	// (bare or "quoted", up to db.schema.name); MaskingUsing is a comma list.
+	MaskingPolicy    string              `json:"maskingPolicy"`
+	MaskingUsing     string              `json:"maskingUsing"`
+	ProjectionPolicy string              `json:"projectionPolicy"`
+	Tags             []snowflake.TagPair `json:"tags"`
 }
+
+// constraintPropsRe mirrors CONSTRAINT_PROPS in
+// frontend/src/components/common/tableClauses.ts; it is matched against the
+// uppercased, whitespace-normalised value prefixed with a single space.
+var constraintPropsRe = regexp.MustCompile(`^(?: (?:NOT )?(?:ENFORCED|DEFERRABLE)| INITIALLY (?:DEFERRED|IMMEDIATE)| (?:ENABLE|DISABLE|VALIDATE|NOVALIDATE|RELY|NORELY))*$`)
 
 // tableRef returns a fully-quoted DB.SCHEMA.TABLE reference.
 func tableRef(db, schema, table string) string {
@@ -46,9 +63,9 @@ func tableRef(db, schema, table string) string {
 
 // BuildAddColumnSql constructs an ALTER TABLE ... ADD COLUMN statement.
 //
-// It always returns a nil error; the error result exists for IPC symmetry with
-// the other builders and to leave room for future validation without changing
-// the Wails-bound signature.
+// It returns an error when a typed policy name or USING column is not a valid
+// identifier, when a CHECK expression contains a semicolon, or when the
+// constraint properties are not recognized keywords.
 func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, error) {
 	colName := cfg.Name
 	if colName == "" {
@@ -108,11 +125,12 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 		if name := strings.TrimSpace(cfg.ConstraintName); name != "" {
 			parts = append(parts, "CONSTRAINT "+snowflake.QuoteIdent(name))
 		}
+		con := ""
 		switch cfg.ConstraintKind {
 		case "unique":
-			parts = append(parts, "UNIQUE")
+			con = "UNIQUE"
 		case "primary_key":
-			parts = append(parts, "PRIMARY KEY")
+			con = "PRIMARY KEY"
 		case "foreign_key":
 			if cfg.FkTableName != "" {
 				fkDb := cfg.FkDb
@@ -123,13 +141,60 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 				if fkSchema == "" {
 					fkSchema = schema
 				}
-				ref := "REFERENCES " + tableRef(fkDb, fkSchema, cfg.FkTableName)
+				con = "REFERENCES " + tableRef(fkDb, fkSchema, cfg.FkTableName)
 				if cfg.FkColumn != "" {
-					ref += fmt.Sprintf(" (%s)", snowflake.QuoteIdent(cfg.FkColumn))
+					con += fmt.Sprintf(" (%s)", snowflake.QuoteIdent(cfg.FkColumn))
 				}
-				parts = append(parts, ref)
+			}
+		case "check":
+			if expr := strings.TrimSpace(cfg.CheckExpr); expr != "" {
+				if strings.Contains(expr, ";") {
+					return "", fmt.Errorf("CHECK expression must not contain a semicolon")
+				}
+				con = "CHECK (" + expr + ")"
 			}
 		}
+		if con != "" {
+			parts = append(parts, con)
+			// Constraint properties: validated as a trust boundary (the string
+			// is emitted verbatim after normalisation).
+			if props := strings.ToUpper(strings.Join(strings.Fields(cfg.ConstraintProps), " ")); props != "" {
+				if !constraintPropsRe.MatchString(" " + props) {
+					return "", fmt.Errorf("unrecognized constraint properties: %s", props)
+				}
+				parts = append(parts, props)
+			}
+		}
+	}
+
+	if p := strings.TrimSpace(cfg.MaskingPolicy); p != "" {
+		ref, err := snowflake.RenderQualifiedName("masking policy", p, 3)
+		if err != nil {
+			return "", err
+		}
+		clause := "WITH MASKING POLICY " + ref
+		if u := strings.TrimSpace(cfg.MaskingUsing); u != "" {
+			var cols []string
+			for _, c := range strings.Split(u, ",") {
+				rc, err := snowflake.RenderQualifiedName("USING column", c, 1)
+				if err != nil {
+					return "", err
+				}
+				cols = append(cols, rc)
+			}
+			clause += " USING (" + strings.Join(cols, ", ") + ")"
+		}
+		parts = append(parts, clause)
+	}
+	if p := strings.TrimSpace(cfg.ProjectionPolicy); p != "" {
+		ref, err := snowflake.RenderQualifiedName("projection policy", p, 3)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, "WITH PROJECTION POLICY "+ref)
+	}
+	if tc := snowflake.TagClause(cfg.Tags); tc != "" {
+		parts = append(parts, "WITH "+tc)
 	}
 
 	if c := strings.TrimSpace(cfg.Comment); c != "" {

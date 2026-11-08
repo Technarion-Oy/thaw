@@ -7,7 +7,7 @@
 // fix to one row's behavior lands in every Properties modal at once.
 
 import { useState, useEffect } from "react";
-import { Button, Input, Select, Space, Typography, Tooltip } from "antd";
+import { Button, Input, Select, Space, Typography, Tooltip, Popconfirm } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import type { snowflake } from "../../../wailsjs/go/models";
 
@@ -240,3 +240,82 @@ export function PickerRow({ label, value, load, busy, onSet, onUnset }: {
     </tr>
   );
 }
+
+// ─── ActionRow ───────────────────────────────────────────────────────────────
+// A row of free-text fields plus action buttons, each turning the field values
+// into one ALTER clause (a builder that throws shows its message inline). Used
+// for the attach/detach-style clauses whose current state SHOW doesn't return
+// (policies, contacts).
+
+export interface RowAction {
+  label: string;
+  clause: (v: string[]) => string;
+  danger?: boolean;
+  confirm?: string;
+}
+
+export function ActionRow({ label, fields, actions, run }: {
+  label: string;
+  fields: string[];
+  actions: RowAction[];
+  run: (clause: string) => Promise<void>;
+}) {
+  const [vals, setVals] = useState(() => fields.map(() => ""));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const go = async (a: RowAction) => {
+    setError(null);
+    let clause: string;
+    try {
+      clause = a.clause(vals.map((v) => v.trim()));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setBusy(a.label);
+    try {
+      await run(clause);
+      setVals(fields.map(() => ""));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <tr>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", fontSize: 12, verticalAlign: "middle" }}>
+        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+          <Space wrap>
+            {fields.map((ph, i) => (
+              <Input
+                key={ph}
+                size="small"
+                placeholder={ph}
+                value={vals[i]}
+                onChange={(e) => setVals((vs) => vs.map((v, j) => (j === i ? e.target.value : v)))}
+                style={{ width: 170 }}
+              />
+            ))}
+            {actions.map((a) => {
+              const btn = (
+                <Button key={a.label} size="small" danger={a.danger} loading={busy === a.label}
+                  onClick={a.confirm ? undefined : () => go(a)}>
+                  {a.label}
+                </Button>
+              );
+              return a.confirm
+                ? <Popconfirm key={a.label} title={a.confirm} onConfirm={() => go(a)}>{btn}</Popconfirm>
+                : btn;
+            })}
+          </Space>
+          {error && <Text type="danger" style={{ fontSize: 11 }}>{error}</Text>}
+        </Space>
+      </td>
+    </tr>
+  );
+}
+

@@ -2,15 +2,19 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect } from "react";
-import { App as AntApp, Modal, Spin, Button, Input, Space, Tag, Select } from "antd";
+import { App as AntApp, Modal, Spin, Button, Input, Space, Tag, Select, Checkbox } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import { ConfirmSwitch } from "../common/ConfirmSwitch";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import SequenceDefaultPicker from "../shared/SequenceDefaultPicker";
 import { parseAllowedValues } from "../tag/allowedValues";
+import { ActionRow } from "../shared/PropertyRows";
+import * as dtc from "../dynamictable/dynamicTableClauses";
+import { withMaskingOptions } from "../common/tableClauses";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
+  AlterTable,
   ExecDDL,
   GetColumnDetails,
   GetColumnTagReferences,
@@ -90,6 +94,8 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const [cur, setCur] = useState<ColMeta>(initial);
   const [colDefault, setColDefault] = useState("");
   const [maskingPolicy, setMaskingPolicy] = useState("");
+  const [maskUsing, setMaskUsing] = useState("");   // optional USING (col, cond_col …)
+  const [maskForce, setMaskForce] = useState(false);
   const [loading, setLoading] = useState(true);
   const [detailsError, setDetailsError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -181,7 +187,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   };
 
   const startEdit = (key: string, value: string) => { setEditing(key); setDraft(value); setCaseSensitive(false); };
-  const cancelEdit = () => { setEditing(null); setDraft(""); };
+  const cancelEdit = () => { setEditing(null); setDraft(""); setMaskUsing(""); setMaskForce(false); };
 
   // ── Section savers ──────────────────────────────────────────────────────────
 
@@ -247,13 +253,15 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
 
   const saveMasking = async () => {
     const trimmed = draft.trim();
-    if (trimmed === maskingPolicy) { cancelEdit(); return; }
+    if (trimmed === maskingPolicy && !maskUsing.trim()) { cancelEdit(); return; }
     let sql: string;
     if (!trimmed) {
       sql = await BuildUnsetColumnMaskingPolicySql(db, schema, table, column);
     } else {
       const p = splitQualified(trimmed, policies);
-      sql = await BuildSetColumnMaskingPolicySql(db, schema, table, column, p.db, p.schema, p.name);
+      try {
+        sql = withMaskingOptions(await BuildSetColumnMaskingPolicySql(db, schema, table, column, p.db, p.schema, p.name), maskUsing, maskForce);
+      } catch (e) { message.error(e instanceof Error ? e.message : String(e)); return; }
     }
     // Replacing or removing an existing governance policy is destructive — confirm
     // with a SQL preview. This also guards the case where the policy list failed
@@ -433,6 +441,27 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{displayValue(maskingPolicy)}{editButton("masking", maskingPolicy, detailsError)}</div>
             ))}
+            {editing === "masking" && draft.trim() !== "" && (
+              <tr><td /><td style={{ paddingBottom: 8 }}>
+                <Space>
+                  <Input size="small" value={maskUsing} onChange={(e) => setMaskUsing(e.target.value)}
+                    placeholder={`USING columns (optional): ${column}, cond_col`} style={{ width: 260, fontFamily: "monospace", fontSize: 12 }} />
+                  <Checkbox checked={maskForce} onChange={(e) => setMaskForce(e.target.checked)}>Force (replace in one step)</Checkbox>
+                </Space>
+              </td></tr>
+            )}
+            {/* Projection policy — the current attachment isn't loaded (POLICY_REFERENCES
+                lookup only covers masking), so this is a set/unset editor. */}
+            <ActionRow
+              label="Projection policy"
+              fields={["policy"]}
+              actions={[
+                { label: "Set", clause: ([p]) => dtc.columnProjectionPolicy(column, p) },
+                { label: "Set (force)", clause: ([p]) => dtc.columnProjectionPolicy(column, `${p} FORCE`) },
+                { label: "Unset", clause: () => dtc.unsetColumnPolicy(column, "PROJECTION"), danger: true, confirm: "Unset the projection policy?" },
+              ]}
+              run={async (clause) => { await AlterTable(db, schema, table, clause); message.success("Projection policy updated"); }}
+            />
 
             {/* Tags */}
             {row("Tags", (

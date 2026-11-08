@@ -5,6 +5,8 @@ package column
 import (
 	"strings"
 	"testing"
+
+	"thaw/internal/snowflake"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -45,6 +47,29 @@ func TestBuildAddColumnSql_CaseSensitiveAndIfNotExists(t *testing.T) {
 	cfg := AddColumnConfig{Name: "myCol", CaseSensitive: true, IfNotExists: true, DataType: "NUMBER(10,2)", ValueMode: "none", ConstraintKind: "none"}
 	sql, _ := BuildAddColumnSql("DB", "SC", "T", cfg)
 	assertContains(t, sql, `ADD COLUMN IF NOT EXISTS "myCol" NUMBER(10,2)`)
+}
+
+func TestBuildAddColumnSql_Governance(t *testing.T) {
+	cfg := AddColumnConfig{
+		Name: "EMAIL", DataType: "VARCHAR", ValueMode: "none", ConstraintKind: "none",
+		MaskingPolicy: `gov.p."Mask Email"`, MaskingUsing: "EMAIL, region", ProjectionPolicy: "gov.p.proj",
+		Tags: []snowflake.TagPair{{Name: "PII", Value: "it's"}},
+	}
+	sql, err := BuildAddColumnSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, sql, `ALTER TABLE "DB"."SC"."T" ADD COLUMN EMAIL VARCHAR WITH MASKING POLICY gov.p."Mask Email" USING (EMAIL, region) WITH PROJECTION POLICY gov.p.proj WITH TAG ("PII" = 'it''s');`)
+
+	for _, bad := range []AddColumnConfig{
+		{Name: "C", DataType: "INT", MaskingPolicy: "p; DROP TABLE t"},
+		{Name: "C", DataType: "INT", MaskingPolicy: "p", MaskingUsing: "a, b)"},
+		{Name: "C", DataType: "INT", ProjectionPolicy: "a.b.c.d"},
+	} {
+		if _, err := BuildAddColumnSql("DB", "SC", "T", bad); err == nil {
+			t.Errorf("expected an error for %+v", bad)
+		}
+	}
 }
 
 func TestBuildAddColumnSql_PlaceholderName(t *testing.T) {
@@ -110,6 +135,45 @@ func TestBuildAddColumnSql_ForeignKeyWithoutTableDropsClause(t *testing.T) {
 	cfg := AddColumnConfig{Name: "FK", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "foreign_key"}
 	sql, _ := BuildAddColumnSql("DB", "SC", "T", cfg)
 	assertNotContains(t, sql, "REFERENCES")
+}
+
+func TestBuildAddColumnSql_Check(t *testing.T) {
+	cfg := AddColumnConfig{Name: "QTY", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "check", ConstraintName: "chk_qty", CheckExpr: " qty > 0 "}
+	sql, err := BuildAddColumnSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, sql, `ALTER TABLE "DB"."SC"."T" ADD COLUMN QTY NUMBER CONSTRAINT "chk_qty" CHECK (qty > 0);`)
+}
+
+func TestBuildAddColumnSql_CheckRejectsSemicolon(t *testing.T) {
+	cfg := AddColumnConfig{Name: "QTY", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "check", CheckExpr: "qty > 0; DROP TABLE T"}
+	if _, err := BuildAddColumnSql("DB", "SC", "T", cfg); err == nil {
+		t.Error("expected error for semicolon in CHECK expression")
+	}
+}
+
+func TestBuildAddColumnSql_ConstraintProps(t *testing.T) {
+	cfg := AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "primary_key", ConstraintProps: "  not   enforced\trely "}
+	sql, err := BuildAddColumnSql("DB", "SC", "T", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEqual(t, sql, `ALTER TABLE "DB"."SC"."T" ADD COLUMN ID NUMBER PRIMARY KEY NOT ENFORCED RELY;`)
+
+	// Props are dropped when no constraint is emitted.
+	cfg = AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "none", ConstraintProps: "RELY"}
+	sql, _ = BuildAddColumnSql("DB", "SC", "T", cfg)
+	assertNotContains(t, sql, "RELY")
+}
+
+func TestBuildAddColumnSql_ConstraintPropsRejected(t *testing.T) {
+	for _, props := range []string{"RELY; DROP TABLE T", "ENFORCED FOO", "NOT RELY", "INITIALLY"} {
+		cfg := AddColumnConfig{Name: "ID", DataType: "NUMBER", ValueMode: "none", ConstraintKind: "unique", ConstraintProps: props}
+		if _, err := BuildAddColumnSql("DB", "SC", "T", cfg); err == nil {
+			t.Errorf("expected error for constraint properties %q", props)
+		}
+	}
 }
 
 func TestBuildAddColumnSql_CollationEscaped(t *testing.T) {
