@@ -65,7 +65,7 @@ func tableRef(db, schema, table string) string {
 //
 // It returns an error when a typed policy name or USING column is not a valid
 // identifier, when a CHECK expression contains a semicolon, or when the
-// constraint properties are not recognised keywords.
+// constraint properties are not recognized keywords.
 func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, error) {
 	colName := cfg.Name
 	if colName == "" {
@@ -160,7 +160,7 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 			// is emitted verbatim after normalisation).
 			if props := strings.ToUpper(strings.Join(strings.Fields(cfg.ConstraintProps), " ")); props != "" {
 				if !constraintPropsRe.MatchString(" " + props) {
-					return "", fmt.Errorf("unrecognised constraint properties: %s", props)
+					return "", fmt.Errorf("unrecognized constraint properties: %s", props)
 				}
 				parts = append(parts, props)
 			}
