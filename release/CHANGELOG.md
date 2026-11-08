@@ -1,3 +1,23 @@
+# [0.10.0](https://github.com/Technarion-Oy/thaw/compare/v0.9.3...v0.10.0) (2026-11-08)
+
+
+### Bug Fixes
+
+* Constrain MCP execution mode dropdown width ([#1013](https://github.com/Technarion-Oy/thaw/issues/1013)) ([d814b00](https://github.com/Technarion-Oy/thaw/commit/d814b00c1daa4013477b0dfb8cf55cc513d17288)), closes [#1011](https://github.com/Technarion-Oy/thaw/issues/1011)
+* Restore modal drag cursor after antd v6 class rename ([#1023](https://github.com/Technarion-Oy/thaw/issues/1023)) ([64cba4e](https://github.com/Technarion-Oy/thaw/commit/64cba4edd6ec07a1cb904960efe8e9244aab3fc4)), closes [#1022](https://github.com/Technarion-Oy/thaw/issues/1022) [#572](https://github.com/Technarion-Oy/thaw/issues/572)
+* Update module github.com/klauspost/compress to v1.20.2 [SECURITY] ([#1017](https://github.com/Technarion-Oy/thaw/issues/1017)) ([e85b33f](https://github.com/Technarion-Oy/thaw/commit/e85b33fcd1df2bfb6ec763d9d46c8af70aca5fa1))
+* Update module github.com/labstack/echo/v4 to v4.16.3 [SECURITY] ([#1008](https://github.com/Technarion-Oy/thaw/issues/1008)) ([8d1f595](https://github.com/Technarion-Oy/thaw/commit/8d1f5950035fc7050f03a2918733046695ece703))
+* Update module golang.org/x/net to v0.62.0 [SECURITY] ([#1007](https://github.com/Technarion-Oy/thaw/issues/1007)) ([e2c1c4b](https://github.com/Technarion-Oy/thaw/commit/e2c1c4b9a836f6fd1a73b7b97d02be534f676a59))
+
+
+### Features
+
+* Dynamic table refresh history view ([#1010](https://github.com/Technarion-Oy/thaw/issues/1010)) ([8c9ca6a](https://github.com/Technarion-Oy/thaw/commit/8c9ca6ac308c9815e90237fc42998b2e8a6de120)), closes [#1005](https://github.com/Technarion-Oy/thaw/issues/1005)
+* Expose the full ALTER DYNAMIC TABLE surface in the sidebar ([#1014](https://github.com/Technarion-Oy/thaw/issues/1014)) ([398bc33](https://github.com/Technarion-Oy/thaw/commit/398bc33e72d20311fb15dc255169acf7d71bfeb5)), closes [#1012](https://github.com/Technarion-Oy/thaw/issues/1012)
+* Expose the full ALTER TABLE surface in the sidebar ([#1016](https://github.com/Technarion-Oy/thaw/issues/1016)) ([8e76da5](https://github.com/Technarion-Oy/thaw/commit/8e76da500e56a326bfc96308f5b39d9af5c2eb32)), closes [#1015](https://github.com/Technarion-Oy/thaw/issues/1015) [#1014](https://github.com/Technarion-Oy/thaw/issues/1014)
+* Field tooltips for cloud-specific integration fields ([#1020](https://github.com/Technarion-Oy/thaw/issues/1020)) ([a879b0f](https://github.com/Technarion-Oy/thaw/commit/a879b0f58829bcf81b90ca7ca2767095d7647fa0)), closes [#1018](https://github.com/Technarion-Oy/thaw/issues/1018)
+* MCP tools to inspect and fill the open create dialog ([#1019](https://github.com/Technarion-Oy/thaw/issues/1019)) ([#1021](https://github.com/Technarion-Oy/thaw/issues/1021)) ([d101479](https://github.com/Technarion-Oy/thaw/commit/d10147984ccc1fa632d79f906a5efb26a541fbeb))
+
 ## [0.9.3](https://github.com/Technarion-Oy/thaw/compare/v0.9.2...v0.9.3) (2026-10-25)
 
 
