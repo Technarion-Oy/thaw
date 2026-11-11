@@ -9358,8 +9358,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@vscode/l10n` | 0.0.18 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
-| `@xyflow/react` | 12.12.0 | MIT |
-| `@xyflow/system` | 0.0.83 | MIT |
+| `@xyflow/react` | 12.12.1 | MIT |
+| `@xyflow/system` | 0.0.84 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
 | `antd` | 6.6.7 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
@@ -11769,7 +11769,7 @@ THE SOFTWARE.
 
 ### @xyflow/react
 
-- **Version:** 12.12.0
+- **Version:** 12.12.1
 - **License:** MIT
 
 ```
@@ -11798,7 +11798,7 @@ SOFTWARE.
 
 ### @xyflow/system
 
-- **Version:** 0.0.83
+- **Version:** 0.0.84
 - **License:** MIT
 
 ```
