@@ -41,7 +41,7 @@ jobs:
       # Python 3.12 is used to match the dbt-snowflake supported range.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.14.7"
+          python-version: "3.15.2"
 
       # Install the dbt Snowflake adapter.  dbt-core is pulled in as a
       # transitive dependency.  Pin to the 1.x generation which supports
