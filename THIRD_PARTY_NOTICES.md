@@ -64,7 +64,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT |
 | `github.com/dvsekhvalnov/jose2go` | v1.7.0 | MIT |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
-| `github.com/gabriel-vasile/mimetype` | v1.4.7 | MIT |
+| `github.com/gabriel-vasile/mimetype` | v1.4.16 | MIT |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
 | `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
 | `github.com/go-git/go-git/v5` | v5.19.3 | Apache-2.0 |
@@ -105,7 +105,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/snowflakedb/gosnowflake/v2` | v2.3.0 | Apache-2.0 |
 | `github.com/valyala/fastjson` | v1.6.10 | MIT |
 | `github.com/wailsapp/go-webview2` | v1.0.22 | MIT |
-| `github.com/wailsapp/wails/v2` | v2.16.0 | MIT |
+| `github.com/wailsapp/wails/v2` | v2.17.1 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
@@ -4892,7 +4892,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ### github.com/gabriel-vasile/mimetype
 
-- **Version:** v1.4.7
+- **Version:** v1.4.16
 - **License:** MIT
 
 ```
@@ -7872,7 +7872,7 @@ SOFTWARE.
 
 ### github.com/wailsapp/wails/v2
 
-- **Version:** v2.16.0
+- **Version:** v2.17.1
 - **License:** MIT
 
 ```
@@ -9359,8 +9359,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@vscode/l10n` | 0.0.18 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
-| `@xyflow/react` | 12.12.1 | MIT |
-| `@xyflow/system` | 0.0.84 | MIT |
+| `@xyflow/react` | 13.0.2 | MIT |
+| `@xyflow/system` | 1.0.0 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
 | `antd` | 6.7.1 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
@@ -9418,6 +9418,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `railroad-diagrams` | 1.0.0 | CC0-1.0 |
 | `randexp` | 0.4.6 | MIT |
 | `react` | 19.3.1 | MIT |
+| `react-compiler-runtime` | 1.0.0 | MIT |
 | `react-dom` | 19.3.1 | MIT |
 | `react-is` | 19.3.0 | MIT |
 | `react-redux` | 9.2.0 | MIT |
@@ -9446,7 +9447,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `word` | 0.3.0 | Apache-2.0 |
 | `xlsx` | 0.18.5 | Apache-2.0 |
 | `yaml` | 2.9.1 | ISC |
-| `zustand` | 4.5.7 | MIT |
 | `zustand` | 5.1.0 | MIT |
 
 ### @ant-design/colors
@@ -11860,7 +11860,7 @@ THE SOFTWARE.
 
 ### @xyflow/react
 
-- **Version:** 12.12.1
+- **Version:** 13.0.2
 - **License:** MIT
 
 ```
@@ -11889,7 +11889,7 @@ SOFTWARE.
 
 ### @xyflow/system
 
-- **Version:** 0.0.84
+- **Version:** 1.0.0
 - **License:** MIT
 
 ```
@@ -15058,6 +15058,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### react-compiler-runtime
+
+- **Version:** 1.0.0
+- **License:** MIT
+
+_No license file was found in the distributed package. Refer to the project's repository for its license terms._
+
 ### react-dom
 
 - **Version:** 19.3.1
@@ -16529,35 +16536,6 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
 OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
-```
-
-### zustand
-
-- **Version:** 4.5.7
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2019 Paul Henschel
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ```
 
 ### zustand
