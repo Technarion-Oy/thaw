@@ -23,7 +23,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 ## Contents
 
 - [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (177)
+- [Frontend — npm packages](#frontend--npm-packages) (178)
 
 ## Backend — Go modules
 
@@ -9279,6 +9279,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@ant-design/react-slick` | 2.0.0 | MIT |
 | `@babel/runtime` | 7.29.7 | MIT |
 | `@babel/runtime` | 8.0.5 | MIT |
+| `@babel/runtime` | 8.1.2 | MIT |
 | `@dagrejs/dagre` | 3.1.3 | MIT |
 | `@dagrejs/graphlib` | 4.0.6 | MIT |
 | `@emotion/hash` | 0.8.0 | MIT |
@@ -9286,47 +9287,47 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@monaco-editor/loader` | 1.7.0 | MIT |
 | `@monaco-editor/react` | 4.7.0 | MIT |
 | `@rc-component/async-validator` | 6.0.0 | MIT |
-| `@rc-component/cascader` | 1.22.0 | MIT |
+| `@rc-component/cascader` | 1.26.0 | MIT |
 | `@rc-component/checkbox` | 2.0.0 | MIT |
-| `@rc-component/collapse` | 1.2.0 | MIT |
+| `@rc-component/collapse` | 1.3.0 | MIT |
 | `@rc-component/color-picker` | 3.1.1 | MIT |
 | `@rc-component/context` | 2.0.2 | MIT |
 | `@rc-component/dialog` | 1.10.0 | MIT |
 | `@rc-component/drawer` | 1.4.2 | MIT |
-| `@rc-component/dropdown` | 1.0.3 | MIT |
+| `@rc-component/dropdown` | 2.0.1 | MIT |
 | `@rc-component/form` | 1.8.6 | MIT |
 | `@rc-component/image` | 1.10.0 | MIT |
-| `@rc-component/input` | 1.3.1 | MIT |
-| `@rc-component/input-number` | 1.6.2 | MIT |
-| `@rc-component/listy` | 1.2.3 | MIT |
-| `@rc-component/mentions` | 1.12.0 | MIT |
-| `@rc-component/menu` | 1.5.0 | MIT |
-| `@rc-component/mini-decimal` | 1.1.0 | MIT |
-| `@rc-component/motion` | 1.3.3 | MIT |
+| `@rc-component/input` | 1.4.1 | MIT |
+| `@rc-component/input-number` | 1.8.0 | MIT |
+| `@rc-component/listy` | 1.4.0 | MIT |
+| `@rc-component/mentions` | 1.14.1 | MIT |
+| `@rc-component/menu` | 1.6.2 | MIT |
+| `@rc-component/mini-decimal` | 1.1.4 | MIT |
+| `@rc-component/motion` | 1.4.0 | MIT |
 | `@rc-component/mutate-observer` | 2.0.1 | MIT |
 | `@rc-component/notification` | 2.1.1 | MIT |
 | `@rc-component/overflow` | 1.0.1 | MIT |
-| `@rc-component/pagination` | 1.4.0 | MIT |
-| `@rc-component/picker` | 1.12.2 | MIT |
+| `@rc-component/pagination` | 1.7.0 | MIT |
+| `@rc-component/picker` | 1.17.0 | MIT |
 | `@rc-component/portal` | 2.2.1 | MIT |
-| `@rc-component/progress` | 1.0.3 | MIT |
+| `@rc-component/progress` | 1.1.0 | MIT |
 | `@rc-component/qrcode` | 2.0.0 | MIT |
 | `@rc-component/rate` | 1.0.1 | MIT |
 | `@rc-component/resize-observer` | 1.1.2 | MIT |
 | `@rc-component/segmented` | 1.4.0 | MIT |
-| `@rc-component/select` | 1.10.1 | MIT |
-| `@rc-component/slider` | 1.1.1 | MIT |
+| `@rc-component/select` | 1.12.0 | MIT |
+| `@rc-component/slider` | 1.2.1 | MIT |
 | `@rc-component/steps` | 1.2.3 | MIT |
 | `@rc-component/switch` | 1.0.3 | MIT |
-| `@rc-component/table` | 1.11.1 | MIT |
-| `@rc-component/tabs` | 1.13.0 | MIT |
+| `@rc-component/table` | 1.12.0 | MIT |
+| `@rc-component/tabs` | 2.0.0 | MIT |
 | `@rc-component/tooltip` | 1.5.2 | MIT |
 | `@rc-component/tour` | 2.4.0 | MIT |
-| `@rc-component/tree` | 1.4.0 | MIT |
-| `@rc-component/tree-select` | 1.16.1 | MIT |
+| `@rc-component/tree` | 1.5.3 | MIT |
+| `@rc-component/tree-select` | 1.19.0 | MIT |
 | `@rc-component/trigger` | 3.10.1 | MIT |
 | `@rc-component/upload` | 1.1.1 | MIT |
-| `@rc-component/util` | 1.14.0 | MIT |
+| `@rc-component/util` | 1.14.1 | MIT |
 | `@rc-component/virtual-list` | 1.5.2 | MIT |
 | `@reduxjs/toolkit` | 2.11.2 | MIT |
 | `@standard-schema/spec` | 1.1.0 | MIT |
@@ -9361,7 +9362,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@xyflow/react` | 12.12.1 | MIT |
 | `@xyflow/system` | 0.0.84 | MIT |
 | `adler-32` | 1.3.1 | Apache-2.0 |
-| `antd` | 6.6.7 | MIT |
+| `antd` | 6.7.1 | MIT |
 | `argparse` | 2.0.1 | Python-2.0 |
 | `big-integer` | 1.6.52 | Unlicense |
 | `cfb` | 1.2.2 | Apache-2.0 |
@@ -9369,7 +9370,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `clsx` | 2.1.1 | MIT |
 | `codepage` | 1.15.0 | Apache-2.0 |
 | `commander` | 2.20.3 | MIT |
-| `compute-scroll-into-view` | 3.1.1 | MIT |
+| `compute-scroll-into-view` | 3.2.2 | MIT |
 | `crc-32` | 1.2.2 | Apache-2.0 |
 | `csstype` | 3.2.3 | MIT |
 | `d3-array` | 3.2.4 | ISC |
@@ -9426,7 +9427,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `reselect` | 5.2.0 | MIT |
 | `ret` | 0.1.15 | MIT |
 | `scheduler` | 0.28.0 | MIT |
-| `scroll-into-view-if-needed` | 3.1.0 | MIT |
+| `scroll-into-view-if-needed` | 3.2.1 | MIT |
 | `sql-formatter` | 15.9.0 | MIT |
 | `ssf` | 0.11.2 | Apache-2.0 |
 | `state-local` | 1.0.7 | MIT |
@@ -9677,6 +9678,36 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+### @babel/runtime
+
+- **Version:** 8.1.2
+- **License:** MIT
+
+```
+MIT License
+
+Copyright (c) 2014-present Sebastian McKenzie and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ### @dagrejs/dagre
 
 - **Version:** 3.1.3
@@ -9866,7 +9897,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### @rc-component/cascader
 
-- **Version:** 1.22.0
+- **Version:** 1.26.0
 - **License:** MIT
 
 ```
@@ -9910,19 +9941,31 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### @rc-component/collapse
 
-- **Version:** 1.2.0
+- **Version:** 1.3.0
 - **License:** MIT
 
 ```
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2014-present yiminghe
+Copyright (c) 2019-present react-component
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### @rc-component/color-picker
@@ -10008,7 +10051,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### @rc-component/dropdown
 
-- **Version:** 1.0.3
+- **Version:** 2.0.1
 - **License:** MIT
 
 ```
@@ -10094,41 +10137,65 @@ SOFTWARE.
 
 ### @rc-component/input
 
-- **Version:** 1.3.1
+- **Version:** 1.4.1
 - **License:** MIT
 
 ```
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2019-present afc163
+Copyright (c) 2019-present react-component
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### @rc-component/input-number
 
-- **Version:** 1.6.2
+- **Version:** 1.8.0
 - **License:** MIT
 
 ```
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2014-present yiminghe
+Copyright (c) 2019-present react-component
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### @rc-component/listy
 
-- **Version:** 1.2.3
+- **Version:** 1.4.0
 - **License:** MIT
 
 ```
@@ -10156,7 +10223,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### @rc-component/mentions
 
-- **Version:** 1.12.0
+- **Version:** 1.14.1
 - **License:** MIT
 
 ```
@@ -10185,7 +10252,7 @@ SOFTWARE.
 
 ### @rc-component/menu
 
-- **Version:** 1.5.0
+- **Version:** 1.6.2
 - **License:** MIT
 
 ```
@@ -10214,7 +10281,7 @@ SOFTWARE.
 
 ### @rc-component/mini-decimal
 
-- **Version:** 1.1.0
+- **Version:** 1.1.4
 - **License:** MIT
 
 ```
@@ -10243,19 +10310,31 @@ SOFTWARE.
 
 ### @rc-component/motion
 
-- **Version:** 1.3.3
+- **Version:** 1.4.0
 - **License:** MIT
 
 ```
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2019-present afc163
+Copyright (c) 2019-present react-component
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### @rc-component/mutate-observer
@@ -10335,24 +10414,36 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### @rc-component/pagination
 
-- **Version:** 1.4.0
+- **Version:** 1.7.0
 - **License:** MIT
 
 ```
-The MIT License (MIT)
+MIT License
 
-Copyright (c) 2014-present yiminghe
+Copyright (c) 2019-present react-component
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### @rc-component/picker
 
-- **Version:** 1.12.2
+- **Version:** 1.17.0
 - **License:** MIT
 
 ```
@@ -10410,7 +10501,7 @@ SOFTWARE.
 
 ### @rc-component/progress
 
-- **Version:** 1.0.3
+- **Version:** 1.1.0
 - **License:** MIT
 
 ```
@@ -10530,7 +10621,7 @@ SOFTWARE.
 
 ### @rc-component/select
 
-- **Version:** 1.10.1
+- **Version:** 1.12.0
 - **License:** MIT
 
 ```
@@ -10559,7 +10650,7 @@ SOFTWARE.
 
 ### @rc-component/slider
 
-- **Version:** 1.1.1
+- **Version:** 1.2.1
 - **License:** MIT
 
 ```
@@ -10633,7 +10724,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### @rc-component/table
 
-- **Version:** 1.11.1
+- **Version:** 1.12.0
 - **License:** MIT
 
 ```
@@ -10662,7 +10753,7 @@ SOFTWARE.
 
 ### @rc-component/tabs
 
-- **Version:** 1.13.0
+- **Version:** 2.0.0
 - **License:** MIT
 
 ```
@@ -10749,7 +10840,7 @@ SOFTWARE.
 
 ### @rc-component/tree
 
-- **Version:** 1.4.0
+- **Version:** 1.5.3
 - **License:** MIT
 
 ```
@@ -10778,7 +10869,7 @@ SOFTWARE.
 
 ### @rc-component/tree-select
 
-- **Version:** 1.16.1
+- **Version:** 1.19.0
 - **License:** MIT
 
 ```
@@ -10864,7 +10955,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### @rc-component/util
 
-- **Version:** 1.14.0
+- **Version:** 1.14.1
 - **License:** MIT
 
 ```
@@ -12036,7 +12127,7 @@ SOFTWARE.
 
 ### antd
 
-- **Version:** 6.6.7
+- **Version:** 6.7.1
 - **License:** MIT
 
 ```
@@ -12840,7 +12931,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### compute-scroll-into-view
 
-- **Version:** 3.1.1
+- **Version:** 3.2.2
 - **License:** MIT
 
 ```
@@ -15228,7 +15319,7 @@ SOFTWARE.
 
 ### scroll-into-view-if-needed
 
-- **Version:** 3.1.0
+- **Version:** 3.2.1
 - **License:** MIT
 
 ```
