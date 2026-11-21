@@ -64,7 +64,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT |
 | `github.com/dvsekhvalnov/jose2go` | v1.7.0 | MIT |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
-| `github.com/gabriel-vasile/mimetype` | v1.4.7 | MIT |
+| `github.com/gabriel-vasile/mimetype` | v1.4.16 | MIT |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
 | `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
 | `github.com/go-git/go-git/v5` | v5.19.3 | Apache-2.0 |
@@ -102,10 +102,10 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/segmentio/encoding` | v0.5.4 | MIT |
 | `github.com/sergi/go-diff` | v1.3.2-0.20230802210424-5b0b94c5c0d3 | MIT |
 | `github.com/skeema/knownhosts` | v1.3.1 | Apache-2.0 |
-| `github.com/snowflakedb/gosnowflake/v2` | v2.3.0 | Apache-2.0 |
+| `github.com/snowflakedb/gosnowflake/v2` | v2.4.0 | Apache-2.0 |
 | `github.com/valyala/fastjson` | v1.6.10 | MIT |
 | `github.com/wailsapp/go-webview2` | v1.0.22 | MIT |
-| `github.com/wailsapp/wails/v2` | v2.16.0 | MIT |
+| `github.com/wailsapp/wails/v2` | v2.17.1 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
@@ -4892,7 +4892,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ### github.com/gabriel-vasile/mimetype
 
-- **Version:** v1.4.7
+- **Version:** v1.4.16
 - **License:** MIT
 
 ```
@@ -7604,7 +7604,7 @@ limitations under the License.
 
 ### github.com/snowflakedb/gosnowflake/v2
 
-- **Version:** v2.3.0
+- **Version:** v2.4.0
 - **License:** Apache-2.0
 
 ```
@@ -7872,7 +7872,7 @@ SOFTWARE.
 
 ### github.com/wailsapp/wails/v2
 
-- **Version:** v2.16.0
+- **Version:** v2.17.1
 - **License:** MIT
 
 ```
