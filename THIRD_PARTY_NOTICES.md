@@ -9420,7 +9420,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `react-dom` | 19.3.1 | MIT |
 | `react-is` | 19.3.0 | MIT |
 | `react-redux` | 9.2.0 | MIT |
-| `recharts` | 3.10.1 | MIT |
+| `recharts` | 3.11.0 | MIT |
 | `redux` | 5.0.1 | MIT |
 | `redux-thunk` | 3.1.0 | MIT |
 | `reselect` | 5.2.0 | MIT |
@@ -15056,7 +15056,7 @@ SOFTWARE.
 
 ### recharts
 
-- **Version:** 3.10.1
+- **Version:** 3.11.0
 - **License:** MIT
 
 ```
