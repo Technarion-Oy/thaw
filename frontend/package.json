@@ -20,7 +20,7 @@
     "@tanstack/react-virtual": "^3.13.24",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "@xyflow/react": "^12.10.1",
+    "@xyflow/react": "^13.0.0",
     "antd": "^6.0.0",
     "leaflet": "^1.9.4",
     "monaco-yaml": "^5.4.1",
