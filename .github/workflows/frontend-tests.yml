@@ -44,10 +44,12 @@ jobs:
 
     steps:
       # git is required by actions/checkout; curl/wget for the node setup action.
+      # libatomic1: the official Node >= 26 binaries link libatomic.so.1, which
+      # the bare ubuntu image does not ship.
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget
+          apt-get install -y git curl wget libatomic1
         working-directory: /
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
