@@ -102,7 +102,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/segmentio/encoding` | v0.5.4 | MIT |
 | `github.com/sergi/go-diff` | v1.3.2-0.20230802210424-5b0b94c5c0d3 | MIT |
 | `github.com/skeema/knownhosts` | v1.3.1 | Apache-2.0 |
-| `github.com/snowflakedb/gosnowflake/v2` | v2.3.0 | Apache-2.0 |
+| `github.com/snowflakedb/gosnowflake/v2` | v2.4.0 | Apache-2.0 |
 | `github.com/valyala/fastjson` | v1.6.10 | MIT |
 | `github.com/wailsapp/go-webview2` | v1.0.22 | MIT |
 | `github.com/wailsapp/wails/v2` | v2.17.1 | MIT |
@@ -7604,7 +7604,7 @@ limitations under the License.
 
 ### github.com/snowflakedb/gosnowflake/v2
 
-- **Version:** v2.3.0
+- **Version:** v2.4.0
 - **License:** Apache-2.0
 
 ```
