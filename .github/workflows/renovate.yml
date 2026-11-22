@@ -108,7 +108,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget jq ca-certificates
+          apt-get install -y git curl wget jq ca-certificates libatomic1
 
       - name: Generate Bot Token
         id: generate-token
@@ -160,7 +160,7 @@ jobs:
       # setup-go, whose `cache: false` above is valid).
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "26"
 
       # Node 24 bundles npm 11, but every build job here runs Node 20 / npm 10,
       # and the two majors resolve nested dependencies differently: for
@@ -246,7 +246,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget jq ca-certificates
+          apt-get install -y git curl wget jq ca-certificates libatomic1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -254,7 +254,7 @@ jobs:
       # requires Node >= 24.11.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "26"
 
       # --strict also fails on deprecated/migratable options, so config drift
       # surfaces here instead of as a silent migration PR later. Keep the
