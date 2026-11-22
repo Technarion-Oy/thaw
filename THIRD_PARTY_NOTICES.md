@@ -9345,12 +9345,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@types/d3-interpolate` | 3.0.4 | MIT |
 | `@types/d3-path` | 3.1.1 | MIT |
 | `@types/d3-scale` | 4.0.9 | MIT |
-| `@types/d3-selection` | 3.0.11 | MIT |
+| `@types/d3-selection` | 3.0.12 | MIT |
 | `@types/d3-shape` | 3.1.8 | MIT |
 | `@types/d3-time` | 3.0.4 | MIT |
 | `@types/d3-timer` | 3.0.2 | MIT |
 | `@types/d3-transition` | 3.0.9 | MIT |
-| `@types/d3-zoom` | 3.0.8 | MIT |
+| `@types/d3-zoom` | 3.0.9 | MIT |
 | `@types/pegjs` | 0.10.6 | MIT |
 | `@types/react` | 19.3.0 | MIT |
 | `@types/react-dom` | 19.3.0 | MIT |
@@ -9375,20 +9375,20 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `csstype` | 3.2.3 | MIT |
 | `d3-array` | 3.2.4 | ISC |
 | `d3-color` | 3.1.0 | ISC |
-| `d3-dispatch` | 3.0.1 | ISC |
-| `d3-drag` | 3.0.0 | ISC |
+| `d3-dispatch` | 3.0.2 | ISC |
+| `d3-drag` | 3.0.1 | ISC |
 | `d3-ease` | 3.0.1 | BSD-3-Clause |
 | `d3-format` | 3.1.2 | ISC |
 | `d3-interpolate` | 3.0.1 | ISC |
 | `d3-path` | 3.1.0 | ISC |
 | `d3-scale` | 4.0.2 | ISC |
-| `d3-selection` | 3.0.0 | ISC |
+| `d3-selection` | 3.0.1 | ISC |
 | `d3-shape` | 3.2.0 | ISC |
 | `d3-time` | 3.1.0 | ISC |
 | `d3-time-format` | 4.1.0 | ISC |
 | `d3-timer` | 3.0.1 | ISC |
-| `d3-transition` | 3.0.1 | ISC |
-| `d3-zoom` | 3.0.0 | ISC |
+| `d3-transition` | 3.0.2 | ISC |
+| `d3-zoom` | 3.0.1 | ISC |
 | `dayjs` | 1.11.19 | MIT |
 | `decimal.js-light` | 2.5.1 | MIT |
 | `discontinuous-range` | 1.0.0 | MIT |
@@ -11478,7 +11478,7 @@ SOFTWARE.
 
 ### @types/d3-selection
 
-- **Version:** 3.0.11
+- **Version:** 3.0.12
 - **License:** MIT
 
 ```
@@ -11623,7 +11623,7 @@ SOFTWARE.
 
 ### @types/d3-zoom
 
-- **Version:** 3.0.8
+- **Version:** 3.0.9
 - **License:** MIT
 
 ```
@@ -13238,11 +13238,11 @@ THIS SOFTWARE.
 
 ### d3-dispatch
 
-- **Version:** 3.0.1
+- **Version:** 3.0.2
 - **License:** ISC
 
 ```
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -13259,11 +13259,11 @@ THIS SOFTWARE.
 
 ### d3-drag
 
-- **Version:** 3.0.0
+- **Version:** 3.0.1
 - **License:** ISC
 
 ```
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -13400,11 +13400,11 @@ THIS SOFTWARE.
 
 ### d3-selection
 
-- **Version:** 3.0.0
+- **Version:** 3.0.1
 - **License:** ISC
 
 ```
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -13505,11 +13505,11 @@ THIS SOFTWARE.
 
 ### d3-transition
 
-- **Version:** 3.0.1
+- **Version:** 3.0.2
 - **License:** ISC
 
 ```
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -13526,11 +13526,11 @@ THIS SOFTWARE.
 
 ### d3-zoom
 
-- **Version:** 3.0.0
+- **Version:** 3.0.1
 - **License:** ISC
 
 ```
-Copyright 2010-2021 Mike Bostock
+Copyright 2010-2026 Mike Bostock
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
