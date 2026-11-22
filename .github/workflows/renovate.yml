@@ -108,7 +108,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget jq ca-certificates
+          apt-get install -y git curl wget jq ca-certificates libatomic1
 
       - name: Generate Bot Token
         id: generate-token
@@ -246,7 +246,7 @@ jobs:
       - name: Install base tools
         run: |
           apt-get update
-          apt-get install -y git curl wget jq ca-certificates
+          apt-get install -y git curl wget jq ca-certificates libatomic1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
