@@ -61,7 +61,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/creack/pty` | v1.1.24 | MIT |
 | `github.com/cyphar/filepath-securejoin` | v0.6.1 | BSD-3-Clause |
 | `github.com/danieljoos/wincred` | v1.2.3 | MIT |
-| `github.com/dustin/go-humanize` | v1.0.1 | MIT |
+| `github.com/dustin/go-humanize` | v1.1.0 | MIT |
 | `github.com/dvsekhvalnov/jose2go` | v1.7.0 | MIT |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
 | `github.com/gabriel-vasile/mimetype` | v1.4.16 | MIT |
@@ -89,7 +89,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/Microsoft/go-winio` | v0.6.2 | MIT |
 | `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | Apache-2.0 |
 | `github.com/mtibben/percent` | v0.2.1 | MIT |
-| `github.com/ncruces/go-strftime` | v1.0.0 | MIT |
+| `github.com/ncruces/go-strftime` | v1.1.0 | MIT |
 | `github.com/pierrec/lz4/v4` | v4.1.22 | BSD-3-Clause |
 | `github.com/pjbgf/sha1cd` | v0.7.0 | Apache-2.0 |
 | `github.com/pkg/browser` | v0.0.0-20240102092130-5ac0b6a4141c | BSD-2-Clause |
@@ -114,7 +114,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `go.opentelemetry.io/otel/trace` | v1.47.0 | Apache-2.0 |
 | `golang.org/x/crypto` | v0.59.0 | BSD-3-Clause |
 | `golang.org/x/exp` | v0.0.0-20260410095643-746e56fc9e2f | BSD-3-Clause |
-| `golang.org/x/mod` | v0.42.0 | BSD-3-Clause |
+| `golang.org/x/mod` | v0.43.0 | BSD-3-Clause |
 | `golang.org/x/net` | v0.62.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.35.0 | BSD-3-Clause |
 | `golang.org/x/sync` | v0.25.0 | BSD-3-Clause |
@@ -125,10 +125,10 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `golang.org/x/xerrors` | v0.0.0-20240903120638-7835f813f4da | BSD-3-Clause |
 | `gopkg.in/lumberjack.v2` | v2.0.0 | MIT |
 | `gopkg.in/warnings.v0` | v0.1.2 | BSD-2-Clause |
-| `modernc.org/libc` | v1.77.1 | BSD-3-Clause |
+| `modernc.org/libc` | v1.80.1 | BSD-3-Clause |
 | `modernc.org/mathutil` | v1.7.1 | BSD-3-Clause |
 | `modernc.org/memory` | v1.12.1 | BSD-3-Clause |
-| `modernc.org/sqlite` | v1.60.1 | BSD-3-Clause |
+| `modernc.org/sqlite` | v1.62.0 | BSD-3-Clause |
 
 ### dario.cat/mergo
 
@@ -4785,7 +4785,7 @@ SOFTWARE.
 
 ### github.com/dustin/go-humanize
 
-- **Version:** v1.0.1
+- **Version:** v1.1.0
 - **License:** MIT
 
 ```
@@ -6829,7 +6829,7 @@ SOFTWARE.
 
 ### github.com/ncruces/go-strftime
 
-- **Version:** v1.0.0
+- **Version:** v1.1.0
 - **License:** MIT
 
 ```
@@ -8753,7 +8753,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### golang.org/x/mod
 
-- **Version:** v0.42.0
+- **Version:** v0.43.0
 - **License:** BSD-3-Clause
 
 ```
@@ -9129,7 +9129,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### modernc.org/libc
 
-- **Version:** v1.77.1
+- **Version:** v1.80.1
 - **License:** BSD-3-Clause
 
 ```
@@ -9234,7 +9234,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### modernc.org/sqlite
 
-- **Version:** v1.60.1
+- **Version:** v1.62.0
 - **License:** BSD-3-Clause
 
 ```
