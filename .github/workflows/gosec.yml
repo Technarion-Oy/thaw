@@ -61,14 +61,16 @@ jobs:
       # go install X@version ignores the current module's go.mod, so gosec's own
       # pinned golang.org/x/tools@v0.25.0 gets pulled in and fails to compile under
       # Go 1.26.2. Build from a temp module instead, where we can promote x/tools
-      # to the version already used by this project (v0.42.0).
+      # to the version already used by this project (v0.52.0). Keep it current
+      # with the toolchain: x/tools v0.42.0 could not read Go 1.27 export data
+      # and gosec died with `package "fmt" without types was imported`.
       - name: Install gosec
         run: |
           tmpdir=$(mktemp -d)
           cd "$tmpdir"
           go mod init _gosec
           go get github.com/securego/gosec/v2/cmd/gosec@v2.21.4
-          go get golang.org/x/tools@v0.42.0
+          go get golang.org/x/tools@v0.52.0
           go install github.com/securego/gosec/v2/cmd/gosec
 
       # Excluded rules are all false positives for a native desktop application:
