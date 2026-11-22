@@ -217,11 +217,13 @@ export default defineConfig({
     // shipped binary even after garble has obfuscated the Go layer.
     sourcemap: false,
 
-    // Switch to Terser for aggressive, multi-pass minification.  esbuild (the
+    // Switch to Terser for aggressive, multi-pass minification.  Oxc (the
     // Vite default) is faster but does not support multiple compression passes
     // or fine-grained compress/mangle control.  The fast CI build-check falls
-    // back to esbuild — it only needs to confirm the bundle builds, not ship it.
-    minify: fastBuild ? "esbuild" : "terser",
+    // back to Oxc — it only needs to confirm the bundle builds, not ship it.
+    // (Not "esbuild": Vite 8 no longer bundles it, and npm 11 does not install
+    // the optional peer, so the build fails with "Cannot find package 'esbuild'".)
+    minify: fastBuild ? "oxc" : "terser",
     terserOptions: {
       compress: {
         // Strip all console calls and debugger statements so no internal
