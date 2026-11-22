@@ -4,9 +4,11 @@
   "timezone": "Europe/Helsinki",
   "schedule": ["on monday"],
   "configMigration": true,
-  "dependencyDashboard": true,
-  "dependencyDashboardTitle": "Dependency Dashboard",
-  "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "Dependency Dashboard",
+    "osvVulnerabilitySummary": "unresolved"
+  },
   "osvVulnerabilityAlerts": true,
   "labels": ["dependencies"],
   "prConcurrentLimit": 4,
