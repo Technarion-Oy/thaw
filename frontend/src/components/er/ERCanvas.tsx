@@ -15,7 +15,7 @@ import {
   type Node,
   type Edge,
   type OnConnect,
-  type NodeChange,
+  type OnNodesChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button, Menu } from "antd";
@@ -563,14 +563,15 @@ function ERCanvasInner({
   );
 
   // Track position changes and persist
-  const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => {
+  const handleNodesChange = useCallback<OnNodesChange>(
+    (changes) => {
       onNodesChange(changes);
 
-      // Check if any position changes occurred (only completed drags, not in-progress)
-      const hasPositionChange = changes.some(
-        (c) => c.type === "position" && c.dragging === false,
-      );
+      // Check if any position changes occurred (only completed drags, not in-progress).
+      // @xyflow/react v13 passes a NodeChangeset, not an array.
+      const hasPositionChange = changes
+        .getByType("position")
+        .some((c) => c.dragging === false);
       if (!hasPositionChange) return;
 
       // Merge with existing saved positions so filtered-out schemas are preserved.
