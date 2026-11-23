@@ -222,6 +222,16 @@
     },
     {
       "description": [
+        "Python only runs dbt in dbt-integration-test.yml, and dbt-snowflake declares support up to 3.13.",
+        "On 3.15 dbt crashes at import (mashumaro UnserializableField), so cap it; raise the cap when",
+        "dbt-snowflake's PyPI classifiers list a newer Python."
+      ],
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["python"],
+      "allowedVersions": "<3.14"
+    },
+    {
+      "description": [
         "renovate.yml pins Node 22 for the bot's own runtime (Renovate 41+ requires it), which is",
         "unrelated to the Node the app builds with — move it into the Renovate group rather than the",
         "CI-toolchain one, so the bot's version and the runtime it needs travel in the same PR.",
