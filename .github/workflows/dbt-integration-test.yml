@@ -38,10 +38,12 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      # Python 3.12 is used to match the dbt-snowflake supported range.
+      # Python 3.13 is the newest version dbt-snowflake declares support for.
+      # Renovate is capped below 3.14 (.github/renovate.json) — raise the cap
+      # there once dbt-snowflake lists a newer Python.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: "3.15.2"
+          python-version: "3.13.18"
 
       # Install the dbt Snowflake adapter.  dbt-core is pulled in as a
       # transitive dependency.  Pin to the 1.x generation which supports
