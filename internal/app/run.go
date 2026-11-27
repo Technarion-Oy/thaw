@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"embed"
+	"net/http"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -42,7 +43,8 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 		Width:  winW,
 		Height: winH,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:     assets,
+			Middleware: limitAssetConcurrency(32),
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 18, B: 18, A: 1},
 		OnStartup:        app.startup,
@@ -73,4 +75,21 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 			TitleBar: mac.TitleBarHiddenInset(),
 		},
 	})
+}
+
+// limitAssetConcurrency caps in-flight asset requests. Under `wails dev` the
+// WKWebView requests the whole unbundled module graph (300+ files) at once and
+// Wails proxies each over its own TCP connection to Vite; that burst overflows
+// Vite's listen backlog (kern.ipc.somaxconn = 128 on macOS), connections are
+// reset, module imports fail, and the window stays blank white. Harmless for
+// production builds, where assets are served from the embedded FS.
+func limitAssetConcurrency(n int) assetserver.Middleware {
+	sem := make(chan struct{}, n)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			next.ServeHTTP(w, r)
+		})
+	}
 }
