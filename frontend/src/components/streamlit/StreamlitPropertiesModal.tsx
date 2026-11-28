@@ -10,7 +10,7 @@ import {
   AppstoreOutlined, EditOutlined, CheckOutlined, CloseOutlined, CopyOutlined, LinkOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, BrowserOpenURL } from "../../utils/wailsRuntime";
 import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";

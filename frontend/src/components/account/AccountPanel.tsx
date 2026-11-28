@@ -28,7 +28,7 @@ import {
   ExportAccountObjectsDDL,
   GetObjectProperties,
 } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useConnectionStore } from "../../store/connectionStore";

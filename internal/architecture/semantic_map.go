@@ -37,6 +37,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
         "frontend/src/store/logPrefsStore.ts",
+        "frontend/src/utils/wailsRuntime.ts",
         "frontend/wailsjs/"
       ],
       "description": "Wails entry points, window state persistence, and Zustand state management."

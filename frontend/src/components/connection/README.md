@@ -27,7 +27,7 @@ Handles the full connection flow: displaying the connect form, loading and manag
 
 ## Gotchas
 
-- `navigator.clipboard` is blocked in WKWebView; any clipboard needs in this folder must use `ClipboardSetText` from `wailsjs/runtime/runtime`. Currently `ConnectModal` has no clipboard operations, but child modals that display generated keys should use the native API.
+- `navigator.clipboard` is blocked in WKWebView; any clipboard needs in this folder must use `ClipboardSetText` from `utils/wailsRuntime`. Currently `ConnectModal` has no clipboard operations, but child modals that display generated keys should use the native API.
 - Profile names are validated against `/^[A-Za-z0-9_-]+$/`; names that violate this pattern display an inline error and block submission.
 - `CancelConnect` must be called when the user clicks Cancel during an ongoing connection attempt (especially for `externalbrowser` which opens a browser window and blocks until the OAuth flow completes).
 - The TOML file is written at the text level by `internal/sfconfig/writer.go` to preserve user comments and unknown keys; do not attempt to re-parse or rewrite it from the frontend.

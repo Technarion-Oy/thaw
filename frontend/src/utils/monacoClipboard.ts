@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import type * as monaco from "monaco-editor";
-import { ClipboardGetText, ClipboardSetText } from "../../wailsjs/runtime/runtime";
+import { ClipboardGetText, ClipboardSetText } from "./wailsRuntime";
 
 /**
  * Patches a Monaco editor instance to route the CODE BUFFER's copy / cut / paste

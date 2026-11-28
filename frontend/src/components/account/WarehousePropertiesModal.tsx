@@ -10,7 +10,7 @@ import {
 } from "@ant-design/icons";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import ObjectParametersModal from "../common/ObjectParametersModal";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import {
   GetObjectProperties,
   GetWarehouseParameters,

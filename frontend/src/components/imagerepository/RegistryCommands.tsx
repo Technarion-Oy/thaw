@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { App as AntApp, Button, Segmented, Space, Tooltip, Typography } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { registrySnippets, type LoginMethod } from "./registrySnippets";
 

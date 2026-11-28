@@ -30,7 +30,7 @@ import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useGridStore, type ConditionalRule } from "../../store/gridStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
 import { computeCellScrollLeft } from "./cellDetailUtils";
 import { defaultColumnOrder, reorderColumnOrder, selectionToTsv } from "./columnOrderUtils";

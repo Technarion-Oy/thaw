@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } fro
 import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
 import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
 import { tableKey, type JoinQueryState, type JoinPath, type DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";

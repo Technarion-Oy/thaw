@@ -10,7 +10,7 @@ import {
   ContainerOutlined, EditOutlined, CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterImageRepository, ListImagesInRepository } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import type { snowflake } from "../../../wailsjs/go/models";

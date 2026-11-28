@@ -11,7 +11,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/crashreport"
 	"thaw/internal/session"
@@ -49,17 +48,16 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 		BackgroundColour: &options.RGBA{R: 18, G: 18, B: 18, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
-		OnBeforeClose: func(ctx context.Context) bool {
+		OnBeforeClose: func(_ context.Context) bool {
 			if !app.isQueryRunning() {
 				return false // nothing running — allow close
 			}
-			result, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
-				Type:          wailsruntime.QuestionDialog,
-				Title:         "Query running",
-				Message:       "A query is currently running. Close anyway?",
-				Buttons:       []string{"Close anyway", "Cancel"},
-				DefaultButton: "Cancel",
-				CancelButton:  "Cancel",
+			result, err := app.confirmDialog(confirmDialogOpts{
+				title:         "Query running",
+				message:       "A query is currently running. Close anyway?",
+				buttons:       []string{"Close anyway", "Cancel"},
+				defaultButton: "Cancel",
+				cancelButton:  "Cancel",
 			})
 			if err != nil || result != "Close anyway" {
 				return true // prevent close

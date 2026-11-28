@@ -6,7 +6,7 @@ import App from "./App";
 import AppErrorBoundary from "./components/common/AppErrorBoundary";
 import "./styles/global.css";
 import "./utils/modalDragResize"; // global drag-to-move for all antd modals (#572)
-import { ClipboardGetText, ClipboardSetText } from "../wailsjs/runtime/runtime";
+import { ClipboardGetText, ClipboardSetText } from "./utils/wailsRuntime";
 
 // Suppress the WebView's native browser context menu so that right-clicking
 // anywhere in the app does not expose browser actions such as "Reload" that

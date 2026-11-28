@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Select, Table, Tag, Tooltip, Typography, message } from "antd";
 import { ClearOutlined, CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { EventsOn, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { EventsOn, ClipboardSetText } from "../../utils/wailsRuntime";
 import { GetQueryLogEntries, ClearQueryLog, IsQueryLogEnabled, SetQueryLogEnabled, PickQueryLogExportFile, ExportQueryLog } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;

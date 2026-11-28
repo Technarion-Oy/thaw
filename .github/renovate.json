@@ -120,8 +120,12 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated. Covers both managers, so the go.mod requirement and the four pinned `go install .../cmd/wails@` CLI versions move in the same PR.",
+      "description": [
+        "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated. Covers both managers, so the go.mod requirement and the four pinned `go install .../cmd/wails@` CLI versions move in the same PR.",
+        "Pinned to v2 minors/patches until the Wails v3 cutover (#23) lands — v3 is a port (different module path, CLI, API, and build system), not a routine major bump (#1044)."
+      ],
       "matchPackageNames": ["github.com/wailsapp/**"],
+      "allowedVersions": "<3.0.0",
       "groupName": "Wails",
       "addLabels": ["wails"]
     },

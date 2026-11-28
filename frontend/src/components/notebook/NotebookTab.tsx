@@ -49,7 +49,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { snowpark } from "../../../wailsjs/go/models";
-import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 
 // Install a document-level capture-phase Cmd+C handler that routes clipboard

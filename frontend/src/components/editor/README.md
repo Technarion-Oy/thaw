@@ -255,7 +255,7 @@ a quoted identifier resolve to nothing (#920). The display gate is the per-edito
 IPC could answer), so the item shows on anything that *looks* like a name, keywords included.
 
 **Clipboard:** `navigator.clipboard` is blocked in WKWebView. All copy operations use
-`ClipboardSetText` from `wailsjs/runtime/runtime`. Monaco's built-in **code-buffer** copy/paste is
+`ClipboardSetText` from `utils/wailsRuntime`. Monaco's built-in **code-buffer** copy/paste is
 patched per-editor via `patchMonacoClipboard` (gated on the public `codeEditor.hasTextFocus()`); the
 find/replace/rename fields inside `.monaco-editor` are ordinary native fields handled by the global
 Cmd/Ctrl+V/C/X handler in `App.tsx` (which skips the code buffer via `monaco.editor.getEditors()`).

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/creack/pty"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GetAvailableShells reads /etc/shells and returns the list of valid shells.
@@ -78,7 +77,7 @@ func (a *App) StartShell(shell, dir string) error {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
-				wailsruntime.EventsEmit(a.ctx, "terminal:data", encoded)
+				a.emit("terminal:data", encoded)
 			}
 			if err != nil {
 				// EOF or closed — shell exited.
@@ -86,7 +85,7 @@ func (a *App) StartShell(shell, dir string) error {
 				a.ptmx = nil
 				a.ptyCmd = nil
 				a.ptyMu.Unlock()
-				wailsruntime.EventsEmit(a.ctx, "terminal:exit")
+				a.emit("terminal:exit")
 				return
 			}
 		}

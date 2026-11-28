@@ -92,7 +92,7 @@ import {
   typeGroupIcon,
   columnIcon,
 } from "../sidebar/objectIcons";
-import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "react";
 import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";

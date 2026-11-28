@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined, UndoOutlined, RedoOutlined } from "@ant-design/icons";
 import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { mcp } from "../../../wailsjs/go/models";
 // Lazy — pulls in @xyflow/@dagrejs (the canvas renderer) only when shown.

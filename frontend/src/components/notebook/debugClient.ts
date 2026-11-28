@@ -10,7 +10,7 @@
  * The DAP framing is: "Content-Length: N\r\n\r\n{json}"
  */
 
-import { EventsEmit, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsEmit, EventsOn } from "../../utils/wailsRuntime";
 
 export interface DebugVariable {
   name: string;

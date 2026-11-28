@@ -7,7 +7,7 @@ import { Button, Tooltip, message } from "antd";
 import { CloseOutlined, CopyOutlined } from "@ant-design/icons";
 import { useGridStore } from "../../store/gridStore";
 import { usePanelLayoutStore } from "../../store/panelLayoutStore";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { prettyPrintJson, parseGeoJson, truncateForDisplay, reconcileDismissedKey } from "./cellDetailUtils";
 import { visualToOriginalIndex } from "./columnOrderUtils";
 

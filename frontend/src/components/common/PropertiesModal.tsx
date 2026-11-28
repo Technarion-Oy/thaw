@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Modal, Spin, Button, Input, InputNumber, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ConfirmSwitch } from "./ConfirmSwitch";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import type { snowflake, table } from "../../../wailsjs/go/models";
 import { GetTableSettings, AlterTableProperty, AlterTable, GetObjectParameters } from "../../../wailsjs/go/app/App";
 import TagsRow from "../shared/TagsRow";

@@ -48,4 +48,4 @@ Renders an interactive ER diagram using `@xyflow/react` from Snowflake table/col
 - FK edges are derived from `column.fkRef` fields, not stored separately. Adding/removing FK edges always goes through column state updates.
 - Both `ERDiagramModal` and `ERDesigner` use the shared `buildMermaid(tables, visibleSchemas?)` from `buildMermaid.ts` for Mermaid clipboard export.
 - Column cap at 30 (`ER_COL_LIMIT`) prevents excessively tall nodes — overflow shows "+N more columns".
-- Clipboard operations use `ClipboardSetText` from `wailsjs/runtime/runtime` (required because WKWebView blocks `navigator.clipboard`).
+- Clipboard operations use `ClipboardSetText` from `utils/wailsRuntime` (required because WKWebView blocks `navigator.clipboard`).

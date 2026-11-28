@@ -10,7 +10,7 @@ import {
   NodeIndexOutlined, ReloadOutlined, CopyOutlined, SaveOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, DescribeGateway, AlterGateway } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import SpecEditor from "../service/SpecEditor";
 import { specProblems } from "../service/specDoc";
 import GatewaySpecForm from "./GatewaySpecForm";

@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Select, Button, Space } from "antd";
 import { CloseOutlined, ReloadOutlined, PoweroffOutlined } from "@ant-design/icons";
 import { GetAvailableShells, StartShell, WriteShell, ResizeShell, StopShell } from "../../../wailsjs/go/app/App";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 import { useThemeStore } from "../../store/themeStore";
 import { useGitStore } from "../../store/gitStore";
 

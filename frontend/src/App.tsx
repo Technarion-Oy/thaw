@@ -20,7 +20,7 @@ import AboutModal from "./components/help/AboutModal";
 import UpdateNotification from "./components/help/UpdateNotification";
 import LicenseAgreement from "./components/setup/LicenseAgreement";
 import { IsConnected, IsLicenseAccepted, SubmitMFACode } from "../wailsjs/go/app/App";
-import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
+import { ClipboardGetText, ClipboardSetText, EventsOn } from "./utils/wailsRuntime";
 import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";

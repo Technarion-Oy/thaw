@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Modal, Button, Tooltip, message } from "antd";
 import { InfoCircleOutlined, CopyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { GetAppInfo } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, BrowserOpenURL } from "../../utils/wailsRuntime";
 import type { app } from "../../../wailsjs/go/models";
 import ThirdPartyNoticesModal from "./ThirdPartyNoticesModal";
 

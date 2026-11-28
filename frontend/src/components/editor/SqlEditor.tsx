@@ -25,7 +25,7 @@ import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
 import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, GetUseContextAt, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";

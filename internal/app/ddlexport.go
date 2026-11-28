@@ -8,8 +8,6 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/ddl"
 	"thaw/internal/snowflake"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ExportAccountObjectsDDL exports all accessible roles and warehouses as SQL files
@@ -85,7 +83,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 		opts,
 		func(done, total int, res ddl.ExportResult) {
 			result = res
-			wailsruntime.EventsEmit(a.ctx, ddlProgressEvent, DDLProgressPayload{
+			a.emit(ddlProgressEvent, DDLProgressPayload{
 				Done:   done,
 				Total:  total,
 				Result: res,
@@ -227,7 +225,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string, option
 		fetch,
 		opts,
 		func(done, total int, res ddl.ExportResult) {
-			wailsruntime.EventsEmit(a.ctx, ddlProgressEvent, DDLProgressPayload{
+			a.emit(ddlProgressEvent, DDLProgressPayload{
 				Done:   done,
 				Total:  total,
 				Result: res,

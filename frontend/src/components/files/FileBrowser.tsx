@@ -44,7 +44,7 @@ import {
   DuplicateFile,
   GitGetHeadFileContent,
 } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 import { sigilColor, deriveNewAndPartial } from "../git/gitStatusUtil";
 import { useQueryStore } from "../../store/queryStore";

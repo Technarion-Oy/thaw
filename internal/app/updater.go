@@ -9,8 +9,6 @@ import (
 	"thaw/internal/logger"
 	"thaw/internal/updater"
 	"thaw/internal/version"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // updateCheckInterval throttles the background startup check so repeated app
@@ -106,5 +104,5 @@ func (a *App) persistUpdateCheck(res updater.CheckResult) {
 // on request, a modal with the release notes and a "Download update" button.
 func (a *App) emitUpdateAvailable(res updater.CheckResult) {
 	logger.L.Info("update available", "current", res.CurrentVersion, "latest", res.LatestVersion)
-	wailsruntime.EventsEmit(a.ctx, "update:available", res)
+	a.emit("update:available", res)
 }

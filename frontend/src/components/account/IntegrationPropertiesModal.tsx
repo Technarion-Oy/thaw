@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Spin, Button, Input, Space, Typography, message } from "antd";
 import { ApiOutlined, CheckOutlined, CopyOutlined, SearchOutlined, TagsOutlined } from "@ant-design/icons";
 import { DescribeIntegration, AlterIntegrationProperty, AlterIntegration } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import type { integrations } from "../../../wailsjs/go/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import TagsRow from "../shared/TagsRow";
