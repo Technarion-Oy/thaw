@@ -114,7 +114,7 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 	mainWindow.OnWindowEvent(events.Common.WindowRuntimeReady, func(_ *application.WindowEvent) {
 		initialReadyOnce.Do(func() {
 			if restoreMaximizedOnMac {
-				mainWindow.Maximise()
+				mainWindow.Maximise() //nolint:misspell // upstream Wails v3 API spelling
 			}
 			mainWindow.Focus()
 		})
