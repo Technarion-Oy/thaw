@@ -32,6 +32,9 @@ tasks:
       - npm run {{if eq .DEV "true"}}build:dev{{else}}build{{end}}
     env:
       PRODUCTION: '{{if eq .DEV "true"}}false{{else}}true{{end}}'
+      # Skip Terser + javascript-obfuscator during `wails3 dev` (Vite serves live
+      # unbundled modules; obfuscating the throwaway embedded dist adds ~20s per start).
+      THAW_FAST_BUILD: '{{if eq .DEV "true"}}1{{else}}{{env "THAW_FAST_BUILD"}}{{end}}'
 
   generate:icons:
     summary: Generates macOS .icns and Windows .ico icons from build/appicon.png

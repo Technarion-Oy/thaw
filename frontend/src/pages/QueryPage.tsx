@@ -258,8 +258,10 @@ export default function QueryPage() {
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
   useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
-  // Load current user/region/url on mount.
+  // Load current user/region/url on mount only if already connected (the
+  // connect-transition effect below loads them once a connection opens).
   useEffect(() => {
+    if (!useConnectionStore.getState().isConnected) return;
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
     GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
@@ -267,11 +269,13 @@ export default function QueryPage() {
 
   // When the active tab changes (including on mount), immediately reflect its
   // context in the toolbar: setActiveTab gives instant feedback from cache,
-  // loadContext fetches fresh state from Go.
+  // loadContext fetches fresh state from Go when connected.
   useEffect(() => {
     const store = useSessionStore.getState();
     store.setActiveTab(activeTabId);
-    store.loadContext(activeTabId);
+    if (useConnectionStore.getState().isConnected) {
+      store.loadContext(activeTabId);
+    }
     setGridSearchOpen(false);
     useGridStore.getState().resetNavigation();
   }, [activeTabId]);

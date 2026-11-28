@@ -5,7 +5,9 @@ package app
 import (
 	"embed"
 	"net/http"
+	goruntime "runtime"
 	"strings"
+	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -77,12 +79,21 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 			TitleBar: application.MacTitleBarHiddenInset,
 		},
 	}
+	restoreMaximizedOnMac := false
 	if app.savedWindowState != nil {
 		if app.savedWindowState.Maximized {
-			// Do not combine WindowStateMaximised with WindowXY: Wails calls
-			// setPosition(X, Y) after maximizing on macOS/Windows, shifting the
-			// maximized window off-frame.
-			winOpts.StartState = application.WindowStateMaximised
+			if goruntime.GOOS == "darwin" {
+				// On macOS Wails v3 calls windowCenter() right after
+				// StartState=WindowStateMaximised on the still-hidden window,
+				// canceling the zoom animation before Show(). Maximize once
+				// the window is shown in WindowRuntimeReady instead.
+				restoreMaximizedOnMac = true
+			} else {
+				// Do not combine WindowStateMaximised with WindowXY: Wails calls
+				// setPosition(X, Y) after maximizing on Windows, shifting the
+				// maximized window off-frame.
+				winOpts.StartState = application.WindowStateMaximised
+			}
 		} else {
 			winOpts.InitialPosition = application.WindowXY
 			winOpts.X = app.savedWindowState.X
@@ -92,6 +103,22 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 
 	mainWindow := wailsApp.Window.NewWithOptions(winOpts)
 	app.mainWindow = mainWindow
+
+	// On macOS, Wails v3 activates the app at ApplicationDidFinishLaunching
+	// (before the window is visible) and later calls Show() using only
+	// makeKeyAndOrderFront: without re-activating the app — leaving the window
+	// behind the launching terminal/IDE during `wails3 dev`. Focus once on
+	// initial runtime ready to bring the window to the foreground (and apply
+	// any deferred macOS maximize).
+	var initialReadyOnce sync.Once
+	mainWindow.OnWindowEvent(events.Common.WindowRuntimeReady, func(_ *application.WindowEvent) {
+		initialReadyOnce.Do(func() {
+			if restoreMaximizedOnMac {
+				mainWindow.Maximise()
+			}
+			mainWindow.Focus()
+		})
+	})
 
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if !app.confirmClose() {
