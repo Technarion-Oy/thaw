@@ -4,8 +4,6 @@ package app
 
 import (
 	"thaw/internal/querylog"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GetQueryLogEntries returns all entries in the session query log.
@@ -30,7 +28,7 @@ func (a *App) SetQueryLogEnabled(enabled bool) {
 	if a.setQueryLogMenuCheck != nil {
 		a.setQueryLogMenuCheck(enabled)
 	}
-	wailsruntime.EventsEmit(a.ctx, "querylog:state", map[string]interface{}{
+	a.emit("querylog:state", map[string]interface{}{
 		"enabled": enabled,
 	})
 }
@@ -38,13 +36,13 @@ func (a *App) SetQueryLogEnabled(enabled bool) {
 // PickQueryLogExportFile opens a native save-file dialog with log/text filters
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickQueryLogExportFile(defaultName string) string {
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
-		Title:           "Export Query Log",
-		DefaultFilename: defaultName,
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Log Files (*.log)", Pattern: "*.log"},
-			{DisplayName: "Text Files (*.txt)", Pattern: "*.txt"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.saveFileDialog(saveDialogOpts{
+		title:           "Export Query Log",
+		defaultFilename: defaultName,
+		filters: []fileFilter{
+			{displayName: "Log Files (*.log)", pattern: "*.log"},
+			{displayName: "Text Files (*.txt)", pattern: "*.txt"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {

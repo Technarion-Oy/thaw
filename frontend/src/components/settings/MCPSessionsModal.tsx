@@ -24,7 +24,7 @@ import {
   StopMCPSession,
   UpdateMCPSessionMode,
 } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useMCPStore } from "../../store/mcpStore";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";

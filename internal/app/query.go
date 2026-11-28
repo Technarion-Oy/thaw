@@ -16,7 +16,6 @@ import (
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ExecuteQuery runs a SQL statement and returns the result set.
@@ -68,7 +67,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 			Feature:    FeatureSQLEditor,
 		}
 		entry.ID = a.queryLog.Record(entry)
-		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+		a.emit("querylog:entry", entry)
 	}
 
 	return result, err
@@ -149,7 +148,7 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 		}
 		entry.ID = a.queryLog.Record(entry)
 		logEntryID = entry.ID
-		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+		a.emit("querylog:entry", entry)
 	}
 
 	ts.queryMu.Lock()
@@ -175,7 +174,7 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 	go func() {
 		result, err := ts.client.Execute(ctx, sql, func(idx, total int, stmtQidChan <-chan string) {
 			// Notify the frontend which statement is about to run.
-			wailsruntime.EventsEmit(a.ctx, "query:statement-start",
+			a.emit("query:statement-start",
 				map[string]int{"index": idx, "total": total})
 			// Watch for the per-statement query ID.  The channel is closed
 			// by Execute once queryOnConn returns, so this goroutine always
@@ -195,7 +194,7 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 						ts.queryMu.Lock()
 						ts.queryID = qid
 						ts.queryMu.Unlock()
-						wailsruntime.EventsEmit(a.ctx, "query:statement-qid",
+						a.emit("query:statement-qid",
 							map[string]interface{}{"index": i, "queryID": qid})
 					}
 				case <-ctx.Done():
@@ -332,7 +331,7 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 			if stuckLogID > 0 {
 				durationMs := time.Since(stuckLogStart).Milliseconds()
 				a.queryLog.UpdateStatus(stuckLogID, querylog.StatusCanceled, durationMs, "", "")
-				wailsruntime.EventsEmit(a.ctx, "querylog:update", map[string]interface{}{
+				a.emit("querylog:update", map[string]interface{}{
 					"id":         stuckLogID,
 					"status":     querylog.StatusCanceled,
 					"durationMs": durationMs,
@@ -407,7 +406,7 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 			status = querylog.StatusSuccess
 		}
 		a.queryLog.UpdateStatus(logEntryID, status, durationMs, errMsg, queryID)
-		wailsruntime.EventsEmit(a.ctx, "querylog:update", map[string]interface{}{
+		a.emit("querylog:update", map[string]interface{}{
 			"id":         logEntryID,
 			"status":     status,
 			"durationMs": durationMs,

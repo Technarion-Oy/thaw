@@ -10,7 +10,7 @@ import GitOperationsDialog from "../git/GitOperationsDialog";
 import AccountPanel from "../account/AccountPanel";
 import { usePanelLayoutStore, type PanelId, type SidebarId } from "../../store/panelLayoutStore";
 import { useGitStore } from "../../store/gitStore";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 
 const { Content } = Layout;
 

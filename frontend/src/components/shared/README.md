@@ -44,5 +44,5 @@ Provides the low-level building blocks used by modal forms throughout the applic
 
 - `ObjectNameCaseControl` forces "Case sensitive" mode (disables the "Case insensitive" radio) when the name requires quoting. The `forced` state is derived from `needsQuoting(name)`, which uses the lazily-loaded keyword set — for the brief window before `GetSnowflakeKeywords` resolves, only the character-pattern check (`UNQUOTED_IDENT_RE`) is applied. This is adequate for the vast majority of inputs.
 - `DataTypeSelect` does NOT validate that the user-entered precision/scale combination is legal for Snowflake (e.g. scale must be ≤ precision). Downstream validation is expected from Snowflake at DDL execution time.
-- Do not use `navigator.clipboard` anywhere in these components. Any future clipboard integration must use `ClipboardSetText` from `wailsjs/runtime/runtime`.
+- Do not use `navigator.clipboard` anywhere in these components. Any future clipboard integration must use `ClipboardSetText` from `utils/wailsRuntime`.
 - `SqlPreview` uses `white-space: pre-wrap` + `word-break: break-all` so long SQL lines wrap rather than overflow the modal.

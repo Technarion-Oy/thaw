@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import { Form } from "antd";
 import type { FormInstance } from "antd";
 import { UpdateOpenFormState, ClearOpenFormState } from "../../../wailsjs/go/app/App";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 import { mcp } from "../../../wailsjs/go/models";
 
 /**

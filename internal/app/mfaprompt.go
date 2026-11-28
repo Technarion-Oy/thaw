@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"time"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // mfaPromptTimeout bounds how long a re-login waits for the user to enter a fresh
@@ -42,7 +40,7 @@ func (a *App) promptMFACode(ctx context.Context) (string, error) {
 	if p := a.currentConnectParams(); p != nil {
 		user, account = p.User, p.Account
 	}
-	wailsruntime.EventsEmit(a.ctx, "mfa:prompt-code", map[string]string{
+	a.emit("mfa:prompt-code", map[string]string{
 		"requestId": id,
 		"user":      user,
 		"account":   account,
@@ -57,10 +55,10 @@ func (a *App) promptMFACode(ctx context.Context) (string, error) {
 		}
 		return code, nil
 	case <-timer.C:
-		wailsruntime.EventsEmit(a.ctx, "mfa:prompt-close", id)
+		a.emit("mfa:prompt-close", id)
 		return "", fmt.Errorf("timed out waiting for a new MFA code")
 	case <-ctx.Done():
-		wailsruntime.EventsEmit(a.ctx, "mfa:prompt-close", id)
+		a.emit("mfa:prompt-close", id)
 		return "", ctx.Err()
 	}
 }

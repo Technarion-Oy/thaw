@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"thaw/internal/config"
 	"thaw/internal/sfconfig"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // LoadSnowflakeCLIConfig reads the Snowflake CLI configuration file (either from
@@ -130,12 +128,12 @@ func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
 		}
 	}
 
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:            "Select Snowflake CLI Config",
-		DefaultDirectory: initialDir,
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Snowflake CLI Config (*.toml)", Pattern: "*.toml"},
-			{DisplayName: "All Files", Pattern: "*.*"},
+	path, err := a.openFileDialog(openDialogOpts{
+		title:            "Select Snowflake CLI Config",
+		defaultDirectory: initialDir,
+		filters: []fileFilter{
+			{displayName: "Snowflake CLI Config (*.toml)", pattern: "*.toml"},
+			{displayName: "All Files", pattern: "*.*"},
 		},
 	})
 	if err != nil || path == "" {

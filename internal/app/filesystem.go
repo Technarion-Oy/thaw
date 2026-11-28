@@ -10,8 +10,6 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
 	"thaw/internal/logger"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // StartFileWatcher starts watching the given directory tree for changes.
@@ -52,7 +50,7 @@ func (a *App) StartFileWatcher(dir string) error {
 		ExcludeGlobs:   fw.ExcludeGlobs,
 		MaxWatchedDirs: fw.MaxWatchedDirs,
 	}, func(evt filesystem.FSChangeEvent) {
-		wailsruntime.EventsEmit(a.ctx, "fs:changed", evt)
+		a.emit("fs:changed", evt)
 	})
 	if err != nil {
 		// Non-fatal: log and continue so the folder still opens.
@@ -226,16 +224,16 @@ func (a *App) currentWorkdir() string {
 // PickAnyFile). The dialog opens in the configured export directory when set.
 func (a *App) PickOpenFile() string {
 	defaultDir := a.currentWorkdir()
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:            "Open file",
-		DefaultDirectory: defaultDir,
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Supported Files (*.sql, *.yml, *.yaml, *.py, *.md)", Pattern: "*.sql;*.yml;*.yaml;*.py;*.md;*.markdown"},
-			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
-			{DisplayName: "YAML Files (*.yml, *.yaml)", Pattern: "*.yml;*.yaml"},
-			{DisplayName: "Python Files (*.py)", Pattern: "*.py"},
-			{DisplayName: "Markdown Files (*.md, *.markdown)", Pattern: "*.md;*.markdown"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.openFileDialog(openDialogOpts{
+		title:            "Open file",
+		defaultDirectory: defaultDir,
+		filters: []fileFilter{
+			{displayName: "Supported Files (*.sql, *.yml, *.yaml, *.py, *.md)", pattern: "*.sql;*.yml;*.yaml;*.py;*.md;*.markdown"},
+			{displayName: "SQL Files (*.sql)", pattern: "*.sql"},
+			{displayName: "YAML Files (*.yml, *.yaml)", pattern: "*.yml;*.yaml"},
+			{displayName: "Python Files (*.py)", pattern: "*.py"},
+			{displayName: "Markdown Files (*.md, *.markdown)", pattern: "*.md;*.markdown"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {
@@ -251,9 +249,9 @@ func (a *App) PickOpenFile() string {
 // configured export directory when one is set.
 func (a *App) PickAnyFile() string {
 	defaultDir := a.currentWorkdir()
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:            "Open any file",
-		DefaultDirectory: defaultDir,
+	path, err := a.openFileDialog(openDialogOpts{
+		title:            "Open any file",
+		defaultDirectory: defaultDir,
 	})
 	if err != nil {
 		return ""
@@ -262,32 +260,32 @@ func (a *App) PickAnyFile() string {
 }
 
 // dataFileFilters returns dialog file filters for the given import format.
-func dataFileFilters(format string) []wailsruntime.FileFilter {
+func dataFileFilters(format string) []fileFilter {
 	switch strings.ToUpper(format) {
 	case "JSON":
-		return []wailsruntime.FileFilter{
-			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		return []fileFilter{
+			{displayName: "JSON Files (*.json;*.jsonl;*.ndjson)", pattern: "*.json;*.jsonl;*.ndjson"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	case "PARQUET":
-		return []wailsruntime.FileFilter{
-			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		return []fileFilter{
+			{displayName: "Parquet Files (*.parquet)", pattern: "*.parquet"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	case "AVRO":
-		return []wailsruntime.FileFilter{
-			{DisplayName: "Avro Files (*.avro)", Pattern: "*.avro"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		return []fileFilter{
+			{displayName: "Avro Files (*.avro)", pattern: "*.avro"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	case "ORC":
-		return []wailsruntime.FileFilter{
-			{DisplayName: "ORC Files (*.orc)", Pattern: "*.orc"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		return []fileFilter{
+			{displayName: "ORC Files (*.orc)", pattern: "*.orc"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	default: // CSV
-		return []wailsruntime.FileFilter{
-			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		return []fileFilter{
+			{displayName: "CSV Files (*.csv)", pattern: "*.csv"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	}
 }
@@ -295,16 +293,16 @@ func dataFileFilters(format string) []wailsruntime.FileFilter {
 // PickDataFile opens a native open-file dialog filtered to common data file
 // formats and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickDataFile() string {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Open data file",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Data Files (*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc)", Pattern: "*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc"},
-			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
-			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
-			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
-			{DisplayName: "Avro Files (*.avro)", Pattern: "*.avro"},
-			{DisplayName: "ORC Files (*.orc)", Pattern: "*.orc"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.openFileDialog(openDialogOpts{
+		title: "Open data file",
+		filters: []fileFilter{
+			{displayName: "Data Files (*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc)", pattern: "*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc"},
+			{displayName: "CSV Files (*.csv)", pattern: "*.csv"},
+			{displayName: "JSON Files (*.json;*.jsonl;*.ndjson)", pattern: "*.json;*.jsonl;*.ndjson"},
+			{displayName: "Parquet Files (*.parquet)", pattern: "*.parquet"},
+			{displayName: "Avro Files (*.avro)", pattern: "*.avro"},
+			{displayName: "ORC Files (*.orc)", pattern: "*.orc"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {
@@ -316,9 +314,9 @@ func (a *App) PickDataFile() string {
 // PickDataFileByFormat opens a native open-file dialog filtered to the file
 // extensions that match the given format.
 func (a *App) PickDataFileByFormat(format string) string {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:   "Open " + format + " file",
-		Filters: dataFileFilters(format),
+	path, err := a.openFileDialog(openDialogOpts{
+		title:   "Open " + format + " file",
+		filters: dataFileFilters(format),
 	})
 	if err != nil {
 		return ""
@@ -331,9 +329,9 @@ func (a *App) PickDataFileByFormat(format string) string {
 // nil if the user cancels.
 func (a *App) PickDataFilesByFormat(format string) []string {
 	filters := dataFileFilters(format)
-	paths, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:   "Open " + format + " files",
-		Filters: filters,
+	paths, err := a.openMultipleFilesDialog(openDialogOpts{
+		title:   "Open " + format + " files",
+		filters: filters,
 	})
 	if err != nil {
 		return nil
@@ -344,14 +342,14 @@ func (a *App) PickDataFilesByFormat(format string) []string {
 // PickSaveFile opens a native save-file dialog pre-populated with defaultName
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickSaveFile(defaultName string) string {
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
-		Title:           "Save file",
-		DefaultFilename: defaultName,
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
-			{DisplayName: "YAML Files (*.yml, *.yaml)", Pattern: "*.yml;*.yaml"},
-			{DisplayName: "Python Files (*.py)", Pattern: "*.py"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.saveFileDialog(saveDialogOpts{
+		title:           "Save file",
+		defaultFilename: defaultName,
+		filters: []fileFilter{
+			{displayName: "SQL Files (*.sql)", pattern: "*.sql"},
+			{displayName: "YAML Files (*.yml, *.yaml)", pattern: "*.yml;*.yaml"},
+			{displayName: "Python Files (*.py)", pattern: "*.py"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {
@@ -364,30 +362,30 @@ func (a *App) PickSaveFile(defaultName string) string {
 // for the requested format ("csv" or "excel") and returns the chosen path, or
 // an empty string if the user cancels.
 func (a *App) PickSaveExportFile(defaultName, format string) string {
-	var filters []wailsruntime.FileFilter
+	var filters []fileFilter
 	title := "Save export file"
 	switch format {
 	case "csv":
 		title = "Save as CSV"
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		filters = []fileFilter{
+			{displayName: "CSV Files (*.csv)", pattern: "*.csv"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	case "excel":
 		title = "Save as Excel"
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "Excel Files (*.xlsx)", Pattern: "*.xlsx"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		filters = []fileFilter{
+			{displayName: "Excel Files (*.xlsx)", pattern: "*.xlsx"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	default:
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		filters = []fileFilter{
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		}
 	}
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
-		Title:           title,
-		DefaultFilename: defaultName,
-		Filters:         filters,
+	path, err := a.saveFileDialog(saveDialogOpts{
+		title:           title,
+		defaultFilename: defaultName,
+		filters:         filters,
 	})
 	if err != nil {
 		return ""
@@ -413,11 +411,11 @@ func (a *App) SaveBinaryFile(path, base64Content string) error {
 // where a plain os.ReadFile of a hand-typed path is denied with EPERM. See the
 // "macOS TCC blocks reads of key files" note in docs/concepts/gotchas.md.
 func (a *App) PickPrivateKeyFile() string {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select private key",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Private Key Files (*.p8, *.pem, *.key)", Pattern: "*.p8;*.pem;*.key"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.openFileDialog(openDialogOpts{
+		title: "Select private key",
+		filters: []fileFilter{
+			{displayName: "Private Key Files (*.p8, *.pem, *.key)", pattern: "*.p8;*.pem;*.key"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {
@@ -433,10 +431,10 @@ func (a *App) PickPrivateKeyFile() string {
 // CanCreateDirectories enables the "New Folder" button so the user can create a
 // fresh (empty) destination in place — e.g. a scaffold target for a template.
 func (a *App) PickDirectory() string {
-	path, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:                "Select folder",
-		DefaultDirectory:     a.currentWorkdir(),
-		CanCreateDirectories: true,
+	path, err := a.openDirectoryDialog(openDialogOpts{
+		title:                "Select folder",
+		defaultDirectory:     a.currentWorkdir(),
+		canCreateDirectories: true,
 	})
 	if err != nil {
 		return ""
@@ -480,11 +478,11 @@ func (a *App) OpenFolderInNewInstance(dir string) error {
 // PickFileForFormatPreview opens a native file-picker filtered to common data
 // file extensions. Returns the chosen path, or "" if the user canceled.
 func (a *App) PickFileForFormatPreview() string {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select a data file to preview",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Data Files (*.csv, *.tsv, *.json, *.ndjson, *.jsonl)", Pattern: "*.csv;*.tsv;*.txt;*.json;*.ndjson;*.jsonl"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+	path, err := a.openFileDialog(openDialogOpts{
+		title: "Select a data file to preview",
+		filters: []fileFilter{
+			{displayName: "Data Files (*.csv, *.tsv, *.json, *.ndjson, *.jsonl)", pattern: "*.csv;*.tsv;*.txt;*.json;*.ndjson;*.jsonl"},
+			{displayName: "All Files (*.*)", pattern: "*.*"},
 		},
 	})
 	if err != nil {

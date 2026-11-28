@@ -6,7 +6,7 @@ import { App as AntApp, Button, Dropdown } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { CopyOutlined, MoreOutlined } from "@ant-design/icons";
 import { DescribeGateway, DropGateway, ListGateways } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { friendlyError } from "../common/errors";
 import CreateGatewayModal from "../gateway/CreateGatewayModal";
 import GatewayPropertiesModal from "../gateway/GatewayPropertiesModal";

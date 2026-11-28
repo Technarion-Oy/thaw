@@ -3,8 +3,6 @@
 package app
 
 import (
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"thaw/internal/config"
 )
 
@@ -47,5 +45,5 @@ func (a *App) AcceptLicense() error {
 // license agreement; the choice is intentionally not persisted, so relaunching
 // prompts again.
 func (a *App) DeclineLicense() {
-	wailsruntime.Quit(a.ctx)
+	a.quit()
 }

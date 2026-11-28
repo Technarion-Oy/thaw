@@ -31,10 +31,14 @@ Conventions for the domain package:
 
 ## Emitting events Go → frontend
 
+All Wails runtime calls in `internal/app/` go through the thin helpers in `internal/app/runtime.go` (guarded by `TestWailsRuntimeIsolatedToRuntimeFile`), and all frontend runtime calls (`EventsOn`, `EventsEmit`, `ClipboardGetText`, `ClipboardSetText`, `BrowserOpenURL`) go through `frontend/src/utils/wailsRuntime.ts` (guarded by `wailsRuntime.test.ts`):
+
 ```go
-wailsruntime.EventsEmit(a.ctx, "event:name", payload)
+a.emit("event:name", payload)
 ```
 ```ts
+import { EventsOn } from "../../utils/wailsRuntime";
+
 const cleanup = EventsOn("event:name", (data) => { ... });
 // call cleanup() on unmount
 ```
@@ -47,7 +51,7 @@ Every item lives in `buildMenu` (`internal/app/menu.go`) and only emits a `menu:
 
 **Several items opening the same dialog** share one event and pass their difference as the trailing `data` payload (the Container Services submenu emits `menu:container-services` with `"pools"`, `"services"`, …), so the frontend needs a single listener. `addConnectionItem` returns the item, so callers that also need to gate it on something else (a feature flag) can collect it.
 
-Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `wailsruntime.MenuUpdateApplicationMenu(app.ctx)`. Call sites must nil-guard the field — tests construct `App` without a menu.
+Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `app.updateApplicationMenu()`. Call sites must nil-guard the field — tests construct `App` without a menu.
 
 Backend `ErrNotConnected` guards stay in place regardless: greying out is UX, not enforcement.
 

@@ -11,7 +11,7 @@ import {
   PickDirectory,
   RevealInFinder,
 } from "../../../wailsjs/go/app/App";
-import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL } from "../../utils/wailsRuntime";
 import type { streamlittemplate } from "../../../wailsjs/go/models";
 
 const { Text, Link, Paragraph } = Typography;

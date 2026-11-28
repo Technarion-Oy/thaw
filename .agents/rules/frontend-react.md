@@ -34,7 +34,7 @@ Follow these invariants whenever creating or editing files under `frontend/src/`
   ```
   Type-only consumers receiving the slim namespace must also type against `editor.api.js`.
 - Never register Monaco completion/hover providers inside render — use module-level disposable refs.
-- Never call `navigator.clipboard` (blocked in macOS WKWebView) — use Wails `ClipboardGetText` / `ClipboardSetText` and preserve the split routing in `utils/monacoClipboard.ts` + `App.tsx`.
+- Never call `navigator.clipboard` (blocked in macOS WKWebView) — use `ClipboardGetText` / `ClipboardSetText` from `utils/wailsRuntime` (never import `wailsjs/runtime` directly; `wailsRuntime.test.ts` guards this) and preserve the split routing in `utils/monacoClipboard.ts` + `App.tsx`.
 - Do not remove the `setTimeout(0)` selection defer or capture-phase drag-select workaround in `SqlEditor.tsx` (`handleMount`, #575), and keep `runDiagnostics` guarded by both `model.getVersionId()` and monotonic `diagRunRef` inside `try/catch/finally` (#718).
 
 ## Frontend Testing (Vitest)

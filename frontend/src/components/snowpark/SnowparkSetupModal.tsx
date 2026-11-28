@@ -42,7 +42,7 @@ import {
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
 import type { snowpark } from "../../../wailsjs/go/models";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 
 const { Text } = Typography;

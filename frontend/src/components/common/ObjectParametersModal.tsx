@@ -8,7 +8,7 @@ import {
 } from "@ant-design/icons";
 import { ConfirmSwitch } from "./ConfirmSwitch";
 import { friendlyError } from "./errors";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import {
   GetObjectParameters, SetObjectParameter, UnsetObjectParameter,

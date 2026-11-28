@@ -23,7 +23,7 @@ import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { GetQueryHistory, ListUsers, GetCurrentUser } from "../../../wailsjs/go/app/App";
 import QueryProfileModal from "../results/QueryProfileModal";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useQueryStore } from "../../store/queryStore";
 import { useSessionStore } from "../../store/sessionStore";

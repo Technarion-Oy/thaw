@@ -31,7 +31,8 @@ Follow these invariants whenever creating or editing Go files in `internal/` or 
 - All read-modify-writes of app config MUST use `config.Update(fn)` (process-locked + atomic write), never `Load()` → mutate → `Save()`.
 - Never persist Thaw-owned secrets (AI keys, OAuth client secrets, pip passwords, MCP tokens) in `config.json` — store them in `internal/secrets` (OS keychain / `0600` fallback).
 - All mutating filesystem operations under a workspace root must validate containment with `internal/filesystem` symlink-resolving path validators (`ValidateInsideOrEqual` / `ValidatePathOrAncestorInsideOrEqual`).
-- On macOS, direct `os.ReadFile` inside TCC-protected folders (`~/Documents`, `~/Desktop`, `~/Downloads`) fails with `EPERM` without prompting — prefer `wailsruntime.OpenFileDialog` and surface actionable hints on `os.ErrPermission`.
+- **Never import `github.com/wailsapp/wails/v2/pkg/runtime` directly in `internal/app/`** outside `internal/app/runtime.go` — use the thin helpers (`a.emit`, `a.openFileDialog`, `a.saveFileDialog`, `a.openDirectoryDialog`, `a.confirmDialog`, `a.windowState`, `a.restoreWindowState`, `a.setWindowTitle`, `a.updateApplicationMenu`, `a.quit`). `TestWailsRuntimeIsolatedToRuntimeFile` guards this boundary.
+- On macOS, direct `os.ReadFile` inside TCC-protected folders (`~/Documents`, `~/Desktop`, `~/Downloads`) fails with `EPERM` without prompting — prefer `a.openFileDialog` (wrapping `wailsruntime.OpenFileDialog`) and surface actionable hints on `os.ErrPermission`.
 
 ## Snowflake Driver (`gosnowflake`) Gotchas
 - `gosnowflake` logs ALL query errors at ERROR level via `slog`, even when caught. Always determine an object's kind before calling `GET_DDL` instead of guessing `TABLE` vs `VIEW`.

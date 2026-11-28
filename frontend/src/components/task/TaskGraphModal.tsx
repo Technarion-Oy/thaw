@@ -32,7 +32,7 @@ import CreateTaskModal from "./CreateTaskModal";
 import CopyTaskModal from "./CopyTaskModal";
 import AddExistingChildModal from "./AddExistingChildModal";
 import RemoveChildLinksModal from "./RemoveChildLinksModal";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;

@@ -40,7 +40,7 @@ import {
   ListDatabases,
   PickDirectory,
 } from "../../../wailsjs/go/app/App";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 import { useThemeStore } from "../../store/themeStore";
 import { useQueryStore } from "../../store/queryStore";
 

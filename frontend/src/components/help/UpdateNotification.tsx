@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Alert, Modal, Button, Spin, message } from "antd";
 import { CloudDownloadOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { CheckForUpdate } from "../../../wailsjs/go/app/App";
-import { BrowserOpenURL, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn } from "../../utils/wailsRuntime";
 import type { updater } from "../../../wailsjs/go/models";
 
 // UpdateNotification renders the app-update UI: a dismissible top banner when the

@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Modal, Input, Button, Tag, Spin, Segmented, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, FunctionOutlined, EnterOutlined } from "@ant-design/icons";
 import { GetAllFunctionNames, GetFunctionTooltip } from "../../../wailsjs/go/app/App";
-import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL } from "../../utils/wailsRuntime";
 import { insertAtCursor } from "../editor/editorRef";
 import type { fnmeta } from "../../../wailsjs/go/models";
 

@@ -20,7 +20,7 @@ import {
   GetDatabaseRetentionDays,
   GetQuotedIdentifiersIgnoreCase,
 } from "../../../wailsjs/go/app/App";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
 interface Tag {

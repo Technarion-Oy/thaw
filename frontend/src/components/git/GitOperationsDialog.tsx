@@ -16,7 +16,7 @@ import {
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
 import { PickDirectory, GitInitWithRemote, GitCancelOAuth } from "../../../wailsjs/go/app/App";
-import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import ChangesView from "./ChangesView";
 
 const { Text } = Typography;

@@ -24,8 +24,6 @@ import (
 	"thaw/internal/snowpark"
 	"thaw/internal/version"
 	"time"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // tabSession holds the per-tab Snowflake client and the two-phase query
@@ -223,10 +221,7 @@ func workdirOverrideArg() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if a.savedWindowState != nil {
-		wailsruntime.WindowSetPosition(ctx, a.savedWindowState.X, a.savedWindowState.Y)
-		if a.savedWindowState.Maximized {
-			wailsruntime.WindowMaximise(ctx)
-		}
+		a.restoreWindowState(*a.savedWindowState)
 	}
 	a.logCleanup = logger.Init()
 	// Grey out flag-gated native menu items whose feature is switched off.
@@ -242,7 +237,7 @@ func (a *App) startup(ctx context.Context) {
 	if dir := workdirOverrideArg(); dir != "" {
 		logger.L.Info("launched with working-directory override", "dir", dir)
 		a.setExportDir(dir)
-		wailsruntime.WindowSetTitle(ctx, "Thaw — "+filepath.Base(dir))
+		a.setWindowTitle("Thaw — " + filepath.Base(dir))
 	} else if cfg, err := config.Load(); err == nil {
 		a.setExportDir(cfg.Git.ExportDir)
 	}
@@ -250,12 +245,12 @@ func (a *App) startup(ctx context.Context) {
 	// Initialize the MCP manager with the Wails event emitter so MCP tools
 	// can send events to the frontend (e.g. open_sql_tab).
 	a.mcpManager = mcp.NewManager(func(eventName string, data interface{}) {
-		wailsruntime.EventsEmit(ctx, eventName, data)
+		a.emit(eventName, data)
 	})
 
 	// Initialize delegated service instances.
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
-		wailsruntime.EventsEmit(ctx, eventName, data)
+		a.emit(eventName, data)
 	})
 	// Let Snowpark resolve the working directory the override-aware way (an
 	// "Open Folder in New Window" instance's folder lives only in memory).
@@ -526,10 +521,7 @@ func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 // Snowflake connection, and flushes logs.
 func (a *App) shutdown(_ context.Context) {
 	// Persist window geometry so it can be restored on the next launch.
-	w, h := wailsruntime.WindowGetSize(a.ctx)
-	x, y := wailsruntime.WindowGetPosition(a.ctx)
-	m := wailsruntime.WindowIsMaximised(a.ctx)
-	_ = session.SaveWindowState(session.WindowState{X: x, Y: y, Width: w, Height: h, Maximized: m})
+	_ = session.SaveWindowState(a.windowState())
 
 	// Stop idle eviction loop.
 	a.sessionConfigMu.Lock()
@@ -651,7 +643,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 			TabID:      querylog.GetTabID(ctx),
 		}
 		entry.ID = a.queryLog.Record(entry)
-		wailsruntime.EventsEmit(a.ctx, "querylog:entry", entry)
+		a.emit("querylog:entry", entry)
 	}
 
 	// Publish the connection under the write lock, then apply feature-flag
@@ -705,7 +697,7 @@ func (a *App) maybeHintMFACaching(client *snowflake.Client) {
 	}
 	status := client.GetMFACachingEnabled(a.fctx(FeatureSessionSetup))
 	if status.Known && !status.Enabled {
-		wailsruntime.EventsEmit(a.ctx, "mfa:enable-caching-hint")
+		a.emit("mfa:enable-caching-hint")
 	}
 }
 
@@ -751,7 +743,7 @@ func (a *App) Disconnect() error {
 	// Clear the session query log on disconnect and notify the frontend so it
 	// drops stale entries (the component may still be mounted).
 	a.queryLog.Clear()
-	wailsruntime.EventsEmit(a.ctx, "querylog:cleared")
+	a.emit("querylog:cleared")
 
 	a.connMu.Lock()
 	client := a.client

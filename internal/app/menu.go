@@ -9,7 +9,6 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // buildMenu constructs the native application menu bar.
@@ -43,7 +42,7 @@ func buildMenu(app *App) *menu.Menu {
 	// tell six otherwise identical Container Services items apart).
 	addConnectionItem := func(m *menu.Menu, label string, accelerator *keys.Accelerator, event string, data ...interface{}) *menu.MenuItem {
 		item := m.AddText(label, accelerator, func(_ *menu.CallbackData) {
-			wailsruntime.EventsEmit(app.ctx, event, data...)
+			app.emit(event, data...)
 		})
 		item.Disabled = true
 		connectionItems = append(connectionItems, item)
@@ -62,35 +61,35 @@ func buildMenu(app *App) *menu.Menu {
 	fileMenu := appMenu.AddSubmenu("File")
 
 	fileMenu.AddText("New Tab", keys.CmdOrCtrl("t"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:new-tab")
+		app.emit("menu:new-tab")
 	})
 
 	fileMenu.AddSeparator()
 
 	fileMenu.AddText("Open File…", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open")
+		app.emit("menu:open")
 	})
 
 	fileMenu.AddText("Open Any File…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open-any")
+		app.emit("menu:open-any")
 	})
 
 	fileMenu.AddText("Open Folder…", keys.Combo("o", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open-folder")
+		app.emit("menu:open-folder")
 	})
 
 	fileMenu.AddText("Open Folder in New Window…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open-folder-new-window")
+		app.emit("menu:open-folder-new-window")
 	})
 
 	fileMenu.AddSeparator()
 
 	fileMenu.AddText("Save", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:save")
+		app.emit("menu:save")
 	})
 
 	fileMenu.AddText("Save As…", keys.Combo("s", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:save-as")
+		app.emit("menu:save-as")
 	})
 
 	// ── View ──────────────────────────────────────────────────────────────────
@@ -105,8 +104,8 @@ func buildMenu(app *App) *menu.Menu {
 		systemItem.Checked = selected == systemItem
 		lightItem.Checked = selected == lightItem
 		darkItem.Checked = selected == darkItem
-		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
-		wailsruntime.EventsEmit(app.ctx, "menu:theme", value)
+		app.updateApplicationMenu()
+		app.emit("menu:theme", value)
 	}
 
 	systemItem = appearanceMenu.AddRadio("System", true, nil, func(_ *menu.CallbackData) {
@@ -122,21 +121,21 @@ func buildMenu(app *App) *menu.Menu {
 	appearanceMenu.AddSeparator()
 
 	appearanceMenu.AddText("Customize Layout…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:customize-layout")
+		app.emit("menu:customize-layout")
 	})
 
 	viewMenu.AddSeparator()
 	viewMenu.AddText("Editor Preferences…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:editor-preferences")
+		app.emit("menu:editor-preferences")
 	})
 	viewMenu.AddText("Logging Preferences…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:logging-preferences")
+		app.emit("menu:logging-preferences")
 	})
 	viewMenu.AddText("File Watching…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:file-watching")
+		app.emit("menu:file-watching")
 	})
 	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
+		app.emit("menu:feature-flags")
 	})
 
 	// ── Tools ─────────────────────────────────────────────────────────────────
@@ -145,33 +144,33 @@ func buildMenu(app *App) *menu.Menu {
 	// to live under View (MCP Sessions, Query Log, Session Management).
 	toolsMenu := appMenu.AddSubmenu("Tools")
 	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
+		app.emit("menu:code-snippets")
 	})
 	toolsMenu.AddSeparator()
 	addConnectionItem(toolsMenu, "Tag Management…", nil, "menu:tag-management")
 	toolsMenu.AddSeparator()
 	addConnectionItem(toolsMenu, "Export Database DDL…", nil, "menu:export-ddl")
 	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
+		app.emit("menu:export-path-format")
 	})
 	toolsMenu.AddSeparator()
 	addConnectionItem(toolsMenu, "Schema Migration…", nil, "menu:migration")
 	addConnectionItem(toolsMenu, "Create dbt Project…", nil, "menu:dbt-create")
 	// Scaffolding a template is a purely local workflow — no connection needed.
 	toolsMenu.AddText("New Streamlit App from Template…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:streamlit-template")
+		app.emit("menu:streamlit-template")
 	})
 	toolsMenu.AddSeparator()
 	toolsMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")
+		app.emit("menu:git-operations")
 	})
 	toolsMenu.AddSeparator()
 	toolsMenu.AddText("New Terminal", keys.CmdOrCtrl("`"), func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
+		app.emit("menu:open-terminal")
 	})
 	toolsMenu.AddSeparator()
 	toolsMenu.AddText("Configure AI Inline Completions…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
+		app.emit("menu:configure-ai")
 	})
 	addConnectionItem(toolsMenu, "MCP Sessions…", nil, "menu:mcp-sessions")
 
@@ -182,11 +181,11 @@ func buildMenu(app *App) *menu.Menu {
 
 	var queryLogEnabled *menu.MenuItem
 	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false, nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:query-log-toggle", queryLogEnabled.Checked)
+		app.emit("menu:query-log-toggle", queryLogEnabled.Checked)
 	})
 	app.setQueryLogMenuCheck = func(checked bool) {
 		queryLogEnabled.Checked = checked
-		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
+		app.updateApplicationMenu()
 	}
 
 	queryLogMenu.AddSeparator()
@@ -196,8 +195,8 @@ func buildMenu(app *App) *menu.Menu {
 		logAll.Checked = selected == logAll
 		logUser.Checked = selected == logUser
 		logInternal.Checked = selected == logInternal
-		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
-		wailsruntime.EventsEmit(app.ctx, "menu:query-log-filter", value)
+		app.updateApplicationMenu()
+		app.emit("menu:query-log-filter", value)
 	}
 	logAll = queryLogMenu.AddRadio("Log All Queries", true, nil, func(_ *menu.CallbackData) {
 		setLogFilter(logAll, "all")
@@ -210,23 +209,23 @@ func buildMenu(app *App) *menu.Menu {
 	})
 
 	toolsMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:session-management")
+		app.emit("menu:session-management")
 	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
 	snowparkMenu := appMenu.AddSubmenu("Snowpark")
 	snowparkMenu.AddText("Check Environment…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-check")
+		app.emit("menu:snowpark-check")
 	})
 	snowparkMenu.AddText("Setup Environment…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-setup")
+		app.emit("menu:snowpark-setup")
 	})
 	snowparkMenu.AddSeparator()
 	addConnectionItem(snowparkMenu, "New Notebook…", nil, "menu:snowpark-new-notebook")
 	addConnectionItem(snowparkMenu, "Open Notebook…", nil, "menu:snowpark-open-notebook")
 	snowparkMenu.AddSeparator()
 	snowparkMenu.AddText("Notebook Preferences…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:notebook-preferences")
+		app.emit("menu:notebook-preferences")
 	})
 	snowparkMenu.AddSeparator()
 
@@ -248,30 +247,30 @@ func buildMenu(app *App) *menu.Menu {
 	// ── Help ──────────────────────────────────────────────────────────────────
 	helpMenu := appMenu.AddSubmenu("Help")
 	helpMenu.AddText("About Thaw…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:about")
+		app.emit("menu:about")
 	})
 	helpMenu.AddText("Check for Updates…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:check-for-update")
+		app.emit("menu:check-for-update")
 	})
 	helpMenu.AddSeparator()
 	helpMenu.AddText("Function Catalog…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:function-catalog")
+		app.emit("menu:function-catalog")
 	})
 	helpMenu.AddSeparator()
 	helpMenu.AddText("Keyboard Shortcuts…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:keyboard-shortcuts")
+		app.emit("menu:keyboard-shortcuts")
 	})
 	helpMenu.AddSeparator()
 	helpMenu.AddText("Reveal Log File", nil, func(_ *menu.CallbackData) {
 		if err := app.RevealLogFile(); err != nil {
-			wailsruntime.LogErrorf(app.ctx, "reveal log file failed: %v", err)
+			app.logErrorf("reveal log file failed: %v", err)
 		}
 	})
 
 	// Recompute every gated item from the two inputs (connection + feature
-	// flags) and push the menu to the OS. Callers hold menuMu. The ctx guard
-	// keeps buildMenu usable from tests, which construct an App without a Wails
-	// runtime.
+	// flags) and push the menu to the OS. Callers hold menuMu. updateApplicationMenu
+	// is a no-op when app.ctx is nil, keeping buildMenu usable from tests that
+	// construct an App without a Wails runtime.
 	refresh := func() {
 		for _, item := range connectionItems {
 			item.Disabled = !connected
@@ -280,9 +279,7 @@ func buildMenu(app *App) *menu.Menu {
 		for _, item := range containerItems {
 			item.Disabled = !connected || !containerEnabled
 		}
-		if app.ctx != nil {
-			wailsruntime.MenuUpdateApplicationMenu(app.ctx)
-		}
+		app.updateApplicationMenu()
 	}
 
 	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only items.

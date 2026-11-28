@@ -12,7 +12,7 @@ import {
   WarningOutlined,
   FolderOpenOutlined,
 } from "@ant-design/icons";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../utils/wailsRuntime";
 import {
   ExportAllDatabasesDDL,
   CancelExport,

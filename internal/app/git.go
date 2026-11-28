@@ -7,8 +7,6 @@ import (
 
 	"thaw/internal/config"
 	"thaw/internal/gitrepo"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GetGitConfig returns the persisted git / export settings.
@@ -288,7 +286,7 @@ func (a *App) GitLoginWithOAuth(provider string) (string, error) {
 	defer cancel() // free our flow's server/goroutine on return (idempotent)
 
 	return gitrepo.PerformOAuthFlow(ctx, provider, func(authURL string) {
-		wailsruntime.EventsEmit(a.ctx, "git:oauth-url", authURL)
+		a.emit("git:oauth-url", authURL)
 	})
 }
 

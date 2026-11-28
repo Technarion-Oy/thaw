@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Modal, Spin, Button, Input, Tooltip, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ConfirmSwitch } from "./ConfirmSwitch";
-import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardSetText } from "../../utils/wailsRuntime";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/app/App";
 
