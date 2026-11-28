@@ -13,8 +13,8 @@ import {
 } from "@tanstack/react-table";
 import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { GetPipeCopyHistory } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetPipeCopyHistory } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { computeColumnWidths } from "../../utils/gridMeasure";
 import dayjs from "dayjs";
 
@@ -69,14 +69,17 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, schema, name]);
 
-  const data = result?.rows ?? [];
+  const data = useMemo<unknown[][]>(
+    () => (result?.rows ?? []).map((r) => r ?? []),
+    [result],
+  );
 
   const initialWidths = useMemo(() => {
     if (!result?.columns?.length) return [];
-    return computeColumnWidths(result.columns, result.rows, {
+    return computeColumnWidths(result.columns, data, {
       font: GRID_FONT, minWidth: MIN_COL_WIDTH, maxWidth: MAX_COL_WIDTH, sampleRows: 50,
     });
-  }, [result]);
+  }, [result, data]);
 
   const columns = useMemo<ColumnDef<SortableGridFeatures, unknown[]>[]>(() => {
     if (!result?.columns?.length) return [];

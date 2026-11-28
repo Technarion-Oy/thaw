@@ -43,7 +43,7 @@ import {
   CreateFile,
   DuplicateFile,
   GitGetHeadFileContent,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 import { sigilColor, deriveNewAndPartial } from "../git/gitStatusUtil";
@@ -70,7 +70,7 @@ import {
   activeEditSession,
   type InlineEditSession,
 } from "./fileTreeUtils";
-import type { filesystem } from "../../../wailsjs/go/models";
+import type * as filesystem from "../../../bindings/thaw/internal/filesystem/models";
 
 type FileEntry    = filesystem.FileEntry;
 type SearchMatch  = filesystem.SearchMatch;
@@ -292,6 +292,7 @@ export default function FileBrowser() {
       // Uncapped: drives the tree coloring for every changed file, including
       // beyond the 500-cap arrays.
       for (const [p, cf] of Object.entries(gitStatus.changedPaths ?? {})) {
+        if (!cf) continue;
         const rel = p.replace(/\\/g, "/");
         byRel.set(rel, cf.status);
         addDirs(rel, cf.status);

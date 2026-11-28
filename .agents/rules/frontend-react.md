@@ -9,9 +9,10 @@ description: "React, TypeScript, Ant Design, Monaco Editor, WKWebView, Zustand, 
 Follow these invariants whenever creating or editing files under `frontend/src/`. Full context: `docs/concepts/patterns.md` and `docs/concepts/gotchas.md`.
 
 ## Generated Files & IPC Safety
-- **Never hand-edit** `frontend/wailsjs/` (run `wails generate module` from repo root) or `frontend/src/generated/` (`objectKinds.ts` / `snowflakeDataTypes.ts` — run `go generate ./internal/objectkind/` or `./internal/snowflake/`).
-- Defend every array returned from Go IPC with `?? []` (Wails marshals Go nil slices as `null`).
+- **Never hand-edit** `frontend/bindings/` (run `wails3 generate bindings -ts -i -clean=true` from repo root) or `frontend/src/generated/` (`objectKinds.ts` / `snowflakeDataTypes.ts` — run `go generate ./internal/objectkind/` or `./internal/snowflake/`).
+- Defend every array returned from Go IPC with `?? []` (Wails marshals Go nil slices as `null`, and v3 interface bindings type them as `T[] | null`).
 - Never construct Snowflake DDL inline in React/TS components — collect form values and call Go `Build*Sql` builders over IPC.
+- **Never render untrusted or external content in an `<iframe>`**: Wails v3 does not block bound-method HTTP calls to `/wails/runtime` from child frames on any platform, and same-origin child frames on Linux WebKitGTK can reach the native message handler. Open external URLs via `BrowserOpenURL` from `utils/wailsRuntime`.
 - Add `// @thaw-domain: <Domain Name>` to new domain TS/TSX files and run `go generate ./internal/architecture/`.
 
 ## Ant Design & Modals
@@ -34,9 +35,9 @@ Follow these invariants whenever creating or editing files under `frontend/src/`
   ```
   Type-only consumers receiving the slim namespace must also type against `editor.api.js`.
 - Never register Monaco completion/hover providers inside render — use module-level disposable refs.
-- Never call `navigator.clipboard` (blocked in macOS WKWebView) — use `ClipboardGetText` / `ClipboardSetText` from `utils/wailsRuntime` (never import `wailsjs/runtime` directly; `wailsRuntime.test.ts` guards this) and preserve the split routing in `utils/monacoClipboard.ts` + `App.tsx`.
+- Never call `navigator.clipboard` (blocked in macOS WKWebView) — use `ClipboardGetText` / `ClipboardSetText` from `utils/wailsRuntime` (never import `@wailsio/runtime` directly; `wailsRuntime.test.ts` guards this) and preserve the split routing in `utils/monacoClipboard.ts` + `App.tsx`.
 - Do not remove the `setTimeout(0)` selection defer or capture-phase drag-select workaround in `SqlEditor.tsx` (`handleMount`, #575), and keep `runDiagnostics` guarded by both `model.getVersionId()` and monotonic `diagRunRef` inside `try/catch/finally` (#718).
 
 ## Frontend Testing (Vitest)
 - Run `cd frontend && npx tsc --noEmit && npm test` after edits.
-- There is no Wails runtime in Vitest/CI: mock the **exact** `wailsjs/` module path imported by the code under test (e.g. `wailsjs/go/sqleditor/Service`), otherwise calls throw and silently fall back.
+- There is no Wails runtime in Vitest/CI: mock the **exact** `bindings/` module path imported by the code under test (e.g. `bindings/thaw/internal/sqleditor/service` or `bindings/thaw/internal/app/app`), otherwise calls throw or load `@wailsio/runtime` browser listeners in Node.

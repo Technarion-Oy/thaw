@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Input, Collapse, Tag, Spin, Empty } from "antd";
 import { SafetyCertificateOutlined, SearchOutlined } from "@ant-design/icons";
-import { GetThirdPartyNotices } from "../../../wailsjs/go/app/App";
+import { GetThirdPartyNotices } from "../../../bindings/thaw/internal/app/app";
 import { parseNotices } from "./parseNotices";
 
 interface Props { onClose: () => void; }

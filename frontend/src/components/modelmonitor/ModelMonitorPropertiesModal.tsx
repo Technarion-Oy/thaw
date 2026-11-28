@@ -10,10 +10,10 @@ import {
   LineChartOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, PlusOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterModelMonitor, ListWarehouses, ParseSqlList } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterModelMonitor, ListWarehouses, ParseSqlList } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

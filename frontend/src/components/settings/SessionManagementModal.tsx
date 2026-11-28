@@ -14,8 +14,8 @@ import {
   GetSessionConfig,
   SaveSessionConfig,
   GetDefaultSessionConfig,
-} from "../../../wailsjs/go/app/App";
-import { config } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as config from "../../../bindings/thaw/internal/config/models";
 
 const { Text } = Typography;
 

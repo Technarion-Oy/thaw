@@ -40,8 +40,8 @@ import {
   PickFreezeOutputFile,
   FreezeRequirements,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
-import type { snowpark } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowpark from "../../../bindings/thaw/internal/snowpark/models";
 import { EventsOn } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 
@@ -218,7 +218,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       setCondaPythonOptions(cfg.condaPythonVersions || []);
       setConfigLoaded(true);
     });
-    ListSystemPythons().then(setAvailablePythons);
+    ListSystemPythons().then((pythons) => setAvailablePythons(pythons ?? []));
     // If the environment is already fully set up, pre-mark all steps done
     // and go straight to the package manager. If partially configured (has
     // venv but missing packages), auto-enter "use existing" mode.
@@ -342,7 +342,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setPackagesLoading(true);
     setPackagesError(null);
     ListEnvPackages()
-      .then((pkgs) => { setPackages(pkgs); setPackagesError(null); })
+      .then((pkgs) => { setPackages(pkgs ?? []); setPackagesError(null); })
       .catch((e) => { setPackages([]); setPackagesError(String(e)); })
       .finally(() => setPackagesLoading(false));
   }, [current]);
@@ -406,7 +406,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   // watching, so a stale package table can't be mistaken for fresh data.
   const refreshPackages = async () => {
     try {
-      setPackages(await ListEnvPackages());
+      setPackages((await ListEnvPackages()) ?? []);
       setPackagesError(null);
     } catch (e) {
       setPackagesError(String(e));

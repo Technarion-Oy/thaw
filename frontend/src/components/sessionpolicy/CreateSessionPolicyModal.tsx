@@ -5,13 +5,13 @@
 import { useState } from "react";
 import { Form, Input, InputNumber, Select, Typography, Row, Col } from "antd";
 import { FieldTimeOutlined } from "@ant-design/icons";
-import { BuildCreateSessionPolicySql, ExecDDL, ReconcileSecondaryRoles } from "../../../wailsjs/go/app/App";
+import { BuildCreateSessionPolicySql, ExecDDL, ReconcileSecondaryRoles } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { sessionpolicy as spModels } from "../../../wailsjs/go/models";
+import type * as spModels from "../../../bindings/thaw/internal/sessionpolicy/models";
 
 const { Text } = Typography;
 

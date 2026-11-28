@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Button, Spin, message } from "antd";
 import { SafetyCertificateOutlined } from "@ant-design/icons";
-import { GetLicenseText, AcceptLicense, DeclineLicense } from "../../../wailsjs/go/app/App";
+import { GetLicenseText, AcceptLicense, DeclineLicense } from "../../../bindings/thaw/internal/app/app";
 
 interface Props {
   /** Called after the user accepts and the choice is persisted, to reveal the workspace. */

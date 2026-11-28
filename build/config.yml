@@ -1,0 +1,40 @@
+# Wails v3 project configuration for Thaw.
+# Release version under `info.version` is updated automatically by
+# scripts/update-version.js during semantic-release (release/release.config.js).
+version: '3'
+
+info:
+  companyName: "Technarion Oy"
+  productName: "Thaw"
+  productIdentifier: "com.technarion.thaw"
+  description: "Snowflake Manager — Free Software (GNU GPL v3)"
+  copyright: "Copyright © 2026 Technarion Oy. Licensed under GPL-3.0-or-later."
+  comments: "Snowflake Manager — Free Software (GNU GPL v3)"
+  version: "0.10.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - build/bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 build DEV=true
+      type: blocking
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: wails3 task run
+      type: primary
+      exit_policy: shutdown

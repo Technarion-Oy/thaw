@@ -10,9 +10,9 @@ import {
   CreateStreamlitFromTemplate,
   PickDirectory,
   RevealInFinder,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { BrowserOpenURL } from "../../utils/wailsRuntime";
-import type { streamlittemplate } from "../../../wailsjs/go/models";
+import type * as streamlittemplate from "../../../bindings/thaw/internal/streamlittemplate/models";
 
 const { Text, Link, Paragraph } = Typography;
 

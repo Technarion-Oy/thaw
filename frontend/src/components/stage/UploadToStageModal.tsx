@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { App as AntApp, Form, Input, Switch, Button, Typography } from "antd";
 import { UploadOutlined, FileOutlined } from "@ant-design/icons";
-import { PickAnyFile, UploadFileToStage } from "../../../wailsjs/go/app/App";
+import { PickAnyFile, UploadFileToStage } from "../../../bindings/thaw/internal/app/app";
 import CreateModalShell from "../shared/CreateModalShell";
 import { quoteIdent } from "../shared/ObjectNameCaseControl";
 

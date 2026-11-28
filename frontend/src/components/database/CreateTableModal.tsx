@@ -7,7 +7,7 @@ import {
 } from "antd";
 import { TableOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecDDL } from "../../../wailsjs/go/app/App";
+import { ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateModalShell from "../shared/CreateModalShell";

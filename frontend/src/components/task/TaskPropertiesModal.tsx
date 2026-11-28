@@ -9,10 +9,11 @@ import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined, SearchOutlined, HistoryOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../bindings/thaw/internal/app/app";
 import CreateTaskModal from "./CreateTaskModal";
 import TaskHistoryModal from "./TaskHistoryModal";
-import type { snowflake, tasks } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as tasks from "../../../bindings/thaw/internal/tasks/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";

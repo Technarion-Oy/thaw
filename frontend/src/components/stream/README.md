@@ -28,7 +28,7 @@ operations (Drop / Rename) are driven from the sidebar context menu in
 - `GetObjectTagReferences("STREAM", db, schema, name, "")` — current tags (no-latency `INFORMATION_SCHEMA.TAG_REFERENCES` read)
 - `AlterStream(db, schema, name, clause)` — `SET / UNSET COMMENT`, `SET / UNSET TAG …`
 
-**`stream.StreamConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`,
+**`stream.StreamConfig` type** from `bindings/thaw/internal/*/models`: `name`, `caseSensitive`,
 `orReplace`, `ifNotExists`, `copyGrants`, `sourceType`, `source`, `appendOnly`,
 `showInitialRows`, `insertOnly`, `comment`. The Create modal keeps form state in a
 local `StrConfig` (the generated class carries a `convertValues` method that a

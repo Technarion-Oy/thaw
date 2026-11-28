@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: Snowpark & Developer Workflows
 
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 /** One SHOW/DESCRIBE row keyed by lower-cased column name, every cell stringified. */
 export type ResultRow = Record<string, string>;
@@ -9,7 +9,7 @@ export type ResultRow = Record<string, string>;
 export function rowsOf(res: snowflake.QueryResult | null | undefined): ResultRow[] {
   const cols = (res?.columns ?? []).map((c) => c.toLowerCase());
   return (res?.rows ?? []).map((r) =>
-    Object.fromEntries(cols.map((c, i) => [c, r[i] == null ? "" : String(r[i])])));
+    Object.fromEntries(cols.map((c, i) => [c, r?.[i] == null ? "" : String(r[i])])));
 }
 
 /** One-line summary of a SHOW COMPUTE POOL INSTANCE FAMILIES row for pickers. */

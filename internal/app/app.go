@@ -11,6 +11,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
@@ -23,7 +27,6 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowpark"
 	"thaw/internal/version"
-	"time"
 )
 
 // tabSession holds the per-tab Snowflake client and the two-phase query
@@ -54,7 +57,16 @@ var tabSessionInitMu sync.Mutex
 
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
-	ctx context.Context
+	ctx        context.Context
+	wailsApp   *application.App
+	mainWindow *application.WebviewWindow
+
+	// closeConfirmed avoids double-prompting when both WindowClosing and
+	// ShouldQuit fire during a single close/quit sequence.
+	closeConfirmed atomic.Bool
+	// windowStateSaved ensures persisted window geometry is captured once while
+	// the native window is still alive (before shutdown destroys it).
+	windowStateSaved atomic.Bool
 
 	// connMu guards the shared connection state — client and connectParams —
 	// which Connect/Disconnect write and many IPC methods read. Wails invokes
@@ -216,13 +228,63 @@ func workdirOverrideArg() string {
 	return ""
 }
 
-// startup is called by the Wails runtime after the application window is ready.
-// It stores the application context and initializes logging.
+// ServiceStartup implements application.ServiceStartup and runs when the Wails
+// v3 runtime initializes services.
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	a.startup(ctx)
+	return nil
+}
+
+// ServiceShutdown implements application.ServiceShutdown and runs during Wails
+// v3 application teardown.
+func (a *App) ServiceShutdown() error {
+	a.shutdown(a.ctx)
+	return nil
+}
+
+// confirmClose guards window close and application quit against losing an
+// in-flight Snowflake query. Returns true when close/quit may proceed.
+func (a *App) confirmClose() bool {
+	if a.closeConfirmed.Load() {
+		return true
+	}
+	if !a.isQueryRunning() {
+		return true
+	}
+	result, err := a.confirmDialog(confirmDialogOpts{
+		title:         "Query running",
+		message:       "A query is currently running. Close anyway?",
+		buttons:       []string{"Close anyway", "Cancel"},
+		defaultButton: "Cancel",
+		cancelButton:  "Cancel",
+	})
+	if err != nil || result != "Close anyway" {
+		return false
+	}
+	a.closeConfirmed.Store(true)
+	return true
+}
+
+// saveWindowStateOnce captures and persists the window geometry at most once
+// while the main window is still alive.
+func (a *App) saveWindowStateOnce() {
+	if a.mainWindow == nil {
+		return
+	}
+	if !a.windowStateSaved.CompareAndSwap(false, true) {
+		return
+	}
+	st := a.windowState()
+	if st.Width >= 100 && st.Height >= 100 {
+		_ = session.SaveWindowState(st)
+	}
+}
+
+// startup is called by ServiceStartup when the Wails runtime initializes the
+// application. It stores the application context and initializes logging and
+// delegated services.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	if a.savedWindowState != nil {
-		a.restoreWindowState(*a.savedWindowState)
-	}
 	a.logCleanup = logger.Init()
 	// Grey out flag-gated native menu items whose feature is switched off.
 	a.syncMenuFeatureFlags()
@@ -255,7 +317,28 @@ func (a *App) startup(ctx context.Context) {
 	// Let Snowpark resolve the working directory the override-aware way (an
 	// "Open Folder in New Window" instance's folder lives only in memory).
 	snowpark.SetWorkdirProvider(a.currentWorkdir)
-	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
+	a.snowparkSvc = snowpark.NewService(ctx, snowpark.Runtime{
+		Emit: func(eventName string, data any) {
+			a.emit(eventName, data)
+		},
+		OnEvent: func(eventName string, callback func(data any)) {
+			a.onEvent(eventName, callback)
+		},
+		OpenFile: func(title string, filters []snowpark.FileFilter) (string, error) {
+			ff := make([]fileFilter, len(filters))
+			for i, f := range filters {
+				ff[i] = fileFilter{displayName: f.DisplayName, pattern: f.Pattern}
+			}
+			return a.openFileDialog(openDialogOpts{title: title, filters: ff})
+		},
+		SaveFile: func(title, defaultFilename string, filters []snowpark.FileFilter) (string, error) {
+			ff := make([]fileFilter, len(filters))
+			for i, f := range filters {
+				ff[i] = fileFilter{displayName: f.DisplayName, pattern: f.Pattern}
+			}
+			return a.saveFileDialog(saveDialogOpts{title: title, defaultFilename: defaultFilename, filters: ff})
+		},
+	}, func(tabId, role, wh, db, schema string) {
 		if val, ok := a.tabSessions.Load(tabId); ok {
 			ts := val.(*tabSession)
 			ts.inUse.Add(1)
@@ -520,8 +603,8 @@ func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 // It stops the embedded terminal, cancels any in-flight query, closes the
 // Snowflake connection, and flushes logs.
 func (a *App) shutdown(_ context.Context) {
-	// Persist window geometry so it can be restored on the next launch.
-	_ = session.SaveWindowState(a.windowState())
+	// Persist window geometry if WindowClosing/ShouldQuit did not already save it.
+	a.saveWindowStateOnce()
 
 	// Stop idle eviction loop.
 	a.sessionConfigMu.Lock()

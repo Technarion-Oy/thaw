@@ -7,14 +7,14 @@ import {
   Form, Input, Select, Space, Typography, Button, Collapse,
 } from "antd";
 import { GoldOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateIcebergTableSql, ExecDDL, ListExternalVolumes, ListIntegrations } from "../../../wailsjs/go/app/App";
+import { BuildCreateIcebergTableSql, ExecDDL, ListExternalVolumes, ListIntegrations } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import TagInput from "../shared/TagInput";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { icebergtable } from "../../../wailsjs/go/models";
+import type * as icebergtable from "../../../bindings/thaw/internal/icebergtable/models";
 
 const { Text } = Typography;
 

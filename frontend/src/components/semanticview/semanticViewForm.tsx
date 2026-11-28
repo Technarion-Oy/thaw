@@ -6,8 +6,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { Button, Checkbox, Input, InputNumber, Select, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { ListObjects, ListUserSchemas, GetTableColumns } from "../../../wailsjs/go/app/App";
-import type { semanticview, snowflake } from "../../../wailsjs/go/models";
+import { ListObjects, ListUserSchemas, GetTableColumns } from "../../../bindings/thaw/internal/app/app";
+import type * as semanticview from "../../../bindings/thaw/internal/semanticview/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagInput from "../shared/TagInput";
 import { TABLE_LIKE_KINDS } from "../shared/objectKinds";
 import type { TagItem } from "../shared/TagInput";
@@ -145,8 +146,8 @@ export const duplicateRelationshipNames = (relationships: SemRelationship[]): Se
  * either.
  */
 export const isCompleteRelationship = (r: SemRelationship) => {
-  if (!r.name.trim() || !r.table.trim() || !r.refTable.trim() || r.columns.length === 0) return false;
-  if (r.joinType === "ASOF") return r.refColumns.length > 0;
+  if (!r.name.trim() || !r.table.trim() || !r.refTable.trim() || (r.columns ?? []).length === 0) return false;
+  if (r.joinType === "ASOF") return (r.refColumns ?? []).length > 0;
   if (r.joinType === "BETWEEN") return !!r.rangeStart.trim() && !!r.rangeEnd.trim();
   return true;
 };
@@ -801,7 +802,7 @@ export function ExpressionsSection({
               />
               <div style={{ flexBasis: "100%" }}>
                 <NonAdditiveEditor
-                  rows={r.nonAdditiveBy}
+                  rows={r.nonAdditiveBy ?? []}
                   dimensions={dimensionNames}
                   onChange={(v) => patch(i, { nonAdditiveBy: v })}
                 />

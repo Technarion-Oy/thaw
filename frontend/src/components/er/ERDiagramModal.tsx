@@ -4,9 +4,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Modal, Button, Checkbox, message } from "antd";
 import { CopyOutlined, EditOutlined } from "@ant-design/icons";
-import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../wailsjs/go/app/App";
+import { ListSchemas, FindJoinPaths, BuildJoinState } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
-import type { snowflake, erdesigner } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as erdesigner from "../../../bindings/thaw/internal/erdesigner/models";
 import { tableKey, type JoinQueryState, type JoinPath, type DesignerTable } from "./erTypes";
 import { buildMermaid } from "./buildMermaid";
 import ERDesigner from "./ERDesigner";
@@ -49,13 +50,13 @@ interface Props {
 
 export default function ERDiagramModal({ database, data, onClose, onDesignerSuccess }: Props) {
   const dataSchemas = useMemo(
-    () => [...new Set(data.tables.map((t) => t.schema))],
+    () => [...new Set((data.tables ?? []).map((t) => t.schema))],
     [data],
   );
 
   const [dbSchemas, setDbSchemas] = useState<string[]>([]);
   useEffect(() => {
-    ListSchemas(database).then(setDbSchemas).catch(() => {});
+    ListSchemas(database).then((s) => setDbSchemas(s ?? [])).catch(() => {});
   }, [database]);
 
   // Merge schemas from ER data with all database schemas, excluding INFORMATION_SCHEMA
@@ -86,8 +87,8 @@ export default function ERDiagramModal({ database, data, onClose, onDesignerSucc
   // Build a lookup of table columns for the JoinQueryPanel column picker
   const tableColumnsMap = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const t of data.tables) {
-      m.set(tableKey(t.schema, t.name), t.columns.map((c) => c.name));
+    for (const t of data.tables ?? []) {
+      m.set(tableKey(t.schema, t.name), (t.columns ?? []).map((c) => c.name));
     }
     return m;
   }, [data]);

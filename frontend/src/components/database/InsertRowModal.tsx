@@ -16,8 +16,9 @@ import {
   GetTableColumnsWithTypes,
   BuildInsertRowsSql,
   ExecDDL,
-} from "../../../wailsjs/go/app/App";
-import { snowflake, table } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as table from "../../../bindings/thaw/internal/table/models";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { DEFAULT_FUNCTIONS, DEFAULT_FUNCTION_CATEGORIES } from "../shared/builtinFunctions";
@@ -129,17 +130,16 @@ export default function InsertRowModal({ db, schema, table: tableName, onClose, 
   const addRow = () => setRows((prev) => [...prev, columns.map(() => emptyCell())]);
   const removeRow = (rowIdx: number) => setRows((prev) => prev.filter((_r, i) => i !== rowIdx));
 
-  const buildCfg = (): table.InsertRowsConfig =>
-    table.InsertRowsConfig.createFrom({
-      rows: rows.map((row) => ({
-        values: columns.map((c, i) => ({
-          column: c.name,
-          dataType: c.dataType,
-          mode: toBackendMode(row[i]?.mode ?? "value"),
-          value: row[i]?.value ?? "",
-        })),
+  const buildCfg = (): table.InsertRowsConfig => ({
+    rows: rows.map((row) => ({
+      values: columns.map((c, i) => ({
+        column: c.name,
+        dataType: c.dataType,
+        mode: toBackendMode(row[i]?.mode ?? "value"),
+        value: row[i]?.value ?? "",
       })),
-    });
+    })),
+  });
 
   const preview = useSqlPreview(
     () => (columns.length ? BuildInsertRowsSql(db, schema, tableName, buildCfg()) : Promise.resolve("")),

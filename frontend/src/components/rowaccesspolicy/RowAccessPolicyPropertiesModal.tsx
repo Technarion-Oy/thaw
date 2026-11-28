@@ -9,10 +9,10 @@ import {
 import {
   SafetyOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterRowAccessPolicy, GetRowAccessPolicyReferences } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterRowAccessPolicy, GetRowAccessPolicyReferences } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
@@ -371,7 +371,7 @@ export default function RowAccessPolicyPropertiesModal({ db, schema, name, onClo
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

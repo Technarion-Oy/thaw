@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { Form, Input, Checkbox, Select } from "antd";
 import { PartitionOutlined } from "@ant-design/icons";
-import { ExecDDL, ListUserSchemas } from "../../../wailsjs/go/app/App";
+import { ExecDDL, ListUserSchemas } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl, { identToken, needsQuoting, quoteIdent, quoteQualifiedIdent } from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";

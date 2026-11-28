@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { App as AntApp, Button, Dropdown, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined } from "@ant-design/icons";
-import { DropImageRepository, ListImageRepositories, ListImagesInRepository } from "../../../wailsjs/go/app/App";
+import { DropImageRepository, ListImageRepositories, ListImagesInRepository } from "../../../bindings/thaw/internal/app/app";
 import { friendlyError } from "../common/errors";
 import CreateImageRepositoryModal from "../imagerepository/CreateImageRepositoryModal";
 import ImageRepositoryPropertiesModal from "../imagerepository/ImageRepositoryPropertiesModal";

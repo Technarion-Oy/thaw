@@ -6,7 +6,7 @@ import { Checkbox, Form, Input, InputNumber, Radio, Segmented, Select } from "an
 import { PlayCircleOutlined } from "@ant-design/icons";
 import {
   BuildExecuteInferenceJobServiceSql, BuildExecuteJobServiceSql, ListComputePools, ListWarehouses,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { useQueryStore } from "../../store/queryStore";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
@@ -18,7 +18,7 @@ import SpecEditor from "../service/SpecEditor";
 import { specProblems } from "../service/specDoc";
 import InferenceSpecForm from "./InferenceSpecForm";
 import { loadModelsCached } from "../model/ModelSourcePicker";
-import type { service as svcModels } from "../../../wailsjs/go/models";
+import type * as svcModels from "../../../bindings/thaw/internal/service/models";
 
 interface Props {
   onClose: () => void;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Alert, Radio } from "antd";
-import { GetSnowflakeKeywords } from "../../../wailsjs/go/sqleditor/Service";
+import { GetSnowflakeKeywords } from "../../../bindings/thaw/internal/sqleditor/service";
 
 // ── Identifier helpers ────────────────────────────────────────────────────────
 

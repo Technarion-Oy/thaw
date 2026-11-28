@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { Select, Button, Space } from "antd";
 import { CloseOutlined, ReloadOutlined, PoweroffOutlined } from "@ant-design/icons";
-import { GetAvailableShells, StartShell, WriteShell, ResizeShell, StopShell } from "../../../wailsjs/go/app/App";
+import { GetAvailableShells, StartShell, WriteShell, ResizeShell, StopShell } from "../../../bindings/thaw/internal/app/app";
 import { EventsOn } from "../../utils/wailsRuntime";
 import { useThemeStore } from "../../store/themeStore";
 import { useGitStore } from "../../store/gitStore";
@@ -82,7 +82,7 @@ export default function TerminalPanel({ onClose }: Props) {
     let offExit: (() => void) | null = null;
 
     const init = async () => {
-      const availableShells = await GetAvailableShells();
+      const availableShells = (await GetAvailableShells()) ?? [];
       if (disposed) return;
       setShells(availableShells);
 

@@ -13,8 +13,9 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { GetTaskRunHistory, ListObjects } from "../../../wailsjs/go/app/App";
-import type { tasks, snowflake } from "../../../wailsjs/go/models";
+import { GetTaskRunHistory, ListObjects } from "../../../bindings/thaw/internal/app/app";
+import type * as tasks from "../../../bindings/thaw/internal/tasks/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import { formatTime, formatDuration } from "../../utils/formatTime";
 
@@ -299,7 +300,7 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
   useEffect(() => {
     if (!isRoot) return;
     ListObjects(db, schema)
-      .then((objs) => setTopoOrder(buildTopoOrder(objs)))
+      .then((objs) => setTopoOrder(buildTopoOrder(objs ?? [])))
       .catch(() => {}); // non-fatal — tasks will just be unsorted
   }, [db, schema, isRoot]);
 

@@ -11,8 +11,8 @@ import {
   SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { GetTaskStatuses } from "../../../wailsjs/go/app/App";
-import type { tasks } from "../../../wailsjs/go/models";
+import { GetTaskStatuses } from "../../../bindings/thaw/internal/app/app";
+import type * as tasks from "../../../bindings/thaw/internal/tasks/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;

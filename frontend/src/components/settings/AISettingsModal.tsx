@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
-import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/app/App";
+import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../bindings/thaw/internal/app/app";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { useAIPrefsStore } from "../../store/aiPrefsStore";
 import { SecretStorageIndicator } from "./SecretStorageIndicator";

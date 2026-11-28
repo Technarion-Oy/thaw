@@ -10,8 +10,8 @@ import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
   GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath, PickPrivateKeyFile,
   SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, ClearDefaultProfile, RenameProfile,
-} from "../../../wailsjs/go/app/App";
-import { sfconfig } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as sfconfig from "../../../bindings/thaw/internal/sfconfig/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
 import { invalidateModelsCache } from "../model/ModelSourcePicker";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -251,9 +251,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     return existingProfileNames.has(name);
   })();
 
-  const buildConnectionFromForm = (profileName: string) => {
+  const buildConnectionFromForm = (profileName: string): sfconfig.Connection => {
     const values = form.getFieldsValue(true);
-    return new sfconfig.Connection({
+    return {
       name:                              profileName,
       account:                           values.account || "",
       user:                              values.user || "",
@@ -285,7 +285,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       proxyPassword:                     values.proxyPassword || "",
       proxyProtocol:                     values.proxyProtocol || "",
       noProxy:                           values.noProxy || "",
-    });
+    };
   };
 
   /** Wraps an async profile operation with a ref-based busy guard. */
@@ -463,7 +463,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               </Tooltip>
             </div>
 
-            {cliConfig && cliConfig.connections?.length > 0 ? (
+            {cliConfig && (cliConfig.connections?.length ?? 0) > 0 ? (
               <Select
                 style={{ width: "100%" }}
                 placeholder="Select a connection profile…"
@@ -471,7 +471,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 onClear={clearProfileSelection}
                 value={selectedProfile}
                 allowClear
-                options={cliConfig.connections.map((c) => ({
+                options={(cliConfig.connections ?? []).map((c) => ({
                   value: c.name,
                   label: cliConfig.defaultConnection === c.name ? `${c.name} (default)` : c.name,
                 }))}

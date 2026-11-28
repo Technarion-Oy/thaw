@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Tag, Spin } from "antd";
 import { FunctionOutlined } from "@ant-design/icons";
-import { GetFunctionInfo, BuildFunctionSelectStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../wailsjs/go/app/App";
+import { GetFunctionInfo, BuildFunctionSelectStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../bindings/thaw/internal/app/app";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;

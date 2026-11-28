@@ -29,7 +29,7 @@ jobs:
           - os: windows-latest # cross-compile arm64 on amd64 runner
             platform: windows
             arch: arm64
-          - os: ubuntu-24.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.1-dev
+          - os: ubuntu-24.04   # pinned: ships libgtk-4-dev + libwebkitgtk-6.0-dev
             platform: linux
             arch: amd64
 
@@ -55,10 +55,10 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 
       - name: Download Go dependencies
         run: go mod download
@@ -90,24 +90,27 @@ jobs:
       #   nothing — and it broke once Go toolchain downloads moved under
       #   GOMODCACHE (garble's linker overlay is rejected there). Windows had
       #   already dropped it (issue #820, Defender/SmartScreen heuristics).
-      # -platform:   explicit target to avoid implicit runner-architecture deps.
-      # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
-      #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
-      #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
+      # Platform Taskfiles handle -trimpath, version ldflags, icons, .app bundle
+      # (macOS), and .syso + wails_tools.nsh (Windows).
 
-      - name: Build (macOS & Linux)
-        if: matrix.platform != 'windows'
-        run: wails build -platform ${{ matrix.platform }}/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+      - name: Build & Package (macOS)
+        if: matrix.platform == 'darwin'
+        run: wails3 task darwin:package ARCH=${{ matrix.arch }} VERSION=${{ steps.prep.outputs.version }}
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
-      - name: Build & Package Installer (Windows)
+      - name: Build (Linux)
+        if: matrix.platform == 'linux'
+        run: wails3 task linux:build ARCH=${{ matrix.arch }} VERSION=${{ steps.prep.outputs.version }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Build binary (Windows)
         if: matrix.platform == 'windows'
-        # This first pass
-        # compiles thaw.exe, generates build/windows/installer/wails_tools.nsh,
-        # and produces a throwaway installer whose packed thaw.exe is still
-        # unsigned — it is rebuilt below after the binary is signed.
-        run: wails build -platform windows/${{ matrix.arch }} -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        # Compiles build/bin/thaw.exe with embedded .syso resources and generates
+        # build/windows/installer/wails_tools.nsh. The NSIS installer is packaged
+        # AFTER Azure Trusted Signing signs thaw.exe (issue #820).
+        run: wails3 task windows:build ARCH=${{ matrix.arch }} VERSION=${{ steps.prep.outputs.version }}
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
@@ -138,20 +141,12 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      - name: Repackage installer with the signed binary (Windows)
+      - name: Package installer with the signed binary (Windows)
         if: matrix.platform == 'windows'
-        shell: pwsh
-        # Re-run NSIS so the installer now embeds the freshly signed thaw.exe.
-        # wails_tools.nsh (INFO_*/ARCH/PRODUCT_EXECUTABLE defines) was generated
-        # by the -nsis build above; we only pass the arch binary define, exactly
-        # as documented in build/windows/installer/project.nsi. The OutFile in
-        # project.nsi overwrites the throwaway installer from the build step.
-        run: |
-          $define = if ("${{ matrix.arch }}" -eq "arm64") { "ARG_WAILS_ARM64_BINARY" } else { "ARG_WAILS_AMD64_BINARY" }
-          $exe = (Resolve-Path build/bin/thaw.exe).Path
-          Push-Location build/windows/installer
-          makensis "-D${define}=$exe" project.nsi
-          Pop-Location
+        # Packages the freshly signed build/bin/thaw.exe into
+        # build/bin/thaw-<arch>-installer.exe via build/windows/installer/project.nsi
+        # without rebuilding thaw.exe.
+        run: wails3 task windows:create:nsis:installer ARCH=${{ matrix.arch }} VERSION=${{ steps.prep.outputs.version }}
 
       - name: Sign installer (Windows)
         if: matrix.platform == 'windows'
@@ -173,7 +168,7 @@ jobs:
         if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-${{ matrix.arch }}.zip" thaw.app
+          ditto -c -k --keepParent thaw.app "thaw-${{ steps.prep.outputs.version }}-darwin-${{ matrix.arch }}.zip"
 
       - name: Rename Windows binaries
         if: matrix.platform == 'windows'

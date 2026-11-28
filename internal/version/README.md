@@ -24,15 +24,15 @@ with the real semver string during release builds by passing `-ldflags` to the G
 Set the version at build time:
 
 ```bash
-# Wails release build
-wails build -ldflags "-X thaw/internal/version.Version=1.2.3"
+# Wails v3 release build
+wails3 task darwin:package VERSION=1.2.3
 
 # Plain go build
 go build -ldflags "-X thaw/internal/version.Version=1.2.3" .
 ```
 
 Consumers:
-- `internal/app/run.go` — passes `version.Version` to `wails.Run` (window title / about box).
+- `internal/app/run.go` — configures the Wails v3 application and window.
 - `internal/crashreport` — embeds version in crash JSON via `crashreport.Init(version.Version)`.
 - `internal/app/app.go` — returns `version.Version` as part of the `AppInfo` IPC response.
 - `internal/updater` / `internal/app/updater.go` — compares `version.Version` against the latest GitHub release tag; the update check is **skipped entirely when `Version == "dev"`**.

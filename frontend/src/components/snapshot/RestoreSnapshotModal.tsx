@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { Alert, Form, Input, Modal } from "antd";
-import { UndropSnapshot } from "../../../wailsjs/go/app/App";
+import { UndropSnapshot } from "../../../bindings/thaw/internal/app/app";
 import { friendlyError } from "../common/errors";
 
 interface Props {

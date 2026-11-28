@@ -1,21 +1,21 @@
 # Architecture
 
-Thaw is a native desktop Snowflake manager built with **Wails v2**: a Go backend and a React/TypeScript frontend compiled into a single binary. The frontend is embedded via `//go:embed all:frontend/dist` in `main.go`.
+Thaw is a native desktop Snowflake manager built with **Wails v3**: a Go backend and a React/TypeScript frontend compiled into a single binary. The frontend is embedded via `//go:embed all:frontend/dist` in `main.go`.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Frontend (React 18 + TS, Ant Design, Monaco, TanStack)      │
+│  Frontend (React 19 + TS, Ant Design, Monaco, TanStack)      │
 │  pages/ · components/ · store/ (Zustand) · utils/            │
 └───────────────▲─────────────────────────────┬───────────────┘
-                │  wailsjs/ (auto-generated)   │
-                │  EventsOn(...)               │  App.ts / Service.ts calls
+                │  @wailsio/runtime           │  frontend/bindings/ (auto-generated)
+                │  EventsOn(...)              │  app.ts / service.ts calls
 ┌───────────────┴─────────────────────────────▼───────────────┐
-│  Wails runtime bridge                                        │
+│  Wails v3 runtime bridge                                     │
 └───────────────▲─────────────────────────────┬───────────────┘
-                │  EventsEmit(ctx, ...)        │  method dispatch
+                │  a.emit(...)                │  method dispatch
 ┌───────────────┴─────────────────────────────▼───────────────┐
 │  Go backend                                                  │
-│  internal/app  (App struct — all IPC methods, thin delegators)│
+│  internal/app  (App service — all IPC methods, thin delegators)│
 │  internal/sqleditor.Service (separate Wails-bound service)   │
 │  internal/<domain> packages (SQL builders, parsers, logic)   │
 │  internal/snowflake (gosnowflake driver wrapper + pool)      │
@@ -27,16 +27,16 @@ Thaw is a native desktop Snowflake manager built with **Wails v2**: a Go backend
 
 ## IPC flow
 
-1. A component calls a generated binding in `frontend/wailsjs/go/app/App.ts` (or `wailsjs/go/sqleditor/Service.ts` for SQL-editor analysis).
-2. The Wails runtime dispatches to the matching Go method on `*App` (package `internal/app`) or the bound `Service`.
+1. A component calls a generated binding in `frontend/bindings/thaw/internal/app/app.ts` (or `frontend/bindings/thaw/internal/sqleditor/service.ts` for SQL-editor analysis).
+2. The Wails v3 runtime dispatches to the matching Go method on `*App` (package `internal/app`) or the bound `Service`.
 3. `*App` methods are **thin delegators**: nil-check the connection, then call into an `internal/<domain>` package that does the real work.
-4. Results flow back as JSON; long-running work emits Wails events (`EventsEmit(ctx, "event:name", payload)`) which components subscribe to with `EventsOn(...)`.
+4. Results flow back as JSON; long-running work emits Wails events (`a.emit("event:name", payload)`) which components subscribe to via `EventsOn(...)` from `frontend/src/utils/wailsRuntime.ts` (which unwraps Wails v3's `event.data` payload).
 
-`frontend/wailsjs/` is **auto-generated** by `wails generate module` — never edit it by hand. After changing any `*App` method signature, regenerate.
+`frontend/bindings/` is **auto-generated** by `wails3 generate bindings -ts -i -clean=true` — never edit it by hand. After changing any `*App` or `sqleditor.Service` method signature, regenerate.
 
 ## Backend package map
 
-`internal/app/` holds the single `App` struct (lifecycle, tab-session management, `Connect`/`Disconnect`) plus all IPC methods, split across files by domain (`query.go`, `objects.go`, `warehouse.go`, …). `run.go` wires `wails.Run` and the `Bind` array; `menu.go` builds the native menu.
+`internal/app/` holds the single `App` service (lifecycle, tab-session management, `Connect`/`Disconnect`) plus all IPC methods, split across files by domain (`query.go`, `objects.go`, `warehouse.go`, …). `run.go` wires `application.New`, `Services`, and the main window; `menu.go` builds the native menu; `runtime.go` isolates Wails v3 runtime helpers.
 
 Everything else under `internal/` is a focused domain package. Each has its own `README.md`; highlights:
 

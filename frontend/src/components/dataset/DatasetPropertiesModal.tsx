@@ -9,10 +9,10 @@ import {
 import {
   DotChartOutlined, ReloadOutlined, PlusOutlined, MoreOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterDataset, ListDatasetVersions } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterDataset, ListDatasetVersions } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -123,8 +123,8 @@ export default function DatasetPropertiesModal({ db, schema, name, onClose }: Pr
   }));
   const versionData = (versions?.rows ?? []).map((row, ri) => {
     const obj: Record<string, unknown> = { key: ri };
-    row.forEach((cell, ci) => { obj[String(ci)] = cell; });
-    obj.__version = versionNameIdx >= 0 ? String(row[versionNameIdx] ?? "") : "";
+    (row ?? []).forEach((cell, ci) => { obj[String(ci)] = cell; });
+    obj.__version = versionNameIdx >= 0 ? String(row?.[versionNameIdx] ?? "") : "";
     return obj;
   });
 

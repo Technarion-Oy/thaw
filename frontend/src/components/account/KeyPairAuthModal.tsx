@@ -15,8 +15,8 @@ import {
   GenerateKeyPair,
   AlterUserProperty,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
-import type { keypair } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as keypair from "../../../bindings/thaw/internal/keypair/models";
 import { friendlyError } from "../common/PropertyRows";
 import { stripPem } from "./keyPairUtils";
 
@@ -78,7 +78,8 @@ export default function KeyPairAuthModal({
   const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
-    CheckAvailableKeyTools().then((tools) => {
+    CheckAvailableKeyTools().then((rawTools) => {
+      const tools = rawTools ?? [];
       setAvailableTools(tools);
       // Default to openssl if available, otherwise go.
       if (tools.includes("openssl")) setMethod("openssl");

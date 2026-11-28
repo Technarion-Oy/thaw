@@ -11,8 +11,8 @@ import {
 import {
   ExecDDL, BuildCreateFileFormatSql,
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
-} from "../../../wailsjs/go/app/App";
-import type { fileformat } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as fileformat from "../../../bindings/thaw/internal/fileformat/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";

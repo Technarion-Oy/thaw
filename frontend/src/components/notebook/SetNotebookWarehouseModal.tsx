@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Select, Button, Space, Typography, message } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
-import { SetNotebookQueryWarehouse } from "../../../wailsjs/go/app/App";
+import { SetNotebookQueryWarehouse } from "../../../bindings/thaw/internal/app/app";
 import { useSessionStore } from "../../store/sessionStore";
 
 const { Text } = Typography;

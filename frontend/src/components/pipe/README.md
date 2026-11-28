@@ -26,7 +26,7 @@ data (status, copy history) or trigger management actions (refresh).
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl`
 - `ListNotificationIntegrations()` — populates the error integration and integration selects
 
-**`pipe.PipeConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `autoIngest`, `errorIntegration`, `awsSnsTopic`, `integration`, `comment`, `copyStatement`.
+**`pipe.PipeConfig` type** from `bindings/thaw/internal/*/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `autoIngest`, `errorIntegration`, `awsSnsTopic`, `integration`, `comment`, `copyStatement`.
 
 **Monaco in-modal:** `CreatePipeModal` embeds a 120px Monaco editor (SQL language) for the `COPY INTO` statement body. `patchMonacoClipboard` is applied on mount to handle WKWebView clipboard restrictions.
 

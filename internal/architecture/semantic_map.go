@@ -27,6 +27,7 @@ func GetCodebaseSemanticMap() string {
         "main.go"
       ],
       "frontend_paths": [
+        "frontend/bindings/",
         "frontend/src/components/connection/ConnectModal.tsx",
         "frontend/src/components/help/UpdateNotification.tsx",
         "frontend/src/components/settings/FileWatchingModal.tsx",
@@ -37,8 +38,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
         "frontend/src/store/logPrefsStore.ts",
-        "frontend/src/utils/wailsRuntime.ts",
-        "frontend/wailsjs/"
+        "frontend/src/utils/wailsRuntime.ts"
       ],
       "description": "Wails entry points, window state persistence, and Zustand state management."
     },

@@ -5,8 +5,8 @@ import { Modal, Spin, Button, Input, Tooltip, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ConfirmSwitch } from "./ConfirmSwitch";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
-import type { snowflake } from "../../../wailsjs/go/models";
-import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/app/App";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import { SetSessionParameter, SetSessionVariable } from "../../../bindings/thaw/internal/app/app";
 
 interface Props {
   parameters: snowflake.SessionParam[] | null;

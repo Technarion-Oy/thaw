@@ -27,7 +27,7 @@ Follow this procedure when building or updating a feature that spans the Go back
 1. Add the public method on `(a *App)` in the matching `internal/app/<domain>.go` file (not `app.go`):
    - Check connection (`if a.client == nil { return …, apperrors.ErrNotConnected }`) and any required feature flag (`a.GetFeatureFlags().<Flag>`).
    - Delegate in one call to `internal/<domain>` and return domain types.
-2. Run `wails generate module` from the repo root to update `frontend/wailsjs/`. Never edit `frontend/wailsjs/` by hand.
+2. Run `wails3 generate bindings -ts -i -clean=true` from the repo root to update `frontend/bindings/`. Never edit `frontend/bindings/` by hand.
 
 ## 4. Wire Native Menu Items (If Applicable)
 1. In `internal/app/menu.go`, use `addConnectionItem(menu, label, accelerator, "menu:<event>", data...)` for items requiring a Snowflake connection, or `AddText` for offline-capable items.
@@ -40,16 +40,16 @@ Basic functionality ships always-on (issue #567). Add a user-facing toggle only 
 ### Adding a flag
 1. Add the `bool` field to `FeatureFlags` in `internal/config/config.go`, set its default in `DefaultFeatureFlags()`, bump `flagsVersion`, and add migration logic in `MigrateFlags()`.
 2. If admin-lockable, add it to `internal/config/adminconfig.go` and its `_darwin.go` / `_windows.go` policy-key tables.
-3. Run `wails generate module`.
+3. Run `wails3 generate bindings -ts -i -clean=true`.
 4. Add `<FlagRow />` (with `locked={locked.<flag>}`) to `frontend/src/components/settings/FeatureFlagsModal.tsx` and list the field in `frontend/src/store/featureFlagsStore.ts`.
 5. Gate every UI entry point (sidebar, toolbar, menu, modal) via `featureFlagsStore` and enforce on the Go IPC method when relevant.
 
 ### Removing a user toggle
-- **Not admin-lockable**: delete the field from `FeatureFlags`/`DefaultFeatureFlags`/`MigrateFlags`, bump `flagsVersion`, remove `<FlagRow />` and store entry, un-gate consumers, and run `wails generate module`.
+- **Not admin-lockable**: delete the field from `FeatureFlags`/`DefaultFeatureFlags`/`MigrateFlags`, bump `flagsVersion`, remove `<FlagRow />` and store entry, un-gate consumers, and run `wails3 generate bindings -ts -i -clean=true`.
 - **Keep admin lock**: leave `config.go` and `adminconfig.go` fields intact, remove only `<FlagRow />`, and add the field to `ForceAlwaysOnFlags()` in `internal/config/config.go`.
 
 ## 6. Build the Frontend UI
-1. Import bindings from `../../../wailsjs/go/app/App` (or `wailsjs/go/sqleditor/Service`) and guard arrays with `?? []`.
+1. Import bindings from `../../../bindings/thaw/internal/app/app` (or `bindings/thaw/internal/sqleditor/service`) and guard arrays with `?? []`.
 2. Mount modals conditionally (`{open && <Modal open destroyOnClose … />}`) so global drag/resize resets on reopen.
 3. Use `const { modal } = AntApp.useApp()` for confirmations — never static `Modal.confirm`.
 4. If the dialog is reachable from multiple entry points, hold visibility in a small Zustand store and mount it once in `QueryPage.tsx`.

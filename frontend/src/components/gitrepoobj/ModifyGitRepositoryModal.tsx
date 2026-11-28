@@ -13,8 +13,8 @@ import {
   ListSecretsInAccount,
   BuildModifyGitRepositorySql,
   ExecDDL,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

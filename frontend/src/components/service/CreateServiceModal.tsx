@@ -7,13 +7,13 @@ import { Form, Input, Checkbox, Select, InputNumber } from "antd";
 import { DeploymentUnitOutlined } from "@ant-design/icons";
 import {
   BuildCreateServiceSql, ExecDDL, ListComputePools, ListWarehouses,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import ServiceSpecFields, { specReady, type TemplateVar } from "./ServiceSpecFields";
-import type { service as svcModels } from "../../../wailsjs/go/models";
+import type * as svcModels from "../../../bindings/thaw/internal/service/models";
 
 interface Props {
   db: string;

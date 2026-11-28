@@ -6,8 +6,8 @@ import { Checkbox, Form, Input, Select } from "antd";
 import { CameraOutlined } from "@ant-design/icons";
 import {
   BuildCreateSnapshotSql, ExecDDL, ListServicesInAccount, ListServiceVolumes,
-} from "../../../wailsjs/go/app/App";
-import { snapshot } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snapshot from "../../../bindings/thaw/internal/snapshot/models";
 import { friendlyError } from "../common/errors";
 import CreateModalShell from "../shared/CreateModalShell";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
@@ -74,10 +74,10 @@ export default function CreateSnapshotModal({ db, schema, service: initial, onCl
 
   const quotedIdentifiersIgnoreCase = useQuotedIdentifiers();
   const preview = useSqlPreview(
-    () => BuildCreateSnapshotSql(db, schema, snapshot.SnapshotConfig.createFrom({
+    () => BuildCreateSnapshotSql(db, schema, {
       ...cfg, tags, volume, instance,
       serviceDatabase: service?.db ?? "", serviceSchema: service?.schema ?? "", serviceName: service?.name ?? "",
-    })),
+    } as snapshot.SnapshotConfig),
     [db, schema, cfg, tags, service, volume, instance],
     { blankOnError: true },
   );

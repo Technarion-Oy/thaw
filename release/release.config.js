@@ -41,7 +41,12 @@ export default {
     [
       "@semantic-release/git",
       {
-        assets: ["wails.json", "release/CHANGELOG.md"],
+        assets: [
+          "build/config.yml",
+          "build/darwin/Info.plist",
+          "build/darwin/Info.dev.plist",
+          "release/CHANGELOG.md",
+        ],
         message:
           "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
       },

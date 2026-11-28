@@ -96,9 +96,9 @@ import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "react";
 import { buildSearchPredicate, filterTreeLimited } from "./objectSearch";
-import { ListDatabases, ListUserDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterTable, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserDatabases, ListSchemas, ListObjects, ListBasicObjects, SearchAccountObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, AlterTable, AlterDynamicTable, AlterExternalTable, AlterIcebergTable, AlterMaterializedView, AlterAlert, ExecuteAlert, AlterService, AlterModelMonitor, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { useQueryStore } from "../../store/queryStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { insertAtCursor } from "../editor/editorRef";
@@ -1259,7 +1259,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const doLoadDatabases = async () => {
     setLoading(true);
     try {
-      const dbs = await ListDatabases();
+      const dbs = (await ListDatabases()) ?? [];
       setTreeData(
         dbs.map((db) => ({
           title: db,
@@ -1322,7 +1322,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const db = parts[1];
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const schemas = await ListSchemas(db);
+        const schemas = (await ListSchemas(db)) ?? [];
         setData((prev) =>
           updateNode(prev, key, schemas.map((s) => ({
             title:  s,
@@ -1349,13 +1349,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         const cached = basicOnly
           ? useObjectStore.getState().objects.filter((o) => o.db === db && o.schema === schema)
           : [];
-        const objects = cached.length > 0
+        const objects = (cached.length > 0
           ? cached.map((o) => ({ name: o.name, kind: o.kind })) as snowflake.SnowflakeObject[]
           : basicOnly
             ? await ListBasicObjects(db, schema)
-            : await ListObjects(db, schema);
+            : await ListObjects(db, schema)) ?? [];
 
-        const groups: Record<string, typeof objects> = {};
+        const groups: Record<string, snowflake.SnowflakeObject[]> = {};
         for (const obj of objects) {
           const k = (obj.kind || "OTHER").toUpperCase();
           if (!groups[k]) groups[k] = [];
@@ -1818,7 +1818,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     // then rebuild the db node's children without collapsing the open ones.
     let schemaNames: string[];
     try {
-      schemaNames = await ListSchemas(db);
+      schemaNames = (await ListSchemas(db)) ?? [];
     } catch {
       // Shared / restricted databases (e.g. SNOWFLAKE) don't support SHOW
       // SCHEMAS — treat as empty, matching onLoadData's db branch.
@@ -3348,7 +3348,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const sql = `ALTER GIT REPOSITORY ${q(db)}.${q(schema)}.${q(name)} FETCH;`;
     const hide = message.loading("Fetching repository…", 0);
     try {
-      const { ExecDDL } = await import("../../../wailsjs/go/app/App");
+      const { ExecDDL } = await import("../../../bindings/thaw/internal/app/app");
       await ExecDDL(sql);
       hide();
       message.success("Repository fetched successfully");

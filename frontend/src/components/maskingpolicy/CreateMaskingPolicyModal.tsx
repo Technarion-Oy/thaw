@@ -7,13 +7,13 @@ import {
   Form, Input, AutoComplete, Button, Checkbox, Collapse, Typography, Space,
 } from "antd";
 import { EyeInvisibleOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateMaskingPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateMaskingPolicySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { maskingpolicy as mpModels } from "../../../wailsjs/go/models";
+import type * as mpModels from "../../../bindings/thaw/internal/maskingpolicy/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";

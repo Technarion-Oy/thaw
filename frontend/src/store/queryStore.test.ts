@@ -2,6 +2,10 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+vi.mock("../../bindings/thaw/internal/app/app", () => ({
+  ExecuteQuery: vi.fn(),
+}));
+
 // The store persists to localStorage and wires window/document listeners at
 // module load. The vitest environment is "node", so stub the browser globals
 // the store touches *before* importing it (via the dynamic import in loadStore).

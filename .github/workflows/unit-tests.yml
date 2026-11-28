@@ -13,7 +13,8 @@ on:
       - "go.sum"
       - "frontend/src/**"
       - "frontend/package*.json"
-      - "wails.json"
+      - "Taskfile.yml"
+      - "build/config.yml"
       - ".github/workflows/unit-tests.yml"
   pull_request:
     branches: ["main"]
@@ -23,7 +24,8 @@ on:
       - "go.sum"
       - "frontend/src/**"
       - "frontend/package*.json"
-      - "wails.json"
+      - "Taskfile.yml"
+      - "build/config.yml"
       - ".github/workflows/unit-tests.yml"
 
 env:

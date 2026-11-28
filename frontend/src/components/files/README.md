@@ -72,7 +72,7 @@ platform-specific labels.
 
 ## Patterns & integration
 
-- **IPC**: `ListDirectory`, `ReadFile`, `SearchFiles`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `CopyFile`, `CreateDirectory`, `CreateFile`, `DuplicateFile`, `GetPlatformOS` — all from `wailsjs/go/app/App`. (`StartFileWatcher`/`StopFileWatcher` now live in `QueryPage`.)
+- **IPC**: `ListDirectory`, `ReadFile`, `SearchFiles`, `RevealInFinder`, `DeleteFile`, `DeleteDirectory`, `RenameFile`, `CopyFile`, `CreateDirectory`, `CreateFile`, `DuplicateFile`, `GetPlatformOS` — all from `bindings/thaw/internal/app/app`. (`StartFileWatcher`/`StopFileWatcher` now live in `QueryPage`.)
 - **Events**: subscribes to `fs:changed` Wails events (`EventsOn`); payload is `{ dir: string }`. On receipt, calls `ListDirectory(dir)` and calls `mergeNodes` on the affected subtree to preserve expanded state.
 - **Live git colors**: a debounced `scheduleGitRefresh` (400 ms) re-runs `gitStore.refreshStatus()` so the tree's status colors update without a manual refresh. It fires on the `thaw:file-saved` DOM event (dispatched by `queryStore.markSaved` after every editor save — watcher-independent; its `detail.path` also marks the saved dir self-changed so the watcher echo skips the re-list) and at the top of the `fs:changed` handler (covering external edits and the app's own file ops, even when the tree update is self-change-suppressed).
 - **Stores**: reads `gitStore.exportDir` (directory root) and `gitStore.status` (for the git-status overlay), plus `gitStore.stageFile`/`unstageFile`/`discardFile` actions; `queryStore` (to open files as new SQL tabs), `diffStore` (to queue files for DDL diff), `featureFlagsStore` (to gate FS watcher).

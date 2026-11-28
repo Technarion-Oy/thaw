@@ -5,13 +5,13 @@
 import { useState } from "react";
 import { Form, Input, Typography } from "antd";
 import { GroupOutlined } from "@ant-design/icons";
-import { BuildCreateAggregationPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateAggregationPolicySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { aggregationpolicy as apModels } from "../../../wailsjs/go/models";
+import type * as apModels from "../../../bindings/thaw/internal/aggregationpolicy/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";

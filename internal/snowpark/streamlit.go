@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Events emitted by the local Streamlit preview, consumed by the deploy modal:
@@ -74,13 +72,10 @@ func defaultStreamlitCommand(appDir, mainFile string, port int) (*exec.Cmd, erro
 	return cmd, nil
 }
 
-// emitPreview emits a preview event. It tolerates a Service with no Wails context
-// (unit tests construct one directly), where there is nothing to emit to.
+// emitPreview emits a preview event. It tolerates a Service with no runtime
+// hooks (unit tests construct one directly), where there is nothing to emit to.
 func (s *Service) emitPreview(event string, data any) {
-	if s.ctx == nil {
-		return
-	}
-	wailsruntime.EventsEmit(s.ctx, event, data)
+	s.emit(event, data)
 }
 
 // StreamlitPreviewResult reports where a started preview is served.

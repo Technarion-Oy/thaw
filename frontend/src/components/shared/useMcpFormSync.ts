@@ -5,9 +5,9 @@
 import { useEffect } from "react";
 import { Form } from "antd";
 import type { FormInstance } from "antd";
-import { UpdateOpenFormState, ClearOpenFormState } from "../../../wailsjs/go/app/App";
+import { UpdateOpenFormState, ClearOpenFormState } from "../../../bindings/thaw/internal/app/app";
 import { EventsOn } from "../../utils/wailsRuntime";
-import { mcp } from "../../../wailsjs/go/models";
+import type * as mcp from "../../../bindings/thaw/internal/mcp/models";
 
 /**
  * Exposes an Ant Design form to the MCP `get_open_form` / `fill_open_form`
@@ -27,9 +27,10 @@ export function useMcpFormSync(
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      UpdateOpenFormState(new mcp.OpenFormState({
+      const state: mcp.OpenFormState = {
         form: formId, kind, provider, fields: form.getFieldsValue(true),
-      })).catch(() => {});
+      };
+      UpdateOpenFormState(state).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
   }, [formId, form, kind, provider, values]);

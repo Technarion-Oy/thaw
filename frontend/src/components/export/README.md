@@ -25,7 +25,7 @@ Covers two distinct concerns:
 
 ## Patterns & integration
 
-- **IPC**: `ExportAllDatabasesDDL` (its `overloadNaming` / `pathTemplate` fields override the persisted preference for one export; an empty string means "use the saved one"), `CancelExport`, `ListExportableDatabases`, `ListUserSchemas`, `RevealInFinder`, `ExportTableData`, `ImportTableData`, `PickDataFilesByFormat`, `ReadFileHead`, `ListFileFormats`, `ListObjects`, `PickDirectory` — all from `wailsjs/go/app/App`.
+- **IPC**: `ExportAllDatabasesDDL` (its `overloadNaming` / `pathTemplate` fields override the persisted preference for one export; an empty string means "use the saved one"), `CancelExport`, `ListExportableDatabases`, `ListUserSchemas`, `RevealInFinder`, `ExportTableData`, `ImportTableData`, `PickDataFilesByFormat`, `ReadFileHead`, `ListFileFormats`, `ListObjects`, `PickDirectory` — all from `bindings/thaw/internal/app/app`.
 - **Events**: `ExportOptionsModal` subscribes to `ddl:progress` Wails events to stream per-database export progress; the subscription is established immediately before calling `ExportAllDatabasesDDL` and torn down in the `finally` block.
 - **Export directory**: `ExportOptionsModal` reads `exportDir` from `gitStore` (shared with the Git panel and `FileBrowser`). The directory picker calls `gitStore.pickExportDir()`.
 - **`thaw:export-complete`**: dispatched as a DOM `CustomEvent` after export finishes; `FileBrowser` (and potentially other components) listen for it to refresh the file tree.

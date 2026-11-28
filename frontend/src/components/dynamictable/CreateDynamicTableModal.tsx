@@ -9,7 +9,7 @@ import {
 import { RetweetOutlined } from "@ant-design/icons";
 import {
   BuildCreateDynamicTableSql, ExecDDL, ListWarehouses,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -17,7 +17,7 @@ import TagInput from "../shared/TagInput";
 import MonacoSqlField from "../shared/MonacoSqlField";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { dynamictable } from "../../../wailsjs/go/models";
+import type * as dynamictable from "../../../bindings/thaw/internal/dynamictable/models";
 
 interface Props {
   db: string;

@@ -15,7 +15,7 @@ Handles the full connection flow: displaying the connect form, loading and manag
 
 ## Patterns & integration
 
-- **IPC**: `ConnectModal` imports from `wailsjs/go/app/App` and calls `internal/app/profiles.go` delegators (profile CRUD) and `internal/sfconfig/writer.go` (TOML text-level mutations) via `internal/app`.
+- **IPC**: `ConnectModal` imports from `bindings/thaw/internal/app/app` and calls `internal/app/profiles.go` delegators (profile CRUD) and `internal/sfconfig/writer.go` (TOML text-level mutations) via `internal/app`.
 - **Stores**:
   - `useConnectionStore` — `setConnected(values)` is called on successful connection to propagate session context app-wide.
   - `useFeatureFlagsStore` — `flags.snowflakeCLIProfileManager` gates the entire profile manager section (dropdown, action buttons, divider). When disabled, the connect form is still shown but profile management is hidden.

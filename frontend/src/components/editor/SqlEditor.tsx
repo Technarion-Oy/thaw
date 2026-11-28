@@ -26,9 +26,9 @@ import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../wailsjs/go/app/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GitGetHeadFileContent } from "../../../bindings/thaw/internal/app/app";
 import { SNOWFLAKE_DATA_TYPES } from "../../generated/snowflakeDataTypes";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, GetUseContextAt, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateDataTypes, ValidateGrammar, ValidateAntiPatterns, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ResolveStoreObject as ResolveStoreObjectIPC, GetUseContextAt, ComputeGitLineDiff, StarSelectAt, FromSourceCount } from "../../../bindings/thaw/internal/sqleditor/service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { FUNCTION_CATEGORIES } from "./snowflakeSql";
 import { getOrCreateMenuId } from "./monacoMenu";
@@ -365,7 +365,7 @@ function makeSugg(label: string, detail: string, sortText: string, range: any, m
 }
 
 // resolveRefs has been moved to the backend (sqleditor.ResolveTableRefs).
-// Use the `ResolveTableRefs` IPC method from wailsjs/go/sqleditor/Service.
+// Use the `ResolveTableRefs` IPC method from bindings/thaw/internal/sqleditor/service.
 
 function monacoKind(monaco: any, kind: string): number {
   const K = monaco.languages.CompletionItemKind;
@@ -651,12 +651,12 @@ let _expandWildcardRegistered = false;
     let refs: ResolvedRef[];
     try {
       const rawRefs = await ParseJoinTableRefs(stmtSql);
-      refs = await ResolveTableRefs(
+      refs = (await ResolveTableRefs(
         (rawRefs || []) as any[], // eslint-disable-line @typescript-eslint/no-explicit-any
         useObjectStore.getState().objects.map((o) => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         { database: "", schema: "" } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         sessionForTab(_ctxMenuTabId) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-      );
+      )) ?? [];
     } catch { return; }
     if (!refs || refs.length === 0 || stale()) return;
 
@@ -1308,19 +1308,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const { added, modified, deleted } = await ComputeGitLineDiff(headLines, currentLines, MAX_DIFF_LINES);
 
       const decorations: any[] = [];
-      for (const lineNum of added) {
+      for (const lineNum of added ?? []) {
         decorations.push({
           range: new monaco.Range(lineNum, 1, lineNum, 1),
           options: { linesDecorationsClassName: "git-gutter-added" },
         });
       }
-      for (const lineNum of modified) {
+      for (const lineNum of modified ?? []) {
         decorations.push({
           range: new monaco.Range(lineNum, 1, lineNum, 1),
           options: { linesDecorationsClassName: "git-gutter-modified" },
         });
       }
-      for (const lineNum of deleted) {
+      for (const lineNum of deleted ?? []) {
         decorations.push({
           range: new monaco.Range(lineNum, 1, lineNum, 1),
           options: { linesDecorationsClassName: "git-gutter-deleted" },
@@ -1523,9 +1523,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                                    UC(tbl.db) === UC(resolvedMatch.db) &&
                                    UC(tbl.schema) === UC(resolvedMatch.schema)
                     );
-                    if (inEditorMatch && inEditorMatch.cols.length > 0) {
+                    if (inEditorMatch && (inEditorMatch.cols ?? []).length > 0) {
                       return {
-                        suggestions: inEditorMatch.cols.map((col: any, i: number) => ({
+                        suggestions: (inEditorMatch.cols ?? []).map((col: any, i: number) => ({
                           label:      col.name,
                           kind:       monaco.languages.CompletionItemKind.Field,
                           insertText: quoteIfNec(col.name),
@@ -1829,7 +1829,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const referencedTableNames = new Set((ctx?.resolvedRefs || []).map((r: any) => UC(r.name)));
         for (const tbl of (ctx?.inEditorTables || [])) {
           if (!referencedTableNames.has(UC(tbl.name))) continue;
-          for (const col of tbl.cols) {
+          for (const col of tbl.cols ?? []) {
             const colName = col.name || (col as any);
             if (!seenColKeys.has(UC(colName))) {
               seenColKeys.add(UC(colName));
@@ -2903,7 +2903,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const esc = (s: string) => s.replace(/"/g, '""');
         let sql: string;
         try {
-          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          const columns = (await GetTableColumns(info.db, info.schema, info.name)) ?? [];
           const colList = columns.map((c) => `    "${esc(c)}"`).join(",\n");
           sql = `SELECT\n${colList}\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}";`;
         } catch {
@@ -2932,7 +2932,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       return;
     }
     void (async () => {
-      const ranges = await GetSqlStatementRanges(sql);
+      const ranges = (await GetSqlStatementRanges(sql)) ?? [];
       const range  = ranges[activeStmtIdx];
       if (!range) { dec.clear(); return; }
       dec.set([{

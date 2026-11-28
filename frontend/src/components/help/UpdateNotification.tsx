@@ -4,9 +4,9 @@
 import { useEffect, useState } from "react";
 import { Alert, Modal, Button, Spin, message } from "antd";
 import { CloudDownloadOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { CheckForUpdate } from "../../../wailsjs/go/app/App";
+import { CheckForUpdate } from "../../../bindings/thaw/internal/app/app";
 import { BrowserOpenURL, EventsOn } from "../../utils/wailsRuntime";
-import type { updater } from "../../../wailsjs/go/models";
+import type * as updater from "../../../bindings/thaw/internal/updater/models";
 
 // UpdateNotification renders the app-update UI: a dismissible top banner when the
 // background check finds a newer release, and a modal (opened from the banner or

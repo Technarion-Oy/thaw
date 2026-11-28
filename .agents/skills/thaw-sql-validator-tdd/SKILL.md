@@ -48,5 +48,5 @@ Use this red-green-refactor loop to fix bugs or add Snowflake SQL grammar and di
    ```bash
    go test -race ./...
    ```
-2. If you changed any exported method signature on `sqleditor.Service`, run `wails generate module` and `cd frontend && npx tsc --noEmit && npm test`.
+2. If you changed any exported method signature on `sqleditor.Service`, run `wails3 generate bindings -ts -i -clean=true` and `cd frontend && npx tsc --noEmit && npm test`.
 3. Update `internal/sqleditor/README.md`, `internal/sqlgrammar/README.md`, `internal/sqltok/README.md`, and `README.md` / `FEATURES.md` in the same PR.

@@ -4,7 +4,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
-import { ExecuteQuery } from "../../wailsjs/go/app/App";
+import { ExecuteQuery } from "../../bindings/thaw/internal/app/app";
 
 // Wraps localStorage to swallow QuotaExceededError on setItem.
 // Persistence is best-effort — the in-memory store remains authoritative.
@@ -694,7 +694,16 @@ export const useQueryStore = create<QueryState>()(
       tabs: patchTab(state.tabs, state.activeTabId, { sql, result: null, error: null }),
     }));
     try {
-      const res = await ExecuteQuery(sql);
+      const raw = await ExecuteQuery(sql);
+      const res: QueryResult | null = raw
+        ? {
+            columns: raw.columns ?? [],
+            rows: (raw.rows ?? []).map((r) => r ?? []),
+            rowsAffected: raw.rowsAffected,
+            queryID: raw.queryID,
+            truncated: raw.truncated,
+          }
+        : null;
       set((state) => ({
         result: res,
         error: null,

@@ -42,15 +42,11 @@ describe("qualifiedOptionsFromResult", () => {
 
   it("degrades to no options rather than throwing when columns is null/undefined", () => {
     const res = { columns: null, rows: [["region"]], rowsAffected: 0, queryID: "", truncated: false };
-    // @ts-expect-error columns is typed as string[], but a QueryResult that
-    // actually arrives with a null columns field must still not throw.
     expect(qualifiedOptionsFromResult(res)).toEqual([]);
   });
 
   it("degrades to no options rather than throwing when rows is null/undefined", () => {
     const res = { columns: ["name"], rows: null, rowsAffected: 0, queryID: "", truncated: false };
-    // @ts-expect-error rows is typed as any[][], but a QueryResult that
-    // actually arrives with a null rows field must still not throw.
     expect(qualifiedOptionsFromResult(res)).toEqual([]);
   });
 });

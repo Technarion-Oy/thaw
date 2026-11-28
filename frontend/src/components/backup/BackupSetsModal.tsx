@@ -19,8 +19,8 @@ import {
 } from "antd";
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
-import type { backup } from "../../../wailsjs/go/models";
+import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../bindings/thaw/internal/app/app";
+import type * as backup from "../../../bindings/thaw/internal/backup/models";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import { escapeTextLit } from "../shared/sqlEscape";
 import dayjs from "dayjs";

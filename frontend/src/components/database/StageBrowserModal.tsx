@@ -15,9 +15,9 @@ import {
 } from "@tanstack/react-table";
 import { sortableGridFeatures, type SortableGridFeatures } from "../../utils/tableFeatures";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../wailsjs/go/app/App";
+import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../bindings/thaw/internal/app/app";
 import { formatBytes } from "../../utils/formatBytes";
-import type { stage } from "../../../wailsjs/go/models";
+import type * as stage from "../../../bindings/thaw/internal/stage/models";
 
 const { Text } = Typography;
 

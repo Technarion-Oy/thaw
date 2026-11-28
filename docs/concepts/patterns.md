@@ -5,8 +5,8 @@ Reusable patterns used throughout Thaw. Per-module specifics live in each folder
 ## Adding a Go → frontend IPC method
 
 1. Add a public method on `*App` (receiver `a *App`) to the `internal/app/<domain>.go` file matching its domain (query methods → `query.go`, object listing → `objects.go`). All files in `internal/app/` are `package app`, so methods bind regardless of which file they live in. Keep `app.go` for the `App` struct, lifecycle, and session management; `run.go`/`menu.go` hold the Wails wiring and native menu.
-2. Run `wails generate module` to regenerate `frontend/wailsjs/`.
-3. Import from `"../../../wailsjs/go/app/App"` in the component.
+2. Run `wails3 generate bindings -ts -i -clean=true` to regenerate `frontend/bindings/`.
+3. Import from `"../../../bindings/thaw/internal/app/app"` in the component.
 
 ## Thin-delegator pattern
 
@@ -31,7 +31,7 @@ Conventions for the domain package:
 
 ## Emitting events Go → frontend
 
-All Wails runtime calls in `internal/app/` go through the thin helpers in `internal/app/runtime.go` (guarded by `TestWailsRuntimeIsolatedToRuntimeFile`), and all frontend runtime calls (`EventsOn`, `EventsEmit`, `ClipboardGetText`, `ClipboardSetText`, `BrowserOpenURL`) go through `frontend/src/utils/wailsRuntime.ts` (guarded by `wailsRuntime.test.ts`):
+All Wails runtime calls in `internal/app/` are isolated to the four shell files (`app.go`, `run.go`, `runtime.go`, `menu.go`, guarded by `TestWailsRuntimeIsolatedToShellFiles`), with domain files calling only the thin helpers in `internal/app/runtime.go`. All frontend runtime calls (`EventsOn`, `EventsEmit`, `ClipboardGetText`, `ClipboardSetText`, `BrowserOpenURL`) go through `frontend/src/utils/wailsRuntime.ts` (guarded by `wailsRuntime.test.ts`):
 
 ```go
 a.emit("event:name", payload)
@@ -51,7 +51,7 @@ Every item lives in `buildMenu` (`internal/app/menu.go`) and only emits a `menu:
 
 **Several items opening the same dialog** share one event and pass their difference as the trailing `data` payload (the Container Services submenu emits `menu:container-services` with `"pools"`, `"services"`, …), so the frontend needs a single listener. `addConnectionItem` returns the item, so callers that also need to gate it on something else (a feature flag) can collect it.
 
-Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), the mutator flips `Disabled`/`Checked` and calls `app.updateApplicationMenu()`. Call sites must nil-guard the field — tests construct `App` without a menu.
+Menu state that changes at runtime follows the same shape: `buildMenu` assigns a `func(...)` field on `App` (`setMenuConnected`, `setQueryLogMenuCheck`), and the mutator calls `SetEnabled`/`SetChecked` directly on the `*application.MenuItem` (which updates the live native menu item in place on all three platforms — never call `appMenu.Update()` after startup). Call sites must nil-guard the field — tests construct `App` without a menu.
 
 Backend `ErrNotConnected` guards stay in place regardless: greying out is UX, not enforcement.
 
@@ -75,7 +75,7 @@ Backend `ErrNotConnected` guards stay in place regardless: greying out is UX, no
 Flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **View → Enabled Features…**. Most flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install (opt-in flags like `queryLog`/`mcpServer` default to `false`).
 
 1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags`, set it `true` in `DefaultFeatureFlags()`, bump `flagsVersion`, and add migration logic to `MigrateFlags()`.
-2. **`wails generate module`** — regenerates `frontend/wailsjs/go/models.ts`.
+2. **`wails3 generate bindings -ts -i -clean=true`** — regenerates `frontend/bindings/thaw/internal/config/models.ts`.
 3. **`FeatureFlagsModal.tsx`** — add a `<FlagRow>` (with `locked={locked.myNewFeature}`) in the right category.
 4. **In the gated component** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your UI. When a flag is `false`, the feature must be HIDDEN or DISABLED.
 5. **If the feature has a native menu item** — gate it there too. `buildMenu` keeps flag-gated items in their own slice and recomputes `Disabled` from *both* the connection and the flags in one `refresh()` closure; `App.setMenuFeatureFlags` (assigned by `buildMenu`, like `setMenuConnected`) is pushed by `App.syncMenuFeatureFlags` from `startup` and from `SaveFeatureFlags`. Flag-gated items start optimistically enabled, mirroring `featureFlagsStore`'s optimistic defaults. `containerServices` (Snowpark → Container Services ▸) is the template.
@@ -86,7 +86,7 @@ Also update `FEATURES.md` (and its "User-Toggleable Features" list if toggleable
 
 **Removing a toggle** (two shapes):
 
-- *Delete the flag entirely* — only when the flag is **not** admin-lockable (no field in `adminconfig.go`). Drop the field from `FeatureFlags`/`DefaultFeatureFlags()`/`MigrateFlags()`, bump `flagsVersion`, remove the `FlagRow`, un-gate every consumer (Go and TSX), remove it from `featureFlagsStore.ts`, and run `wails generate module`.
+- *Delete the flag entirely* — only when the flag is **not** admin-lockable (no field in `adminconfig.go`). Drop the field from `FeatureFlags`/`DefaultFeatureFlags()`/`MigrateFlags()`, bump `flagsVersion`, remove the `FlagRow`, un-gate every consumer (Go and TSX), remove it from `featureFlagsStore.ts`, and run `wails3 generate bindings -ts -i -clean=true`.
 - *Hide the row but keep the flag* — when IT policy must still be able to force the feature off. Leave `config.go` and `adminconfig.go` untouched, delete only the `FlagRow`, and add the field to `ForceAlwaysOnFlags()` (config.go) so a stale user-stored `false` is overridden to `true` on the read path while admin overrides (applied on top by `LoadAdminConfig`) still win. `loadUserFeatureFlags()` runs `ForceAlwaysOnFlags` after `MigrateFlags`.
 
 ### IT-admin enforced policies
@@ -160,7 +160,7 @@ SPCS specifications (service / job, gateway, inference job) are edited with `fro
 - `getQualifiedIdent(model, pos)` extracts dotted identifiers; `getStatementLineRanges(sql)` mirrors the Go splitter.
 - Module-level caches: `hoverDDLCache` (60 s TTL), `fetchedSchemaObjects` Set.
 - **Never register completion/hover providers inside render** — use module-level disposable refs.
-- SQL analysis (diagnostics, JOIN suggestions, autocomplete context, ref resolution) goes through the backend `sqleditor.Service` (imported from `wailsjs/go/sqleditor/Service`). The frontend resolves nothing inline; `GetAutocompleteContextFull` returns resolved refs, in-editor CREATE TABLE columns, and context-detection flags in one round-trip. Only `node-sql-parser`-dependent checks (`validateWithParser`, `validateBareColumnRefs`) stay in `sqlDiagnostics.ts`.
+- SQL analysis (diagnostics, JOIN suggestions, autocomplete context, ref resolution) goes through the backend `sqleditor.Service` (imported from `bindings/thaw/internal/sqleditor/service`). The frontend resolves nothing inline; `GetAutocompleteContextFull` returns resolved refs, in-editor CREATE TABLE columns, and context-detection flags in one round-trip. Only `node-sql-parser`-dependent checks (`validateWithParser`, `validateBareColumnRefs`) stay in `sqlDiagnostics.ts`.
 
 ## Cross-tab search & replace
 

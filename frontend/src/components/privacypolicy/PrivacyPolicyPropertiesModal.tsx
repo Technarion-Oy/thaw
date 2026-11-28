@@ -11,10 +11,10 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, AlterPrivacyPolicy, GetPrivacyPolicyReferences,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import Editor from "@monaco-editor/react";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
 import { useThemeStore } from "../../store/themeStore";
@@ -387,7 +387,7 @@ export default function PrivacyPolicyPropertiesModal({ db, schema, name, onClose
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

@@ -17,7 +17,7 @@ The terminal automatically resizes when its container changes dimensions.
 
 ## Patterns & integration
 
-- **IPC**: `GetAvailableShells`, `StartShell`, `WriteShell`, `ResizeShell`, `StopShell` — all from `wailsjs/go/app/App`.
+- **IPC**: `GetAvailableShells`, `StartShell`, `WriteShell`, `ResizeShell`, `StopShell` — all from `bindings/thaw/internal/app/app`.
 - **Events**: `terminal:data` (Base64-encoded PTY output from Go → xterm write), `terminal:exit` (PTY process ended).
 - **Stores**: `themeStore` for `resolved` (dark/light) and `editorFont` / `editorFontSize` (applied to xterm `fontFamily` and `fontSize`); `gitStore` for `exportDir` (passed as the shell's starting directory to `StartShell`).
 - **Base64 transport**: PTY output is Base64-encoded on the Go side before emission to survive the Wails IPC bridge without multi-byte character corruption. The frontend decodes with `atob` and writes a `Uint8Array` to xterm.

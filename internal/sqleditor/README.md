@@ -39,7 +39,7 @@ Key capabilities:
 ## Key types & functions
 
 ### Wails binding
-`Service` (`service.go`) is registered in `internal/app/run.go`'s `Bind` array. The frontend imports its methods from `wailsjs/go/sqleditor/Service` — **not** from `wailsjs/go/app/App`. Every method is a one-liner that calls the corresponding package-level function.
+`Service` (`service.go`) is registered in `internal/app/run.go`'s `Services` slice. The frontend imports its methods from `bindings/thaw/internal/sqleditor/service` — **not** from `bindings/thaw/internal/app/app`. Every method is a one-liner that calls the corresponding package-level function.
 
 ### Syntax & semantic validation
 - `ValidateSyntax(sql) []DiagMarker` — walks the `internal/sqltok` token stream (recursing into a `$$…$$` body **only when it opens with `BEGIN`/`DECLARE`**, i.e. an anonymous scripting block, and rebasing line/col; plain string constants and non-SQL `LANGUAGE PYTHON`/`JAVASCRIPT` UDF bodies stay opaque — #704). A bare (non-`$$`) scripting block is likewise validated as one scripting scope so its `EXCEPTION`/`END` fragments don't trip the outer statement-start gate (issue #793 A1); flags unclosed strings/parens/comments (incl. unterminated `$$`), bad `$$` scripting syntax, placeholder tokens, wrong `:=`/`=` assignments, undeclared variables. A `$$…$$` body of a scalar `LANGUAGE SQL` function (`sqlScalarFuncArgs` gate) is instead validated as a plain SQL expression (`validateSQLExprBodyIdents`): every bare identifier must resolve to a function argument, a call, a qualified-name part, or a builtin/keyword/date-part word — anything else is flagged as "not a function argument" (#509). Bodies that query tables (SELECT/FROM/…) are skipped, since they can reference columns. The argument list is read by `procFuncArgNames`, which accepts both bare and `"quoted"` argument names (stored unquoted + uppercased) — skipping quoted names would mistake the type name for the argument name and flag every body reference (#871). Two further passes scan scripting blocks (`$$…$$` opening with BEGIN/DECLARE), reusing `scriptingExtractVars` + `procFuncArgNames` for the in-scope variable/argument set:
@@ -84,7 +84,7 @@ Key capabilities:
 
 ## Patterns & integration
 
-- Registered as a second Wails-bound struct alongside `*app.App`; frontend calls `wailsjs/go/sqleditor/Service.*` methods.
+- Registered as a second Wails-bound service alongside `*app.App`; frontend calls `bindings/thaw/internal/sqleditor/service.*` methods.
 - All functions are pure (no shared mutable state); safe to call concurrently.
 - `DiagMarker.Severity` follows Monaco constants: `8` = Error (red), `4` = Warning (yellow).
 - `DiagMarker.Code` carries JSON quick-fix metadata when `ValidateTablesExist` finds a table in another schema; the frontend `CodeActionProvider` parses this to offer lightbulb qualification actions.

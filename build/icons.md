@@ -1,18 +1,17 @@
 # Application Icons
 
 `build/appicon.png` (currently **1024 × 1024 px**) is the single source of truth
-for the application icon. Wails v2 derives every platform icon from it during
-`wails build` — there is **no** `wails generate icons` command (that belongs to
-the Wails v3 CLI). To change the icon, replace `appicon.png` and rebuild.
+for the application icon. `build/Taskfile.yml`'s `generate:icons` task runs
+`wails3 generate icons` to derive the macOS and Windows icon files from it. To
+change the icon, replace `appicon.png` and rebuild.
 
 | Platform | What the build produces | Regenerated when? |
 |---|---|---|
-| macOS | `iconfile.icns` written into `build/bin/thaw.app/Contents/Resources/` | Every `wails build` — never committed, so it can't go stale |
-| Windows | `build/windows/icon.ico`, compiled into the `.exe` via a `.syso` resource | Only if the `.ico` is **missing** — delete it after changing the artwork, or the old icon is reused |
-| Linux | Nothing — Wails v2 does no Linux icon packaging | n/a |
+| macOS | `build/darwin/icons.icns`, copied into `build/bin/thaw.app/Contents/Resources/` | Automatically by `common:generate:icons` whenever `appicon.png` changes (git-ignored) |
+| Windows | `build/windows/icon.ico`, compiled into `thaw.exe` via `wails3 generate syso` | Automatically by `common:generate:icons` whenever `appicon.png` changes (git-ignored) |
+| Linux | Nothing — Thaw ships a standalone Linux binary | n/a |
 
-Because the macOS `.icns` is generated straight into the bundle, this repository
-intentionally contains no `build/darwin/iconfile.icns` or `build/linux/` icon.
+Neither `build/darwin/icons.icns` nor `build/windows/icon.ico` is committed to git.
 
 ## Credit
 

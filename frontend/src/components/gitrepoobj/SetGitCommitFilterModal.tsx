@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Typography } from "antd";
 import { EditOutlined } from "@ant-design/icons";
-import { SetGitCommitFilter, GetGitCommitFilter } from "../../../wailsjs/go/app/App";
+import { SetGitCommitFilter, GetGitCommitFilter } from "../../../bindings/thaw/internal/app/app";
 
 const { Text } = Typography;
 

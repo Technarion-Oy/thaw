@@ -1,0 +1,40 @@
+version: '3'
+
+vars:
+  APP_NAME: "thaw"
+  BIN_DIR: "build/bin"
+  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+  GOOS: '{{.GOOS | default OS}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the application binary for the target OS
+    cmds:
+      - task: "{{.GOOS}}:build"
+
+  package:
+    summary: Builds and packages a production release artifact for the target OS
+    cmds:
+      - task: "{{.GOOS}}:package"
+
+  run:
+    summary: Runs the built application
+    cmds:
+      - task: "{{.GOOS}}:run"
+
+  dev:
+    summary: Runs the application in development mode with live reload
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  generate:bindings:
+    summary: Regenerates TypeScript IPC bindings into frontend/bindings/
+    cmds:
+      - task: common:generate:bindings

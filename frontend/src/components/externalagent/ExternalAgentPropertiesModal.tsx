@@ -9,10 +9,10 @@ import {
 import {
   GlobalOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterExternalAgent } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterExternalAgent } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

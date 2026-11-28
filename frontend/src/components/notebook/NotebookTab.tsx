@@ -46,9 +46,9 @@ import {
   SaveNotebookBreakpoints,
   LoadNotebookBreakpoints,
   GetKernelPythonVersion,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
-import type { snowpark } from "../../../wailsjs/go/models";
+import type * as snowpark from "../../../bindings/thaw/internal/snowpark/models";
 import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 
@@ -344,7 +344,7 @@ export default function NotebookTab({ tabId }: Props) {
       .then((bps) => {
         const map = new Map<string, Set<number>>();
         for (const [cellId, lines] of Object.entries(bps ?? {})) {
-          if (lines.length > 0) map.set(cellId, new Set(lines));
+          if (lines && lines.length > 0) map.set(cellId, new Set(lines));
         }
         setBreakpoints(map);
       })
@@ -1243,8 +1243,8 @@ function CellView({
   const queryResult: QueryResult | null = useMemo(() => {
     if (!sqlResult) return null;
     return {
-      columns: sqlResult.columns,
-      rows: sqlResult.rows,
+      columns: sqlResult.columns ?? [],
+      rows: (sqlResult.rows ?? []).map((r) => r ?? []),
       rowsAffected: sqlResult.rowCount,
       queryID: sqlResult.queryID,
       truncated: sqlResult.truncated,
@@ -1432,7 +1432,7 @@ function CellView({
       let text: string;
       if (cell.kind === "sql") {
         try {
-          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          const columns = (await GetTableColumns(info.db, info.schema, info.name)) ?? [];
           const colList = columns.map((c) => `    "${esc(c)}"`).join(",\n");
           text = `SELECT\n${colList}\nFROM ${fqn};`;
         } catch {
@@ -1441,7 +1441,7 @@ function CellView({
       } else {
         // Code cell: generate a Snowpark DataFrame snippet.
         try {
-          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          const columns = (await GetTableColumns(info.db, info.schema, info.name)) ?? [];
           text = `df = session.table('${fqn}')\n# columns: ${columns.join(", ")}\ndf.show()`;
         } catch {
           text = `df = session.table('${fqn}')\ndf.show()`;
@@ -1700,7 +1700,7 @@ function CellView({
               </div>
             </>
           )}
-          {cell.kind === "sql" && cell.sqlResult && cell.sqlResult.columns.length === 0 && (
+          {cell.kind === "sql" && cell.sqlResult && (cell.sqlResult.columns ?? []).length === 0 && (
             <div style={{
               borderTop: "1px solid var(--border)",
               padding: "6px 10px",

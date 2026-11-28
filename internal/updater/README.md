@@ -7,7 +7,7 @@
 ## Responsibility
 
 Tells the user when a newer Thaw release is available. It deliberately contains
-**no** download-and-apply/self-update logic — Wails v2 has no updater or restart
+**no** download-and-apply/self-update logic — Wails has no built-in updater or restart
 API, so full self-update is deferred to the Wails v3 migration (see issue #568).
 The one job here is: fetch → compare → hand the frontend a `CheckResult`.
 

@@ -5,7 +5,7 @@ import {
   Modal, Form, Input, Select, InputNumber, Checkbox, Space, Typography, Divider, message,
 } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
-import { DeployNotebook, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { DeployNotebook, ListUserSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../bindings/thaw/internal/app/app";
 import { useSessionStore } from "../../store/sessionStore";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
@@ -75,7 +75,7 @@ export default function DeployNotebookModal({ open, filePath, content, defaultNa
     setLoadingSchemas(true);
     setSchemas([]);
     ListUserSchemas(db)
-      .then(setSchemas)
+      .then((s) => setSchemas(s ?? []))
       .catch(() => {})
       .finally(() => setLoadingSchemas(false));
   }

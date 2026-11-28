@@ -8,7 +8,7 @@ import { LineChartOutlined } from "@ant-design/icons";
 import {
   BuildCreateModelMonitorSql, ExecDDL, ListWarehouses, ListObjects,
   ListModelVersions, GetTableColumnsWithTypes,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
@@ -156,7 +156,7 @@ export default function CreateModelMonitorModal({ db, schema, onClose, onSuccess
         const cols = res?.columns ?? [];
         const idx = cols.findIndex((c) => c.toLowerCase() === "name");
         const rows = res?.rows ?? [];
-        setVersions(idx >= 0 ? rows.map((r) => String(r[idx])).filter(Boolean) : []);
+        setVersions(idx >= 0 ? rows.map((r) => String(r?.[idx] ?? "")).filter(Boolean) : []);
       })
       .catch(() => setVersions([]));
   }, [db, schema, cfg.model]);

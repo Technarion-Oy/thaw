@@ -12,10 +12,10 @@ import {
 import {
   GetObjectProperties, DescribeSessionPolicy, AlterSessionPolicy, GetSessionPolicyReferences,
   ParseSecondaryRoles, FormatSecondaryRoles, ReconcileSecondaryRoles,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -447,7 +447,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
   // Index the single DESCRIBE row by column name (lowercased) → value string.
   const descByCol: Record<string, string> = {};
   if (desc && desc.columns && desc.rows && desc.rows.length > 0) {
-    const row = desc.rows[0];
+    const row = desc.rows[0] ?? [];
     desc.columns.forEach((c, ci) => {
       const v = ci < row.length && row[ci] != null ? String(row[ci]) : "";
       descByCol[c.toLowerCase()] = v;
@@ -662,7 +662,7 @@ export default function SessionPolicyPropertiesModal({ db, schema, name, onClose
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

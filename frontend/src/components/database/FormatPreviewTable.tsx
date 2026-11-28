@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Tooltip } from "antd";
-import type { fileformat } from "../../../wailsjs/go/models";
+import type * as fileformat from "../../../bindings/thaw/internal/fileformat/models";
 
 interface Props {
   previewData: fileformat.PreviewResult | null;
@@ -60,8 +60,8 @@ export default function FormatPreviewTable({ previewData }: Props) {
                   overflow: "hidden", 
                   textOverflow: "ellipsis" 
                 }}>
-                  <Tooltip title={row[col]} placement="topLeft">
-                    {row[col] === "" ? <em style={{ color: "var(--text-muted)", fontSize: 10 }}>(empty)</em> : row[col]}
+                  <Tooltip title={row?.[col]} placement="topLeft">
+                    {(row?.[col] ?? "") === "" ? <em style={{ color: "var(--text-muted)", fontSize: 10 }}>(empty)</em> : row?.[col]}
                   </Tooltip>
                 </td>
               ))}

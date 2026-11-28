@@ -9,10 +9,10 @@ import {
 import {
   FundOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, DescribeDataMetricFunction, AlterDataMetricFunction, GetDataMetricFunctionReferences } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, DescribeDataMetricFunction, AlterDataMetricFunction, GetDataMetricFunctionReferences } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -228,7 +228,8 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
     const propCi = cols.indexOf("property");
     const valCi = cols.indexOf("value");
     if (propCi < 0 || valCi < 0) return out;
-    for (const r of detail.rows ?? []) {
+    for (const raw of detail.rows ?? []) {
+      const r = raw ?? [];
       const k = String(r[propCi] ?? "").toLowerCase();
       if (k) out[k] = String(r[valCi] ?? "");
     }
@@ -435,7 +436,7 @@ export default function DataMetricFunctionPropertiesModal({ db, schema, name, ar
                   key: String(ci),
                   render: (_: unknown, row: (string | null)[]) => String(row[ci] ?? ""),
                 }))}
-                dataSource={refs.rows ?? []}
+                dataSource={(refs.rows ?? []).map((r) => (r ?? []) as (string | null)[])}
                 scroll={{ x: true }}
               />
             )

@@ -34,7 +34,7 @@ offered for them.
 - `AlterExternalTable(db, schema, name, clause)` — `REFRESH` / `SET AUTO_REFRESH = …`
 - `ExecDDL(sql)` — comment edits run `COMMENT ON TABLE <fqn> IS '…'` (the `ALTER EXTERNAL TABLE` grammar does not accept `SET`/`UNSET COMMENT`; external tables are tables, so the general-purpose `COMMENT ON TABLE` applies — clearing is `IS ''`)
 
-**`externaltable.ExternalTableConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `columns` (`{name, type, expression, partition}[]`), `location`, `refreshOnCreate`, `autoRefresh`, `pattern`, `fileFormatName`, `fileFormatType`, `awsSnsTopic`, `copyGrants`, `comment`, `tags` (`{name, value}[]`). The Create modal keeps form state in a local `ETConfig` (the generated class carries a `convertValues` method — see Gotchas — that a plain literal can't satisfy) and casts to the generated type only at the IPC boundary.
+**`externaltable.ExternalTableConfig` type** from `bindings/thaw/internal/*/models`: `name`, `caseSensitive`, `orReplace`, `ifNotExists`, `columns` (`{name, type, expression, partition}[]`), `location`, `refreshOnCreate`, `autoRefresh`, `pattern`, `fileFormatName`, `fileFormatType`, `awsSnsTopic`, `copyGrants`, `comment`, `tags` (`{name, value}[]`). The Create modal keeps form state in a local `ETConfig` (the generated class carries a `convertValues` method — see Gotchas — that a plain literal can't satisfy) and casts to the generated type only at the IPC boundary.
 
 **Shared components:** `ObjectNameCaseControl` for case-sensitivity; inline SQL preview block.
 

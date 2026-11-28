@@ -11,10 +11,10 @@ import {
 } from "@ant-design/icons";
 import {
   GetObjectProperties, DescribePasswordPolicy, AlterPasswordPolicy, GetPasswordPolicyReferences,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -297,7 +297,8 @@ export default function PasswordPolicyPropertiesModal({ db, schema, name, onClos
     const valIdx = desc.columns.findIndex((c) => c.toLowerCase() === "value");
     const defIdx = desc.columns.findIndex((c) => c.toLowerCase() === "default");
     if (propIdx >= 0) {
-      for (const row of desc.rows) {
+      for (const rawRow of desc.rows) {
+        const row = rawRow ?? [];
         const prop = row[propIdx] === null || row[propIdx] === undefined ? "" : String(row[propIdx]).toUpperCase();
         const value = valIdx >= 0 && row[valIdx] != null ? String(row[valIdx]) : "";
         const def = defIdx >= 0 && row[defIdx] != null ? String(row[defIdx]) : "";
@@ -458,7 +459,7 @@ export default function PasswordPolicyPropertiesModal({ db, schema, name, onClos
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

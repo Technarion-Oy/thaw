@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { App as AntApp, Button, Dropdown, Select } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined, UndoOutlined } from "@ant-design/icons";
-import { DropSnapshot, ListSnapshots, UndropSnapshot } from "../../../wailsjs/go/app/App";
+import { DropSnapshot, ListSnapshots, UndropSnapshot } from "../../../bindings/thaw/internal/app/app";
 import { friendlyError } from "../common/errors";
 import CreateSnapshotModal from "../snapshot/CreateSnapshotModal";
 import RestoreSnapshotModal from "../snapshot/RestoreSnapshotModal";

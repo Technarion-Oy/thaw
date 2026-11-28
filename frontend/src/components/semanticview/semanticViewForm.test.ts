@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 // semanticViewForm.tsx imports ObjectNameCaseControl, which calls
 // GetSnowflakeKeywords() at module load time — stub it out rather than
 // requiring a browser `window` for this pure-function test.
-vi.mock("../../../wailsjs/go/sqleditor/Service", () => ({
+vi.mock("../../../bindings/thaw/internal/sqleditor/service", () => ({
   GetSnowflakeKeywords: () => Promise.resolve([]),
 }));
 

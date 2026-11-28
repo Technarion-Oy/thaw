@@ -1,6 +1,6 @@
 # Thaw — Google Antigravity & Gemini Guide
 
-Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend embedded as a single binary).
+Thaw is a native desktop Snowflake manager built with **Wails v3** (Go backend + React/TypeScript frontend embedded as a single binary).
 
 This file is a concise root rule kept well under Google Antigravity's 24 KB per-file rule cap so it is never truncated. Detailed domain rules live in `.agents/rules/` (auto-loaded by file glob), multi-step procedures live in `.agents/skills/` (loaded on demand via progressive disclosure), and deep documentation lives in the files below — **read the relevant one before working in an area**:
 
@@ -59,8 +59,8 @@ Before proposing new features, refactoring, or writing new files, you MUST consu
 
 ## Non-Negotiable Invariants
 
-- **Never hand-edit generated files**: `frontend/wailsjs/`, `frontend/src/generated/`, `internal/architecture/semantic_map.go`, `THIRD_PARTY_NOTICES.md`, `docs/backend/`, and `docs/frontend/`. Regenerate with the commands below.
-- **Never delete `frontend/dist/.gitkeep`**: required for `//go:embed all:frontend/dist` during `wails generate module` on clean checkouts.
+- **Never hand-edit generated files**: `frontend/bindings/`, `frontend/src/generated/`, `internal/architecture/semantic_map.go`, `THIRD_PARTY_NOTICES.md`, `docs/backend/`, and `docs/frontend/`. Regenerate with the commands below.
+- **Never delete `frontend/dist/.gitkeep`**: required for `//go:embed all:frontend/dist` during `wails3 generate bindings` on clean checkouts.
 - **Never alter git history**: always work on a dedicated branch (`feat/`, `fix/`, `chore/`, `docs/`, etc. off `main`); **never** use `git commit --amend`, `git rebase`, or `git push --force`. Always create new commits.
 - **Never tag manually**: do not create or push `v*` tags by hand — `manual-release.yml` runs `semantic-release` from Conventional Commit squash-merge PR titles (`feat` → minor, `fix`/`perf` → patch, `feat!`/`BREAKING CHANGE` → major; `refactor`/`chore`/`docs`/`style`/`test`/`build`/`ci` → no release).
 - **Target upstream PRs cleanly**: `gh pr create --repo Technarion-Oy/thaw --base main --title "..." --body "..."`.
@@ -76,8 +76,9 @@ cd frontend && npm test              # vitest unit suite
 cd frontend && npm run build         # full production build
 
 # Wails bindings & app build
-wails generate module                # regenerate frontend/wailsjs/ after changing internal/app/ or bound Service signatures
-wails build                          # frontend + Go binary → build/bin/
+wails3 generate bindings -ts -i -clean=true   # regenerate frontend/bindings/ after changing internal/app/ or bound Service signatures
+wails3 task build                             # frontend + Go binary → build/bin/
+wails3 task package                           # full OS package (.app / NSIS / binary) → build/bin/
 go mod tidy
 
 # Go tests
@@ -110,9 +111,9 @@ thaw/
 ├── main.go              # //go:embed all:frontend/dist + app.Run(assets)
 ├── .agents/             # Google Antigravity workspace rules (glob-scoped) & skills (on-demand)
 ├── internal/
-│   ├── app/             # Wails-bound App struct (package app) — ALL IPC methods (thin delegators).
-│   │                    #   app.go=struct+lifecycle, run.go=wails.Run wiring, menu.go=native menu,
-│   │                    #   <domain>.go=IPC bindings. See internal/app/README.md.
+│   ├── app/             # Wails-bound App service (package app) — ALL IPC methods (thin delegators).
+│   │                    #   app.go=struct+lifecycle, run.go=application.New wiring, menu.go=native menu,
+│   │                    #   runtime.go=Wails v3 runtime helpers, <domain>.go=IPC bindings. See internal/app/README.md.
 │   ├── snowflake/       # gosnowflake driver wrapper, pool, object-cache, datatypes, collations, result helpers
 │   ├── objectkind/      # canonical object-kind registry (leaf pkg); generates frontend/src/generated/objectKinds.ts
 │   ├── sqltok/          # single-pass Snowflake SQL tokenizer & splitter (leaf pkg)
@@ -122,15 +123,16 @@ thaw/
 │   │                    #   stage, secret, warehouse, tasks, objects, queryhistory, dbtproject, …)
 │   ├── migration/, snowpark/, mcp/   # larger features (Service pattern / localhost MCP servers)
 │   └── ai, config, secrets, gitrepo, filesystem, sfconfig, logger, crashreport, updater, …  # infrastructure
-└── frontend/src/
-    ├── pages/           # top-level pages (QueryPage)
-    ├── components/      # feature UI by domain (editor/, results/, layout/, notebook/, …)
-    ├── store/           # Zustand stores (~17 stores)
-    ├── generated/       # Go-generated TS artifacts (objectKinds.ts, snowflakeDataTypes.ts — DO NOT EDIT)
-    └── wailsjs/         # Wails auto-generated IPC bindings (DO NOT EDIT)
+└── frontend/
+    ├── bindings/        # Wails v3 auto-generated TS interface bindings (DO NOT EDIT)
+    └── src/
+        ├── pages/       # top-level pages (QueryPage)
+        ├── components/  # feature UI by domain (editor/, results/, layout/, notebook/, …)
+        ├── store/       # Zustand stores (~17 stores)
+        └── generated/   # Go-generated TS artifacts (objectKinds.ts, snowflakeDataTypes.ts — DO NOT EDIT)
 ```
 
-**IPC flow**: component → `wailsjs/go/app/App.ts` (or `wailsjs/go/sqleditor/Service.ts`) → Wails runtime → Go methods on `*App` / bound `Service` → `internal/` domain packages.
+**IPC flow**: component → `bindings/thaw/internal/app/app.ts` (or `bindings/thaw/internal/sqleditor/service.ts`) → `@wailsio/runtime` → Go methods on `*App` / bound `Service` → `internal/` domain packages.
 
 ---
 
@@ -140,4 +142,4 @@ When you add, remove, or modify a user-facing feature, internal package, fronten
 
 ## Tech Stack
 
-Wails v2.17 · Go 1.26 (toolchain 1.27) · gosnowflake v2.4 · React 19 + TypeScript 7 · Vite 8 · Ant Design 6 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js 6.
+Wails v3.1 · Go 1.26 (toolchain 1.27) · gosnowflake v2.4 · React 19 + TypeScript 7 · Vite 8 · Ant Design 6 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js 6.

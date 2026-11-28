@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { Modal, Select, Typography, Space, Alert, message } from "antd";
 import { BranchesOutlined } from "@ant-design/icons";
-import { AlterTask } from "../../../wailsjs/go/app/App";
-import type { tasks } from "../../../wailsjs/go/models";
+import { AlterTask } from "../../../bindings/thaw/internal/app/app";
+import type * as tasks from "../../../bindings/thaw/internal/tasks/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;

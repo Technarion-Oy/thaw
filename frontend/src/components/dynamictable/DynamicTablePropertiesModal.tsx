@@ -10,7 +10,7 @@ import {
   RetweetOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, SyncOutlined, HistoryOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, GetObjectParameters, AlterDynamicTable, ListWarehouses } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, GetObjectParameters, AlterDynamicTable, ListWarehouses } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { SECTION_HEAD, LABEL_TD, q1, opts, EditRow, SelectRow, PickerRow, ActionRow } from "../shared/PropertyRows";
 import GovernanceRows from "../common/GovernanceRows";
@@ -18,7 +18,7 @@ import { quoteIdent } from "../shared/ObjectNameCaseControl";
 import DynamicTableRefreshHistoryModal from "./DynamicTableRefreshHistoryModal";
 import * as dtc from "./dynamicTableClauses";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

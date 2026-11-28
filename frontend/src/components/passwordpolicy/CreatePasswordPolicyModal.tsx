@@ -5,13 +5,13 @@
 import { useState } from "react";
 import { Form, Input, InputNumber, Typography, Row, Col } from "antd";
 import { SafetyCertificateOutlined } from "@ant-design/icons";
-import { BuildCreatePasswordPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreatePasswordPolicySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { passwordpolicy as ppModels } from "../../../wailsjs/go/models";
+import type * as ppModels from "../../../bindings/thaw/internal/passwordpolicy/models";
 
 const { Text } = Typography;
 

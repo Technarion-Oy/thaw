@@ -3,7 +3,7 @@
 
 import dagre from "@dagrejs/dagre";
 import { MarkerType, type Node, type Edge } from "@xyflow/react";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import {
   type DesignerTable,
   tableKey,
@@ -297,11 +297,11 @@ function literalDefault(raw: string): string {
 
 /** Convert snowflake.ERDiagramData to DesignerTable[] with FK wiring. */
 export function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
-  const tables: DesignerTable[] = data.tables.map((t) => ({
+  const tables: DesignerTable[] = (data.tables ?? []).map((t) => ({
     id: crypto.randomUUID(),
     schema: t.schema,
     name: t.name,
-    columns: t.columns.map((c) => ({
+    columns: (t.columns ?? []).map((c) => ({
       id: crypto.randomUUID(),
       name: c.name,
       dataType: normalizeDataType(c.dataType),

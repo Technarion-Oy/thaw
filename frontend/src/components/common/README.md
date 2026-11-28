@@ -23,8 +23,8 @@ Provides general-purpose modals for displaying and editing Snowflake object prop
 
 ## Patterns & integration
 
-- **IPC** (both files): `wailsjs/go/app/App` — `GetTableSettings`, `AlterTableProperty`, `SetSessionParameter`, `SetSessionVariable`.
-- **Backend types**: `snowflake.PropertyPair`, `snowflake.SessionParam`, `snowflake.SessionVar` (from `wailsjs/go/models`); `table.TableSettings` when the optional `TableSettingsSection` is active.
+- **IPC** (both files): `bindings/thaw/internal/app/app` — `GetTableSettings`, `AlterTableProperty`, `SetSessionParameter`, `SetSessionVariable`.
+- **Backend types**: `snowflake.PropertyPair`, `snowflake.SessionParam`, `snowflake.SessionVar` (from `bindings/thaw/internal/*/models`); `table.TableSettings` when the optional `TableSettingsSection` is active.
 - **Props pattern**: callers pass pre-fetched data (`rows`, `parameters`, `variables`) as `null` while loading, the real arrays when ready, or an error string. The modals handle all three states (spinner, data, error) internally.
 - **Clipboard**: uses Wails `ClipboardSetText`; not `navigator.clipboard` (blocked in WKWebView).
 - **No Zustand stores**: both components are stateless with respect to global state — all data flows in via props and changes are notified via `onParamChange`/`onVarChange` callbacks so the caller can update its local state.

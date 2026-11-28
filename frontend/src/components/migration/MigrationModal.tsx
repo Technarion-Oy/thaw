@@ -39,7 +39,7 @@ import {
   GenerateMigrationScript,
   ListDatabases,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { EventsOn } from "../../utils/wailsRuntime";
 import { useThemeStore } from "../../store/themeStore";
 import { useQueryStore } from "../../store/queryStore";
@@ -138,7 +138,7 @@ export default function MigrationModal({ onClose }: Props) {
 
   // Load databases on mount
   useEffect(() => {
-    ListDatabases().then(setDatabases).catch(() => {});
+    ListDatabases().then((dbs) => setDatabases(dbs ?? [])).catch(() => {});
   }, []);
 
   // ── Mapping helpers ────────────────────────────────────────────────────────
@@ -291,7 +291,7 @@ export default function MigrationModal({ onClose }: Props) {
       const sql = await GenerateMigrationScript(
         selectedItems as any,
         fallbackDB,
-        tableStrategy
+        tableStrategy as any
       ) as unknown as string;
       loadInNewTab(sql);
       onClose();
@@ -389,7 +389,7 @@ export default function MigrationModal({ onClose }: Props) {
     });
 
     try {
-      await ExecuteMigration(selectedObjects as any, fallbackDB, 5, tableStrategy);
+      await ExecuteMigration(selectedObjects as any, fallbackDB, 5, tableStrategy as any);
     } catch (e: any) {
       messageApi.error("Deploy error: " + (e?.message ?? String(e)));
     } finally {

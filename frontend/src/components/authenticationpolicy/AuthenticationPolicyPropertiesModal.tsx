@@ -14,10 +14,11 @@ import {
   GetAuthenticationPolicyReferences, FormatAuthPolicyList,
   ParseSqlList, NormalizeSqlScalar, QuoteSqlText,
   AuthenticationPolicyListParams, AuthenticationPolicyMFAEnrollmentOptions,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake, authenticationpolicy } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as authenticationpolicy from "../../../bindings/thaw/internal/authenticationpolicy/models";
 import { MFAPolicyRow, PATPolicyRow, WorkloadIdentityPolicyRow, ClientPolicyRow, useReconciledSelection } from "./PolicyBagRows";
 
 const { Text } = Typography;
@@ -650,7 +651,7 @@ export default function AuthenticationPolicyPropertiesModal({ db, schema, name, 
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

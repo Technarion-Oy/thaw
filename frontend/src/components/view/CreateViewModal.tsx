@@ -7,7 +7,7 @@ import { Form, Input, Checkbox, Space, Collapse } from "antd";
 import { EyeOutlined } from "@ant-design/icons";
 import {
   BuildCreateViewSql, ExecDDL,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -15,7 +15,7 @@ import TagInput from "../shared/TagInput";
 import MonacoSqlField from "../shared/MonacoSqlField";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { view } from "../../../wailsjs/go/models";
+import type * as view from "../../../bindings/thaw/internal/view/models";
 
 interface Props {
   db: string;

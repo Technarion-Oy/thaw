@@ -11,11 +11,11 @@ import {
   RobotOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined,
   PlusOutlined, MoreOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterModel, ListModelVersions } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterModel, ListModelVersions } from "../../../bindings/thaw/internal/app/app";
 import ModelSourcePicker, { type ModelSourceValue } from "./ModelSourcePicker";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -308,8 +308,8 @@ export default function ModelPropertiesModal({ db, schema, name, onClose }: Prop
   }));
   const versionData = (versions?.rows ?? []).map((row, ri) => {
     const obj: Record<string, unknown> = { key: ri };
-    row.forEach((cell, ci) => { obj[String(ci)] = cell; });
-    obj.__version = versionNameIdx >= 0 ? String(row[versionNameIdx] ?? "") : "";
+    (row ?? []).forEach((cell, ci) => { obj[String(ci)] = cell; });
+    obj.__version = versionNameIdx >= 0 ? String(row?.[versionNameIdx] ?? "") : "";
     return obj;
   });
 

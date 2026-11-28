@@ -10,8 +10,8 @@ import {
   GetObjectProperties, AlterSchema, GetSchemaParameters,
   ListExternalVolumes, ListIntegrations, ListComputePools, ListWarehouses,
   ListUserSchemas,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import ObjectParametersModal from "../common/ObjectParametersModal";

@@ -7,12 +7,13 @@ import {
   Form, Input, InputNumber, Select, AutoComplete, Checkbox, Button, Space, Typography, Collapse,
 } from "antd";
 import { ApiOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateExternalFunctionSql, ExecDDL, ListApiIntegrations, ListUserFunctions, GetExternalFunctionOptions } from "../../../wailsjs/go/app/App";
+import { BuildCreateExternalFunctionSql, ExecDDL, ListApiIntegrations, ListUserFunctions, GetExternalFunctionOptions } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { externalfunction, snowflake } from "../../../wailsjs/go/models";
+import type * as externalfunction from "../../../bindings/thaw/internal/externalfunction/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

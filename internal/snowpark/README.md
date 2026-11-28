@@ -32,8 +32,8 @@
 
 ```go
 // snowpark.go:764
-type Service struct { ctx context.Context; syncTabContext SyncTabContextFunc }
-func NewService(ctx context.Context, syncTabContext SyncTabContextFunc) *Service
+type Service struct { ctx context.Context; rt Runtime; syncTabContext SyncTabContextFunc }
+func NewService(ctx context.Context, rt Runtime, syncTabContext SyncTabContextFunc) *Service
 
 // Kernel lifecycle
 func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *snowflake.ConnectParams, tabId string) error
@@ -75,7 +75,7 @@ func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error
 
 ## Patterns & integration
 
-- `Service` is registered in `internal/app/run.go`'s `Bind` array; frontend imports from `wailsjs/go/snowpark/Service`.
+- `Service` is owned by `App` (`internal/app/app.go`) and exposed via thin delegators in `internal/app/snowpark.go` (frontend imports from `bindings/thaw/internal/app/app`). `internal/snowpark` has no Wails import; event emission and native file dialogs are injected via the `Runtime` callback struct.
 - The kernel protocol is a line-oriented stdin/stdout protocol. The Go side sends code blocks terminated by `<<<THAW_RUN>>>` and reads until `<<<THAW_CELL_DONE>>>`. Specialised request types (completions, hover, SQL, syntax, debug) are distinguished by a leading marker line.
 - Kernel sessions are stored in a package-level `sync.Map` keyed by `tabId`; each entry is a `notebookSession` struct holding the `*exec.Cmd`, stdin/stdout pipes, and a per-session mutex.
 - The embedded `kernelPyScript` (a constant Go string containing ~500 lines of Python) is piped to the subprocess via stdin at startup. It sets up a shared namespace `g`, auto-creates a Snowpark `session` from `THAW_SF_*` environment variables, patches `session.sql()` to auto-collect DDL statements, and loops reading code blocks.

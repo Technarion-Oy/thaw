@@ -59,11 +59,12 @@ export function objectTypeFromPath(path: string): { label: string; color: string
  *  FileBrowser tree. Keys are repo-relative forward-slash paths (as the backend
  *  emits them). */
 export function deriveNewAndPartial(
-  changedPaths: Record<string, { isNew: boolean; partiallyStaged: boolean }> | undefined | null,
+  changedPaths: Record<string, { isNew: boolean; partiallyStaged: boolean } | undefined> | undefined | null,
 ): { newFilesRel: Set<string>; partiallyStagedRel: Set<string> } {
   const newFilesRel = new Set<string>();
   const partiallyStagedRel = new Set<string>();
   for (const [p, cf] of Object.entries(changedPaths ?? {})) {
+    if (!cf) continue;
     if (cf.isNew) newFilesRel.add(p);
     if (cf.partiallyStaged) partiallyStagedRel.add(p);
   }

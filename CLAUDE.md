@@ -1,6 +1,6 @@
 # Thaw — Claude Code Guide
 
-Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend embedded as a single binary).
+Thaw is a native desktop Snowflake manager built with **Wails v3** (Go backend + React/TypeScript frontend embedded as a single binary).
 
 This file is a concise index. Detailed documentation lives in dedicated files — **read the relevant one before working in an area**:
 
@@ -46,8 +46,9 @@ cd frontend && npm run build         # full frontend build
 cd frontend && npm test              # vitest
 
 # App
-wails build                          # frontend + Go binary
-wails generate module                # regenerate frontend/wailsjs/ after changing internal/app/ signatures
+wails3 task build                               # frontend + Go binary → build/bin/
+wails3 task package                             # full OS package (.app / NSIS / binary)
+wails3 generate bindings -ts -i -clean=true     # regenerate frontend/bindings/ after changing internal/app/ signatures
 go mod tidy
 
 # Go tests
@@ -79,9 +80,9 @@ See [`docs/concepts/testing.md`](docs/concepts/testing.md) for lint/security gat
 thaw/
 ├── main.go              # //go:embed all:frontend/dist + app.Run(assets)
 ├── internal/
-│   ├── app/             # Wails-bound App struct (package app) — ALL IPC methods (thin delegators).
-│   │                    #   app.go=struct+lifecycle, run.go=wails.Run wiring, menu.go=native menu,
-│   │                    #   <domain>.go=IPC bindings. See internal/app/README.md.
+│   ├── app/             # Wails-bound App service (package app) — ALL IPC methods (thin delegators).
+│   │                    #   app.go=struct+lifecycle, run.go=application.New wiring, menu.go=native menu,
+│   │                    #   runtime.go=Wails v3 runtime helpers, <domain>.go=IPC bindings. See internal/app/README.md.
 │   ├── snowflake/       # gosnowflake driver wrapper, pool, object-cache, result helpers
 │   ├── objectkind/      # canonical object-kind registry (KIND, SHOW plural, label, order,
 │   │                    #   GET_DDL type) — every consumer derives from it; generates
@@ -93,14 +94,15 @@ thaw/
 │   │                    #   stage, secret, warehouse, tasks, objects, queryhistory, dbtproject, …)
 │   ├── migration/, snowpark/, mcp/   # larger features (Service pattern / MCP servers)
 │   └── ai, config, secrets, gitrepo, filesystem, sfconfig, logger, crashreport, updater, …  # infrastructure
-└── frontend/src/
-    ├── pages/           # top-level pages (QueryPage)
-    ├── components/      # feature UI by domain (editor/, results/, layout/, notebook/, …)
-    ├── store/           # ~14 Zustand stores
-    └── wailsjs/         # auto-generated IPC bindings (DO NOT EDIT)
+└── frontend/
+    ├── bindings/        # Wails v3 auto-generated TS interface bindings (DO NOT EDIT)
+    └── src/
+        ├── pages/       # top-level pages (QueryPage)
+        ├── components/  # feature UI by domain (editor/, results/, layout/, notebook/, …)
+        └── store/       # ~17 Zustand stores
 ```
 
-**IPC flow**: component → `wailsjs/go/app/App.ts` (or `wailsjs/go/sqleditor/Service.ts`) → Wails runtime → Go methods on `App` / bound `Service` → `internal/` domain packages. Full detail: [`docs/concepts/architecture.md`](docs/concepts/architecture.md). Every package/folder has a `README.md`.
+**IPC flow**: component → `bindings/thaw/internal/app/app.ts` (or `bindings/thaw/internal/sqleditor/service.ts`) → `@wailsio/runtime` → Go methods on `App` / bound `Service` → `internal/` domain packages. Full detail: [`docs/concepts/architecture.md`](docs/concepts/architecture.md). Every package/folder has a `README.md`.
 
 ---
 
@@ -110,4 +112,4 @@ When you add, remove, or modify a user-facing feature, internal package, fronten
 
 ## Tech stack
 
-Wails v2.17 · Go 1.26 (toolchain 1.27) · gosnowflake v2.4 · React 19 + TypeScript 7 · Vite 8 · Ant Design 6 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js 6.
+Wails v3.1 · Go 1.26 (toolchain 1.27) · gosnowflake v2.4 · React 19 + TypeScript 7 · Vite 8 · Ant Design 6 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js 6.

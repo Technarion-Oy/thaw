@@ -15,7 +15,7 @@ import {
   BuildAddSemanticViewMaterializationSql,
   DescribeSemanticView, ListSemanticDimensions, ListSemanticFacts, ListSemanticMetrics,
   ListSemanticDimensionsForMetric,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import { identToken } from "../shared/ObjectNameCaseControl";
@@ -23,7 +23,7 @@ import {
   isMaterializationValid, qualifiedOptionsFromResult, NEW_MATERIALIZATION,
   type NewMaterialization, type RefreshMode,
 } from "./semanticViewMaterialization";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 // Snowflake's documented floor for MAX_STALENESS (seconds) — mirrors
 // MinMaxStaleness in internal/semanticview/sql.go and MIN_MAX_STALENESS in
@@ -78,7 +78,7 @@ function ResultTable({ res }: { res: snowflake.QueryResult }) {
       }))}
       dataSource={res.rows.map((row) => {
         const obj: Record<number, unknown> = {};
-        row.forEach((cell, ci) => { obj[ci] = cell; });
+        (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
         return obj;
       })}
     />
@@ -92,7 +92,7 @@ function LazySection({
 }: {
   title: string;
   description?: string;
-  loader: () => Promise<snowflake.QueryResult>;
+  loader: () => Promise<snowflake.QueryResult | null>;
 }) {
   const [res, setRes] = useState<snowflake.QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);

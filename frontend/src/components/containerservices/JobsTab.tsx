@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { App as AntApp, Button, Descriptions, Dropdown, Modal, Select, Space } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined } from "@ant-design/icons";
-import { DropJobService, ListJobServices } from "../../../wailsjs/go/app/App";
+import { DropJobService, ListJobServices } from "../../../bindings/thaw/internal/app/app";
 import { friendlyError } from "../common/errors";
 import ServicePropertiesModal, { ServiceLogs } from "../service/ServicePropertiesModal";
 import ContainerTabLayout from "./ContainerTabLayout";

@@ -9,7 +9,7 @@ import {
 import { AlertOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   BuildCreateAlertSql, ExecDDL, ListWarehouses,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -17,7 +17,7 @@ import TagInput from "../shared/TagInput";
 import MonacoSqlField from "../shared/MonacoSqlField";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { alert as alertModels } from "../../../wailsjs/go/models";
+import type * as alertModels from "../../../bindings/thaw/internal/alert/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";

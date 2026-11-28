@@ -24,10 +24,11 @@ detailed material and links out to the canonical docs rather than duplicating th
 ### Production binary
 
 ```bash
-wails build
+wails3 task package   # full OS package (.app / NSIS / binary) → build/bin/
+wails3 task build     # binary only → build/bin/
 ```
 
-The output binary is placed in `build/bin/`.
+The output artifact is placed in `build/bin/`.
 
 The frontend build pipeline applies two layers of IP protection automatically:
 - **Terser** (2-pass minification, no source maps, dead code and console removal)
@@ -39,16 +40,16 @@ The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to ac
 the obfuscator's memory usage.
 
 **CI release builds** are triggered by running the release pipeline, which automatically
-creates and pushes the version tag. Artifacts for macOS (arm64), Windows (amd64), and
+creates and pushes the version tag. Artifacts for macOS (arm64/amd64), Windows (amd64/arm64), and
 Linux (amd64) are produced and named after the tag.
 
 ### Regenerating the Wails bindings
 
-After changing any exported method signature on the `*App` struct (`internal/app/`), regenerate
-the JS bindings in `frontend/wailsjs/`:
+After changing any exported method signature on `*App` (`internal/app/`) or `sqleditor.Service`
+(`internal/sqleditor/`), regenerate the TypeScript interface bindings in `frontend/bindings/`:
 
 ```bash
-wails generate module
+wails3 generate bindings -ts -i -clean=true
 ```
 
 ---
@@ -59,13 +60,16 @@ wails generate module
 thaw/
 ├── main.go                        # Thin entry point: //go:embed frontend/dist + app.Run(assets)
 ├── go.mod
-├── wails.json                     # Wails project configuration
+├── Taskfile.yml                   # Wails v3 Taskfile entry point (build/package/run/dev)
 ├── build/
-│   ├── darwin/                    # macOS app icons
-│   └── windows/                   # Windows resources
+│   ├── config.yml                 # Wails v3 project metadata & dev_mode config
+│   ├── Taskfile.yml               # Shared frontend/icon/binding tasks
+│   ├── darwin/                    # macOS Info.plist, entitlements, Taskfile
+│   ├── linux/                     # Linux Taskfile
+│   └── windows/                   # Windows NSIS installer & Taskfile
 ├── internal/
 │   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios, Ollama); inline completions; model listing and testing
-│   ├── app/                        # Wails-bound App struct (package app): app.go (lifecycle), run.go (wails.Run wiring), menu.go (native menu), + IPC methods split by domain (query.go, objects.go, …). Most methods are thin delegators (nil-check → domain-package func → return); real logic lives in the domain packages below
+│   ├── app/                        # Wails-bound App service (package app): app.go (lifecycle), run.go (application.New wiring), menu.go (native menu), runtime.go (Wails v3 helpers), + IPC methods split by domain (query.go, objects.go, …). Most methods are thin delegators (nil-check → domain-package func → return); real logic lives in the domain packages below
 │   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
 │   ├── backup/                    # Backup sets/policies: SHOW parsers + CREATE/ALTER/RESTORE SQL builders (BackupSetRow, BackupPolicyRow, BackupRow)
 │   ├── config/config.go           # Saved git / export / AI settings
@@ -115,7 +119,7 @@ thaw/
     │   ├── store/                 # Zustand stores (~14 stores)
     │   ├── pages/QueryPage.tsx    # Main query workspace
     │   └── components/            # Feature components by domain (~30 directories)
-    └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
+    └── bindings/                  # Auto-generated Wails v3 Go→TS bridge (do not edit)
 ```
 
 A per-package `README.md` documents the types, builders, parsers, and gotchas of every
@@ -143,10 +147,9 @@ cd frontend && npm run test:watch  # watch mode
 cd frontend && npx tsc --noEmit    # type-check only
 ```
 
-> **Linux note** — the `migration`, `snowpark`, and other Wails-importing packages need CGO +
-> GTK/WebKit headers:
+> **Linux note** — building the desktop app (`internal/app`) needs CGO + GTK4/WebKitGTK 6.0 + X11 headers:
 > ```bash
-> sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+> sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
 > ```
 
 ### Integration tests
@@ -213,10 +216,10 @@ See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the full workflow (branching, co
 docs-with-code rule, and quality gates) and [`docs/concepts/patterns.md`](concepts/patterns.md)
 for engineering patterns. The essentials:
 
-- **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.
+- **Backend changes** — edit any `.go` file; `wails3 dev` recompiles automatically.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
 - **Adding a backend method** — add the method (on `*App`) to the matching
-  `internal/app/<domain>.go`, then run `wails generate module`.
+  `internal/app/<domain>.go`, then run `wails3 generate bindings -ts -i -clean=true`.
 - **Adding a Go package** — place it under `internal/`, give it a `README.md`, and import it
   from the relevant `internal/app/<domain>.go`.
 - **Adding a native menu item** — extend `buildMenu` in `internal/app/menu.go`; emit a Wails
@@ -312,7 +315,7 @@ Session state (window size and tab list):
 
 | Build | Path |
 |---|---|
-| Development (`wails dev`) | `./thaw-session.json` |
+| Development (`wails3 dev`) | `./thaw-session.json` |
 | macOS production | `~/Library/Application Support/thaw/session.json` |
 | Windows production | `%LOCALAPPDATA%\thaw\session.json` |
 | Linux production | `~/.local/share/thaw/session.json` (or `$XDG_DATA_HOME/thaw/session.json`) |

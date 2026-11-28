@@ -7,8 +7,8 @@ import {
   Modal, Form, Input, Select, Space, Button,
 } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/app/App";
-import { dbtproject } from "../../../wailsjs/go/models";
+import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../bindings/thaw/internal/app/app";
+import type * as dbtproject from "../../../bindings/thaw/internal/dbtproject/models";
 import { useQueryStore } from "../../store/queryStore";
 import SqlPreview from "../shared/SqlPreview";
 
@@ -21,12 +21,12 @@ interface Props {
 
 export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Props) {
   const [mode, setMode] = useState<"direct" | "workspace">("direct");
-  const [cfg, setCfg] = useState<dbtproject.ExecuteConfig>(new dbtproject.ExecuteConfig({
+  const [cfg, setCfg] = useState<dbtproject.ExecuteConfig>({
     args: "",
     dbtVersion: "",
     fromWorkspace: "",
     projectRoot: "",
-  }));
+  });
   const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [preview, setPreview] = useState("");

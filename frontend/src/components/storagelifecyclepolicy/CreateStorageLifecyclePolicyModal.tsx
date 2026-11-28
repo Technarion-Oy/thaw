@@ -7,7 +7,7 @@ import {
   Form, Input, AutoComplete, Button, Typography, Space, Select, InputNumber,
 } from "antd";
 import { HddOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateStorageLifecyclePolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateStorageLifecyclePolicySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";

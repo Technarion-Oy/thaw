@@ -3,8 +3,8 @@
 // @thaw-domain: Snowpark & Developer Workflows
 
 import { create } from "zustand";
-import { GetNotebookPrefs } from "../../wailsjs/go/app/App";
-import type { config } from "../../wailsjs/go/models";
+import { GetNotebookPrefs } from "../../bindings/thaw/internal/app/app";
+import type * as config from "../../bindings/thaw/internal/config/models";
 
 interface NotebookPrefsState {
   prefs: config.NotebookPrefs;

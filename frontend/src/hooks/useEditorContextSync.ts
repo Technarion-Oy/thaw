@@ -10,7 +10,7 @@ import {
   UpdateQueryResult,
   ClearQueryResult,
   RemoveEditorTab,
-} from "../../wailsjs/go/app/App";
+} from "../../bindings/thaw/internal/app/app";
 
 /**
  * Syncs the editor's active tab, SQL content, and query results to the

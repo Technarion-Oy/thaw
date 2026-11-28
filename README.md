@@ -1,10 +1,10 @@
 # Thaw — Snowflake Manager
 
 A native desktop application for Snowflake management: browse objects, run SQL queries, export
-DDL to a git repository, and push changes through CI/CD workflows. Built with **Wails v2** (Go
+DDL to a git repository, and push changes through CI/CD workflows. Built with **Wails v3** (Go
 backend + React/TypeScript frontend, shipped as a single binary).
 
-**Stack:** Go · Wails v2 · React · Ant Design · Monaco Editor · TanStack Table
+**Stack:** Go · Wails v3 · React · Ant Design · Monaco Editor · TanStack Table
 
 > Thaw is **free software** licensed under the **GNU General Public License v3.0 (or later)** —
 > see [License](#license).
@@ -34,7 +34,7 @@ The complete, exhaustive feature catalogue lives in [`FEATURES.md`](FEATURES.md)
 
 ## Requirements
 
-Thaw ships as a **single self-contained binary** (Wails v2) — there is no separate runtime to
+Thaw ships as a **single self-contained binary** (Wails v3) — there is no separate runtime to
 install for the app itself. You need a supported OS, the platform's web-rendering runtime, and a
 Snowflake account. **Outbound HTTPS** access to your Snowflake account is required. Note that
 **`git` is _not_ required** — Thaw's git integration uses an embedded Go git implementation
@@ -44,9 +44,9 @@ Snowflake account. **Outbound HTTPS** access to your Snowflake account is requir
 
 | OS | Architectures | Runtime notes |
 |----|---------------|---------------|
-| **macOS** | `arm64` (Apple Silicon), `amd64` (Intel) | Minimum **macOS 10.13 High Sierra**. Builds are code-signed & notarized. |
+| **macOS** | `arm64` (Apple Silicon), `amd64` (Intel) | Minimum **macOS 12 Monterey**. Builds are code-signed & notarized. |
 | **Windows** | `amd64`, `arm64` | Requires the **[Microsoft Edge WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)** (present on up-to-date Windows 10/11; installed automatically by the signed NSIS installer if missing). |
-| **Linux** | `amd64` | Requires **GTK3** and **WebKit2GTK 4.1** runtime libraries — e.g. on Debian/Ubuntu `sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0`. |
+| **Linux** | `amd64` | Requires **GTK4** and **WebKitGTK 6.0** runtime libraries — e.g. on Debian/Ubuntu `sudo apt-get install -y libgtk-4-1 libwebkitgtk-6.0-4`. |
 
 ### Optional runtime dependencies (feature-specific)
 
@@ -121,14 +121,14 @@ any supported cloud works**:
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Go | ≥ 1.22 | `brew install go` |
+| Go | ≥ 1.26 | `brew install go` |
 | Node.js | ≥ 20 | `brew install node` |
-| Wails CLI | ≥ 2.9 | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
+| Wails CLI | v3.1+ | `go install github.com/wailsapp/wails/v3/cmd/wails3@latest` |
 
-Verify your toolchain with `wails doctor`.
+Verify your toolchain with `wails3 doctor`.
 
-> **Linux** also needs CGO + GTK/WebKit headers:
-> `sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev`
+> **Linux** also needs CGO + GTK4/WebKitGTK 6.0 + X11 headers:
+> `sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev`
 
 ### Getting started
 
@@ -140,15 +140,15 @@ go mod tidy
 cd frontend && npm install && cd ..
 
 # 3. Run in development mode (Go + React hot-reload)
-wails dev
+wails3 dev
 ```
 
-The first `wails dev` run regenerates `frontend/wailsjs/` from your Go structs.
+Regenerate `frontend/bindings/` after changing Go IPC method signatures with `wails3 generate bindings -ts -i -clean=true`.
 
-To produce a production binary (output in `build/bin/`):
+To produce a production binary / app bundle (output in `build/bin/`):
 
 ```bash
-wails build
+wails3 task package   # or `wails3 task build` for binary only
 ```
 
 For the full build/test/architecture reference, see

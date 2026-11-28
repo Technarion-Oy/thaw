@@ -6,9 +6,9 @@ import (
 	"slices"
 	"testing"
 
-	"thaw/internal/config"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/wailsapp/wails/v2/pkg/menu"
+	"thaw/internal/config"
 )
 
 // connectionGatedLabels are the native menu items that front IPC requiring a
@@ -40,25 +40,29 @@ var containerServiceLabels = []string{
 
 // collectDisabled walks the menu tree and returns the labels of every text item,
 // split into disabled and enabled.
-func collectDisabled(m *menu.Menu) (disabled, enabled []string) {
-	var walk func(items []*menu.MenuItem)
-	walk = func(items []*menu.MenuItem) {
-		for _, item := range items {
-			if item.SubMenu != nil {
-				walk(item.SubMenu.Items)
+func collectDisabled(m *application.Menu) (disabled, enabled []string) {
+	var walk func(cur *application.Menu)
+	walk = func(cur *application.Menu) {
+		for i := 0; ; i++ {
+			item := cur.ItemAt(i)
+			if item == nil {
+				break
+			}
+			if sub := item.GetSubmenu(); sub != nil {
+				walk(sub)
 				continue
 			}
-			if item.Type != menu.TextType {
+			if item.IsSeparator() || item.IsCheckbox() || item.IsRadio() {
 				continue
 			}
-			if item.Disabled {
-				disabled = append(disabled, item.Label)
+			if !item.Enabled() {
+				disabled = append(disabled, item.Label())
 			} else {
-				enabled = append(enabled, item.Label)
+				enabled = append(enabled, item.Label())
 			}
 		}
 	}
-	walk(m.Items)
+	walk(m)
 	slices.Sort(disabled)
 	slices.Sort(enabled)
 	return disabled, enabled

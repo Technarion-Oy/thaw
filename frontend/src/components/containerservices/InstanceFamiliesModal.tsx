@@ -3,7 +3,7 @@
 
 import { Alert, Button, Modal, Table } from "antd";
 import { tableFromResult } from "../shared/LazyResultTable";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 /**
  * Read-only SHOW COMPUTE POOL INSTANCE FAMILIES reference. Mostly opened for

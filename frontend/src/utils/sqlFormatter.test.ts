@@ -180,7 +180,7 @@ function _applyCasing(sql: string, kc: string, ic: string, fc: string): string {
   return out.join("");
 }
 
-vi.mock("../../wailsjs/go/sqleditor/Service", () => ({
+vi.mock("../../bindings/thaw/internal/sqleditor/service", () => ({
   ApplySqlCasing: (sql: string, kc: string, ic: string, fc: string) =>
     Promise.resolve(_applyCasing(sql, kc, ic, fc)),
 }));

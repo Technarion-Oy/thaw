@@ -18,9 +18,9 @@ import {
 import {
   ListUsers, ExecuteQuery, AlterUserProperty,
   ResetUserPassword, RenameUser, AbortAllUserQueries,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { useSessionStore } from "../../store/sessionStore";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import UserPropertiesModal from "./UserPropertiesModal";
 import { friendlyError } from "../common/PropertyRows";
 import CreateUserModal from "./CreateUserModal";

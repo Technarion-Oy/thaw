@@ -46,7 +46,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 
       - name: Download Go dependencies
         run: go mod download
@@ -111,7 +111,7 @@ jobs:
           rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate-repacked.p12"
 
       - name: Build (macOS)
-        run: wails build -platform darwin/${{ matrix.arch }} -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=0.0.0-signtest" -trimpath
+        run: wails3 task darwin:package ARCH=${{ matrix.arch }} VERSION=0.0.0-signtest
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 

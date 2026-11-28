@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
-import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
-import type { table } from "../../../wailsjs/go/models";
+import { GetDatabaseTableSummary } from "../../../bindings/thaw/internal/app/app";
+import type * as table from "../../../bindings/thaw/internal/table/models";
 import type { SortOrder } from "antd/es/table/interface";
 import { KIND_VAR } from "../sidebar/objectIcons";
 import type { SummaryFilters } from "./objectSummaryFilters";
@@ -38,7 +38,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
     setLoading(true);
     setError(null);
     try {
-      const tables = await GetDatabaseTableSummary(db);
+      const tables = (await GetDatabaseTableSummary(db)) ?? [];
       setData(tables);
     } catch (e) {
       setError(String(e));

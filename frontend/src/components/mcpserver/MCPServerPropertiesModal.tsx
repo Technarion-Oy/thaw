@@ -9,11 +9,11 @@ import {
 import {
   PartitionOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, DescribeMCPServer } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, DescribeMCPServer } from "../../../bindings/thaw/internal/app/app";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

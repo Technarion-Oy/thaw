@@ -5,13 +5,13 @@
 import { useEffect, useState } from "react";
 import { Form, Input, Checkbox, Select } from "antd";
 import { ExperimentOutlined } from "@ant-design/icons";
-import { BuildCreateNotebookSql, ExecDDL, ListWarehouses } from "../../../wailsjs/go/app/App";
+import { BuildCreateNotebookSql, ExecDDL, ListWarehouses } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import StageFilePicker from "../shared/StageFilePicker";
-import type { notebook as nbModels } from "../../../wailsjs/go/models";
+import type * as nbModels from "../../../bindings/thaw/internal/notebook/models";
 
 interface Props {
   db: string;

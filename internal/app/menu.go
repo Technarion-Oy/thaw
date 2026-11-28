@@ -3,31 +3,31 @@
 package app
 
 import (
+	goruntime "runtime"
 	"sync"
 
-	"thaw/internal/config"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/menu/keys"
+	"thaw/internal/config"
 )
 
 // buildMenu constructs the native application menu bar.
 // Menu item callbacks emit Wails events so the frontend can react without
 // requiring additional bound methods.
-func buildMenu(app *App) *menu.Menu {
-	appMenu := menu.NewMenu()
+func buildMenu(app *App) *application.Menu {
+	appMenu := application.NewMenu()
 
 	// Items fronting features that need a live Snowflake connection. They start
 	// disabled (the app always launches disconnected) and are toggled by
 	// app.setMenuConnected, wired at the bottom of this function and called from
 	// Connect/Disconnect. Everything else works offline and stays enabled.
-	var connectionItems []*menu.MenuItem
+	var connectionItems []*application.MenuItem
 
 	// Container Services items are gated on the connection *and* on the
 	// containerServices feature flag, which the user can flip at runtime. They
 	// start optimistically enabled-by-flag (mirroring featureFlagsStore) and are
 	// corrected by setMenuFeatureFlags as soon as the real flags are read.
-	var containerItems []*menu.MenuItem
+	var containerItems []*application.MenuItem
 
 	// The two inputs below are written by two independently-triggered IPC paths
 	// (Connect/Disconnect vs. startup/SaveFeatureFlags), so they and the item
@@ -37,58 +37,75 @@ func buildMenu(app *App) *menu.Menu {
 	containerEnabled := true
 	connected := false
 
+	addItem := func(m *application.Menu, label, accelerator string, cb func(*application.Context)) *application.MenuItem {
+		item := m.Add(label).OnClick(cb)
+		if accelerator != "" {
+			item.SetAccelerator(accelerator)
+		}
+		return item
+	}
+
 	// addConnectionItem adds a text item that is greyed out while disconnected.
 	// Any extra args are emitted as the event payload (the frontend uses this to
 	// tell six otherwise identical Container Services items apart).
-	addConnectionItem := func(m *menu.Menu, label string, accelerator *keys.Accelerator, event string, data ...interface{}) *menu.MenuItem {
-		item := m.AddText(label, accelerator, func(_ *menu.CallbackData) {
+	addConnectionItem := func(m *application.Menu, label, accelerator, event string, data ...any) *application.MenuItem {
+		item := addItem(m, label, accelerator, func(_ *application.Context) {
 			app.emit(event, data...)
 		})
-		item.Disabled = true
+		item.SetEnabled(false)
 		connectionItems = append(connectionItems, item)
 		return item
 	}
 
 	// Standard macOS application menu (About, Services, Hide, Quit, …).
 	// This must come first so that macOS renders subsequent submenus correctly.
-	appMenu.Append(menu.AppMenu())
+	// application.NewAppMenu() reads globalApplication.options.Name on darwin,
+	// so skip it when unit tests invoke buildMenu without application.New().
+	if application.Get() != nil {
+		appMenu.AddRole(application.AppMenu)
+	}
 
-	// Standard Edit menu (Cut, Copy, Paste, Select All, Undo, Redo).
-	// Required for Cmd+C/V/X/A to work inside WKWebView text inputs.
-	appMenu.Append(menu.EditMenu())
+	// Standard macOS Edit menu (Cut, Copy, Paste, Select All, Undo, Redo).
+	// Required on macOS so AppKit responder selectors work inside WKWebView text
+	// inputs. Gated to darwin because on Windows/Linux Wails v3's EditMenu role
+	// registers Go callbacks with Ctrl+C/V/X/A/Z (and Backspace on Linux GTK4)
+	// accelerators that hijack editing from Monaco, ResultGrid, and xterm.js.
+	if goruntime.GOOS == "darwin" {
+		appMenu.AddRole(application.EditMenu)
+	}
 
 	// ── File ─────────────────────────────────────────────────────────────────
 	fileMenu := appMenu.AddSubmenu("File")
 
-	fileMenu.AddText("New Tab", keys.CmdOrCtrl("t"), func(_ *menu.CallbackData) {
+	addItem(fileMenu, "New Tab", "CmdOrCtrl+t", func(_ *application.Context) {
 		app.emit("menu:new-tab")
 	})
 
 	fileMenu.AddSeparator()
 
-	fileMenu.AddText("Open File…", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Open File…", "CmdOrCtrl+o", func(_ *application.Context) {
 		app.emit("menu:open")
 	})
 
-	fileMenu.AddText("Open Any File…", nil, func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Open Any File…", "", func(_ *application.Context) {
 		app.emit("menu:open-any")
 	})
 
-	fileMenu.AddText("Open Folder…", keys.Combo("o", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Open Folder…", "CmdOrCtrl+Shift+o", func(_ *application.Context) {
 		app.emit("menu:open-folder")
 	})
 
-	fileMenu.AddText("Open Folder in New Window…", nil, func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Open Folder in New Window…", "", func(_ *application.Context) {
 		app.emit("menu:open-folder-new-window")
 	})
 
 	fileMenu.AddSeparator()
 
-	fileMenu.AddText("Save", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Save", "CmdOrCtrl+s", func(_ *application.Context) {
 		app.emit("menu:save")
 	})
 
-	fileMenu.AddText("Save As…", keys.Combo("s", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
+	addItem(fileMenu, "Save As…", "CmdOrCtrl+Shift+s", func(_ *application.Context) {
 		app.emit("menu:save-as")
 	})
 
@@ -98,43 +115,42 @@ func buildMenu(app *App) *menu.Menu {
 	appearanceMenu := viewMenu.AddSubmenu("Appearance")
 
 	// Declare items first so the closures can reference all three.
-	var systemItem, lightItem, darkItem *menu.MenuItem
+	var systemItem, lightItem, darkItem *application.MenuItem
 
-	setAppearance := func(selected *menu.MenuItem, value string) {
-		systemItem.Checked = selected == systemItem
-		lightItem.Checked = selected == lightItem
-		darkItem.Checked = selected == darkItem
-		app.updateApplicationMenu()
+	setAppearance := func(selected *application.MenuItem, value string) {
+		systemItem.SetChecked(selected == systemItem)
+		lightItem.SetChecked(selected == lightItem)
+		darkItem.SetChecked(selected == darkItem)
 		app.emit("menu:theme", value)
 	}
 
-	systemItem = appearanceMenu.AddRadio("System", true, nil, func(_ *menu.CallbackData) {
+	systemItem = appearanceMenu.AddRadio("System", true).OnClick(func(_ *application.Context) {
 		setAppearance(systemItem, "system")
 	})
-	lightItem = appearanceMenu.AddRadio("Light", false, nil, func(_ *menu.CallbackData) {
+	lightItem = appearanceMenu.AddRadio("Light", false).OnClick(func(_ *application.Context) {
 		setAppearance(lightItem, "light")
 	})
-	darkItem = appearanceMenu.AddRadio("Dark", false, nil, func(_ *menu.CallbackData) {
+	darkItem = appearanceMenu.AddRadio("Dark", false).OnClick(func(_ *application.Context) {
 		setAppearance(darkItem, "dark")
 	})
 
 	appearanceMenu.AddSeparator()
 
-	appearanceMenu.AddText("Customize Layout…", nil, func(_ *menu.CallbackData) {
+	addItem(appearanceMenu, "Customize Layout…", "", func(_ *application.Context) {
 		app.emit("menu:customize-layout")
 	})
 
 	viewMenu.AddSeparator()
-	viewMenu.AddText("Editor Preferences…", nil, func(_ *menu.CallbackData) {
+	addItem(viewMenu, "Editor Preferences…", "", func(_ *application.Context) {
 		app.emit("menu:editor-preferences")
 	})
-	viewMenu.AddText("Logging Preferences…", nil, func(_ *menu.CallbackData) {
+	addItem(viewMenu, "Logging Preferences…", "", func(_ *application.Context) {
 		app.emit("menu:logging-preferences")
 	})
-	viewMenu.AddText("File Watching…", nil, func(_ *menu.CallbackData) {
+	addItem(viewMenu, "File Watching…", "", func(_ *application.Context) {
 		app.emit("menu:file-watching")
 	})
-	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
+	addItem(viewMenu, "Enabled Features…", "", func(_ *application.Context) {
 		app.emit("menu:feature-flags")
 	})
 
@@ -143,88 +159,86 @@ func buildMenu(app *App) *menu.Menu {
 	// standalone Git, Terminal, and AI menus plus the operational items that used
 	// to live under View (MCP Sessions, Query Log, Session Management).
 	toolsMenu := appMenu.AddSubmenu("Tools")
-	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "Code Snippets…", "", func(_ *application.Context) {
 		app.emit("menu:code-snippets")
 	})
 	toolsMenu.AddSeparator()
-	addConnectionItem(toolsMenu, "Tag Management…", nil, "menu:tag-management")
+	addConnectionItem(toolsMenu, "Tag Management…", "", "menu:tag-management")
 	toolsMenu.AddSeparator()
-	addConnectionItem(toolsMenu, "Export Database DDL…", nil, "menu:export-ddl")
-	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
+	addConnectionItem(toolsMenu, "Export Database DDL…", "", "menu:export-ddl")
+	addItem(toolsMenu, "Export Path Format…", "", func(_ *application.Context) {
 		app.emit("menu:export-path-format")
 	})
 	toolsMenu.AddSeparator()
-	addConnectionItem(toolsMenu, "Schema Migration…", nil, "menu:migration")
-	addConnectionItem(toolsMenu, "Create dbt Project…", nil, "menu:dbt-create")
+	addConnectionItem(toolsMenu, "Schema Migration…", "", "menu:migration")
+	addConnectionItem(toolsMenu, "Create dbt Project…", "", "menu:dbt-create")
 	// Scaffolding a template is a purely local workflow — no connection needed.
-	toolsMenu.AddText("New Streamlit App from Template…", nil, func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "New Streamlit App from Template…", "", func(_ *application.Context) {
 		app.emit("menu:streamlit-template")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "Git Operations…", "CmdOrCtrl+g", func(_ *application.Context) {
 		app.emit("menu:git-operations")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("New Terminal", keys.CmdOrCtrl("`"), func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "New Terminal", "CmdOrCtrl+`", func(_ *application.Context) {
 		app.emit("menu:open-terminal")
 	})
 	toolsMenu.AddSeparator()
-	toolsMenu.AddText("Configure AI Inline Completions…", nil, func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "Configure AI Inline Completions…", "", func(_ *application.Context) {
 		app.emit("menu:configure-ai")
 	})
-	addConnectionItem(toolsMenu, "MCP Sessions…", nil, "menu:mcp-sessions")
+	addConnectionItem(toolsMenu, "MCP Sessions…", "", "menu:mcp-sessions")
 
 	toolsMenu.AddSeparator()
 
 	// ── Query Log submenu ────────────────────────────────────────────────
 	queryLogMenu := toolsMenu.AddSubmenu("Query Log")
 
-	var queryLogEnabled *menu.MenuItem
-	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false, nil, func(_ *menu.CallbackData) {
-		app.emit("menu:query-log-toggle", queryLogEnabled.Checked)
+	var queryLogEnabled *application.MenuItem
+	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false).OnClick(func(_ *application.Context) {
+		app.emit("menu:query-log-toggle", queryLogEnabled.Checked())
 	})
 	app.setQueryLogMenuCheck = func(checked bool) {
-		queryLogEnabled.Checked = checked
-		app.updateApplicationMenu()
+		queryLogEnabled.SetChecked(checked)
 	}
 
 	queryLogMenu.AddSeparator()
 
-	var logAll, logUser, logInternal *menu.MenuItem
-	setLogFilter := func(selected *menu.MenuItem, value string) {
-		logAll.Checked = selected == logAll
-		logUser.Checked = selected == logUser
-		logInternal.Checked = selected == logInternal
-		app.updateApplicationMenu()
+	var logAll, logUser, logInternal *application.MenuItem
+	setLogFilter := func(selected *application.MenuItem, value string) {
+		logAll.SetChecked(selected == logAll)
+		logUser.SetChecked(selected == logUser)
+		logInternal.SetChecked(selected == logInternal)
 		app.emit("menu:query-log-filter", value)
 	}
-	logAll = queryLogMenu.AddRadio("Log All Queries", true, nil, func(_ *menu.CallbackData) {
+	logAll = queryLogMenu.AddRadio("Log All Queries", true).OnClick(func(_ *application.Context) {
 		setLogFilter(logAll, "all")
 	})
-	logUser = queryLogMenu.AddRadio("Log User Queries Only", false, nil, func(_ *menu.CallbackData) {
+	logUser = queryLogMenu.AddRadio("Log User Queries Only", false).OnClick(func(_ *application.Context) {
 		setLogFilter(logUser, "user")
 	})
-	logInternal = queryLogMenu.AddRadio("Log Internal Queries Only", false, nil, func(_ *menu.CallbackData) {
+	logInternal = queryLogMenu.AddRadio("Log Internal Queries Only", false).OnClick(func(_ *application.Context) {
 		setLogFilter(logInternal, "internal")
 	})
 
-	toolsMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {
+	addItem(toolsMenu, "Session Management…", "", func(_ *application.Context) {
 		app.emit("menu:session-management")
 	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
 	snowparkMenu := appMenu.AddSubmenu("Snowpark")
-	snowparkMenu.AddText("Check Environment…", nil, func(_ *menu.CallbackData) {
+	addItem(snowparkMenu, "Check Environment…", "", func(_ *application.Context) {
 		app.emit("menu:snowpark-check")
 	})
-	snowparkMenu.AddText("Setup Environment…", nil, func(_ *menu.CallbackData) {
+	addItem(snowparkMenu, "Setup Environment…", "", func(_ *application.Context) {
 		app.emit("menu:snowpark-setup")
 	})
 	snowparkMenu.AddSeparator()
-	addConnectionItem(snowparkMenu, "New Notebook…", nil, "menu:snowpark-new-notebook")
-	addConnectionItem(snowparkMenu, "Open Notebook…", nil, "menu:snowpark-open-notebook")
+	addConnectionItem(snowparkMenu, "New Notebook…", "", "menu:snowpark-new-notebook")
+	addConnectionItem(snowparkMenu, "Open Notebook…", "", "menu:snowpark-open-notebook")
 	snowparkMenu.AddSeparator()
-	snowparkMenu.AddText("Notebook Preferences…", nil, func(_ *menu.CallbackData) {
+	addItem(snowparkMenu, "Notebook Preferences…", "", func(_ *application.Context) {
 		app.emit("menu:notebook-preferences")
 	})
 	snowparkMenu.AddSeparator()
@@ -241,45 +255,45 @@ func buildMenu(app *App) *menu.Menu {
 		{"Gateways…", "gateways"},
 	} {
 		containerItems = append(containerItems,
-			addConnectionItem(containerMenu, it.label, nil, "menu:container-services", it.tab))
+			addConnectionItem(containerMenu, it.label, "", "menu:container-services", it.tab))
 	}
 
 	// ── Help ──────────────────────────────────────────────────────────────────
 	helpMenu := appMenu.AddSubmenu("Help")
-	helpMenu.AddText("About Thaw…", nil, func(_ *menu.CallbackData) {
+	addItem(helpMenu, "About Thaw…", "", func(_ *application.Context) {
 		app.emit("menu:about")
 	})
-	helpMenu.AddText("Check for Updates…", nil, func(_ *menu.CallbackData) {
+	addItem(helpMenu, "Check for Updates…", "", func(_ *application.Context) {
 		app.emit("menu:check-for-update")
 	})
 	helpMenu.AddSeparator()
-	helpMenu.AddText("Function Catalog…", nil, func(_ *menu.CallbackData) {
+	addItem(helpMenu, "Function Catalog…", "", func(_ *application.Context) {
 		app.emit("menu:function-catalog")
 	})
 	helpMenu.AddSeparator()
-	helpMenu.AddText("Keyboard Shortcuts…", nil, func(_ *menu.CallbackData) {
+	addItem(helpMenu, "Keyboard Shortcuts…", "", func(_ *application.Context) {
 		app.emit("menu:keyboard-shortcuts")
 	})
 	helpMenu.AddSeparator()
-	helpMenu.AddText("Reveal Log File", nil, func(_ *menu.CallbackData) {
+	addItem(helpMenu, "Reveal Log File", "", func(_ *application.Context) {
 		if err := app.RevealLogFile(); err != nil {
 			app.logErrorf("reveal log file failed: %v", err)
 		}
 	})
 
 	// Recompute every gated item from the two inputs (connection + feature
-	// flags) and push the menu to the OS. Callers hold menuMu. updateApplicationMenu
-	// is a no-op when app.ctx is nil, keeping buildMenu usable from tests that
-	// construct an App without a Wails runtime.
+	// flags). Callers hold menuMu. MenuItem.SetEnabled/SetChecked already update
+	// the live native item in place on macOS, Windows, and Linux; do NOT call
+	// appMenu.Update() after startup (on Windows it detaches items onto a fresh
+	// off-screen HMENU, and on Linux it mutates GTK4 off the main thread).
 	refresh := func() {
 		for _, item := range connectionItems {
-			item.Disabled = !connected
+			item.SetEnabled(connected)
 		}
 		// Runs after the loop above, which also covers the container items.
 		for _, item := range containerItems {
-			item.Disabled = !connected || !containerEnabled
+			item.SetEnabled(connected && containerEnabled)
 		}
-		app.updateApplicationMenu()
 	}
 
 	// Connect/Disconnect call this to grey out (or restore) the Snowflake-only items.

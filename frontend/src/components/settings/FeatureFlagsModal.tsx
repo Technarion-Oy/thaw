@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { Button, Modal, Switch, Tooltip, Typography, message } from "antd";
 import { LockOutlined } from "@ant-design/icons";
-import { GetFeatureFlags, SaveFeatureFlags } from "../../../wailsjs/go/app/App";
+import { GetFeatureFlags, SaveFeatureFlags } from "../../../bindings/thaw/internal/app/app";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
-import type { config } from "../../../wailsjs/go/models";
+import type * as config from "../../../bindings/thaw/internal/config/models";
 
 const { Text } = Typography;
 

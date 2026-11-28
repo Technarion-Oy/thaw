@@ -10,7 +10,7 @@ import {
   DetectStreamlitMainFile,
   ListWarehouses,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";

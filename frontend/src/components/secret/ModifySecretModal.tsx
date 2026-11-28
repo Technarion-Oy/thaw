@@ -6,8 +6,8 @@ import {
   Typography, Button, Alert, DatePicker,
 } from "antd";
 import { KeyOutlined } from "@ant-design/icons";
-import { ListSecurityIntegrations, ExecDDL, GetObjectProperties, BuildModifySecretSql } from "../../../wailsjs/go/app/App";
-import type { secret } from "../../../wailsjs/go/models";
+import { ListSecurityIntegrations, ExecDDL, GetObjectProperties, BuildModifySecretSql } from "../../../bindings/thaw/internal/app/app";
+import type * as secret from "../../../bindings/thaw/internal/secret/models";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -38,7 +38,7 @@ export default function ModifySecretModal({ db, schema, name, onClose, onSuccess
         ]);
         setIntegrations(ints ?? []);
 
-        const pMap = new Map(props.map(p => [p.key.toUpperCase(), p.value]));
+        const pMap = new Map((props ?? []).map(p => [p.key.toUpperCase(), p.value]));
         const type = pMap.get("TYPE") || "PASSWORD";
         const comment = pMap.get("COMMENT") || "";
         setOriginalComment(comment);
@@ -71,7 +71,7 @@ export default function ModifySecretModal({ db, schema, name, onClose, onSuccess
 
   useEffect(() => {
     if (cfg) {
-      BuildModifySecretSql(db, schema, name, cfg, originalComment).then((sqls) => setPreview(sqls.join("\n\n"))).catch(() => {});
+      BuildModifySecretSql(db, schema, name, cfg, originalComment).then((sqls) => setPreview((sqls ?? []).join("\n\n"))).catch(() => {});
     }
   }, [db, schema, name, cfg, originalComment]);
 

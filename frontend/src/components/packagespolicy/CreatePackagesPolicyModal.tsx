@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Form, Input, Select, Typography } from "antd";
 import { CodeSandboxOutlined } from "@ant-design/icons";
-import { BuildCreatePackagesPolicySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreatePackagesPolicySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";

@@ -9,8 +9,8 @@ import {
 import {
   ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, DescribeExternalFunction, AlterExternalFunction } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetObjectProperties, DescribeExternalFunction, AlterExternalFunction } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 
@@ -201,7 +201,8 @@ export default function ExternalFunctionPropertiesModal({ db, schema, name, args
     const propCi = cols.indexOf("property");
     const valCi = cols.indexOf("value");
     if (propCi < 0 || valCi < 0) return out;
-    for (const r of detail.rows ?? []) {
+    for (const raw of detail.rows ?? []) {
+      const r = raw ?? [];
       const k = String(r[propCi] ?? "").toLowerCase();
       if (k) out[k] = String(r[valCi] ?? "");
     }

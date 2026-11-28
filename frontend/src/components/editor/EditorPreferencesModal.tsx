@@ -13,7 +13,7 @@ import {
   Switch,
   Typography,
 } from "antd";
-import { GetEditorPrefs, SaveEditorPrefs } from "../../../wailsjs/go/app/App";
+import { GetEditorPrefs, SaveEditorPrefs } from "../../../bindings/thaw/internal/app/app";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { useEditorTabPrefsStore } from "../../store/editorTabPrefsStore";
 

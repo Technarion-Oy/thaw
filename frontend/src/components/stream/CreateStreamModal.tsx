@@ -8,13 +8,14 @@ import { ThunderboltOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import {
   BuildCreateStreamSql, ExecDDL, ListDatabases, ListUserSchemas, ListObjects,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { stream, snowflake } from "../../../wailsjs/go/models";
+import type * as stream from "../../../bindings/thaw/internal/stream/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 interface Props {
   db: string;

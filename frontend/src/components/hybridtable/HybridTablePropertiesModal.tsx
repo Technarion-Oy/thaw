@@ -14,10 +14,10 @@ import {
   GetObjectProperties, AlterHybridTable, ListHybridTableIndexes,
   CreateHybridTableIndex, DropHybridTableIndex, GetTableColumnsWithTypes,
   HybridIndexColumnOptions,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -289,10 +289,10 @@ export default function HybridTablePropertiesModal({ db, schema, name, onClose }
   const uniqCi = lower.indexOf("is_unique");
   const indexData = (indexes?.rows ?? []).map((row, ri) => ({
     key: ri,
-    idxName: nameCi >= 0 ? String(row[nameCi] ?? "") : "",
-    columns: colsCi >= 0 ? String(row[colsCi] ?? "") : "",
-    included: inclCi >= 0 ? String(row[inclCi] ?? "") : "",
-    unique: uniqCi >= 0 ? String(row[uniqCi] ?? "") : "",
+    idxName: nameCi >= 0 ? String(row?.[nameCi] ?? "") : "",
+    columns: colsCi >= 0 ? String(row?.[colsCi] ?? "") : "",
+    included: inclCi >= 0 ? String(row?.[inclCi] ?? "") : "",
+    unique: uniqCi >= 0 ? String(row?.[uniqCi] ?? "") : "",
   }));
   const isUnique = (v: string) => v.toLowerCase() === "true" || v.toLowerCase() === "y";
 

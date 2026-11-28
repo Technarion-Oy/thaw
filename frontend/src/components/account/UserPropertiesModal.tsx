@@ -9,8 +9,8 @@ import {
   ListUserMfaMethods, RemoveUserMfaMethod, AddUserDelegatedAuth, RemoveUserDelegatedAuth,
   ListAccountAuthenticationPolicies, ListAccountPasswordPolicies, ListAccountSessionPolicies,
   ListSecurityIntegrations, ListAccountTags, GetUserTagReferences, GetUserPolicyReferences,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { EditRow, InfoRow, SECTION_HEAD, LABEL_TD, friendlyError } from "../common/PropertyRows";
 import TagsRow, { type EditableTag } from "../shared/TagsRow";
 import KeyPairAuthModal, { type KeySlot, SLOT_PROPERTY } from "./KeyPairAuthModal";

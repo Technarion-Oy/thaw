@@ -12,15 +12,15 @@ import {
   ExecDDL,
   ListExternalAccessIntegrations,
   ListSupportedDbtVersions,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useCreateSubmit } from "../shared/createModalHooks";
 import SourceLocationPicker from "./SourceLocationPicker";
-import { dbtproject } from "../../../wailsjs/go/models";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as dbtproject from "../../../bindings/thaw/internal/dbtproject/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 interface Props {
   db: string;
@@ -30,7 +30,7 @@ interface Props {
 }
 
 export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<dbtproject.CreateConfig>(new dbtproject.CreateConfig({
+  const [cfg, setCfg] = useState<dbtproject.CreateConfig>({
     name: "",
     caseSensitive: false,
     orReplace: false,
@@ -40,7 +40,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
     dbtVersion: "",
     defaultTarget: "",
     externalAccessIntegrations: [],
-  }));
+  });
   const [eaiList, setEaiList] = useState<snowflake.IntegrationRow[]>([]);
   const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);

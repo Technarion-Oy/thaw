@@ -6,7 +6,7 @@ import {
   Divider, InputNumber, Button, message,
 } from "antd";
 import { UserAddOutlined, KeyOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/app/App";
+import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";

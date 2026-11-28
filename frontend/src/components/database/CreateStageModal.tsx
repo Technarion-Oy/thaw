@@ -12,7 +12,7 @@ import {
 import {
   ExecDDL, ListIntegrations, BuildCreateStageSql, ListFileFormats,
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
@@ -21,7 +21,9 @@ import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
 import FormatPreviewTable from "./FormatPreviewTable";
-import type { snowflake, stage, fileformat } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as stage from "../../../bindings/thaw/internal/stage/models";
+import type * as fileformat from "../../../bindings/thaw/internal/fileformat/models";
 
 const { Text } = Typography;
 
@@ -74,8 +76,8 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
   const hasPreviewRef = useRef(false);
 
   useEffect(() => {
-    ListIntegrations("STORAGE").then(setIntegrations).catch(() => {});
-    ListFileFormats(db, schema).then(setFileFormats).catch(() => {});
+    ListIntegrations("STORAGE").then((rows) => setIntegrations(rows ?? [])).catch(() => {});
+    ListFileFormats(db, schema).then((rows) => setFileFormats(rows ?? [])).catch(() => {});
   }, [db, schema]);
 
   const handlePickFile = async () => {

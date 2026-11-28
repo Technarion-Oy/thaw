@@ -44,7 +44,7 @@ Persistence is handled per-store via Zustand's `persist` middleware.
   hooks to avoid requiring a component context. Example: `sessionStore` reads
   `queryStore.getState().activeTabId` before firing `UseRole`.
 - IPC is called directly from store actions (`import ... from
-  "../../wailsjs/go/app/App"`), not proxied through components.
+  "../../bindings/thaw/internal/app/app"`), not proxied through components.
 - `themeStore` applies side-effects (`document.documentElement.setAttribute`)
   on module load and in `onRehydrateStorage` so the theme is applied before the
   first render.

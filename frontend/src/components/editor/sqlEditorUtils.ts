@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
+import { GetTableForeignKeys } from "../../../bindings/thaw/internal/app/app";
 
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();

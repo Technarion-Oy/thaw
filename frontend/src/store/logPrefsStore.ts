@@ -3,8 +3,8 @@
 // @thaw-domain: Core IPC & App Lifecycle
 
 import { create } from "zustand";
-import { GetLogPrefs, GetLogPrefsLocked } from "../../wailsjs/go/app/App";
-import type { config } from "../../wailsjs/go/models";
+import { GetLogPrefs, GetLogPrefsLocked } from "../../bindings/thaw/internal/app/app";
+import type * as config from "../../bindings/thaw/internal/config/models";
 
 // Optimistic defaults: build-default level ("" sentinel), no SQL written to
 // disk, nothing admin-locked until the backend responds.
