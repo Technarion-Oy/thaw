@@ -52,7 +52,7 @@ tasks:
       # Stamp numeric X.Y.Z release versions into the bundle plist (Apple notarization
       # rejects non-numeric CFBundleVersion strings such as branch names or -signtest).
       - cmd: |
-          if [ -n "{{.VERSION}}" ] && echo "{{.VERSION}}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if [[ "{{.VERSION}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{.VERSION}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion {{.VERSION}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
           fi

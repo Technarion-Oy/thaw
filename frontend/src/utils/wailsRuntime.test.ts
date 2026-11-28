@@ -1,32 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const runtimeMocks = vi.hoisted(() => {
-  class MockRuntimeError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "RuntimeError";
-    }
-  }
+const runtimeMocks = vi.hoisted(() => ({
+  Browser: {
+    OpenURL: vi.fn(),
+  },
+  Clipboard: {
+    Text: vi.fn(),
+    SetText: vi.fn(),
+  },
+  Events: {
+    Emit: vi.fn(),
+    On: vi.fn(),
+  },
+}));
+
+// Keep the real `Call` export (including `Call.RuntimeError`) from
+// `@wailsio/runtime` so the test fails if a future runtime bump renames or
+// moves `RuntimeError`, while mocking Browser/Clipboard/Events.
+vi.mock("@wailsio/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wailsio/runtime")>();
   return {
-    Browser: {
-      OpenURL: vi.fn(),
-    },
-    Call: {
-      RuntimeError: MockRuntimeError,
-    },
-    Clipboard: {
-      Text: vi.fn(),
-      SetText: vi.fn(),
-    },
-    Events: {
-      Emit: vi.fn(),
-      On: vi.fn(),
-    },
+    ...actual,
+    Browser: runtimeMocks.Browser,
+    Clipboard: runtimeMocks.Clipboard,
+    Events: runtimeMocks.Events,
   };
 });
 
-vi.mock("@wailsio/runtime", () => runtimeMocks);
-
+import { Call } from "@wailsio/runtime";
 import {
   BrowserOpenURL,
   ClipboardGetText,
@@ -109,8 +110,11 @@ describe("wailsRuntime wrapper", () => {
     expect(runtimeMocks.Browser.OpenURL).toHaveBeenCalledWith("https://example.com");
   });
 
-  it("formats RuntimeError via String(err) without a RuntimeError prefix", () => {
-    const err = new runtimeMocks.Call.RuntimeError("SQL compilation error: table not found");
+  it("formats real @wailsio/runtime Call.RuntimeError via String(err) without a RuntimeError prefix", () => {
+    expect(Call.RuntimeError).toBeTypeOf("function");
+    const err = new Call.RuntimeError("SQL compilation error: table not found");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe("RuntimeError");
     expect(String(err)).toBe("SQL compilation error: table not found");
     expect(`${err}`).toBe("SQL compilation error: table not found");
     expect(err.message).toBe("SQL compilation error: table not found");

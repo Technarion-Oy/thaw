@@ -28,7 +28,7 @@ tasks:
       - cmd: |
           rm -rf build/windows/.assets-tmp
           VERSION_FLAG=""
-          if [ -n "{{.VERSION}}" ] && echo "{{.VERSION}}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if [[ "{{.VERSION}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION_FLAG="-productversion {{.VERSION}}"
           fi
           wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config build/config.yml -dir build/windows/.assets-tmp $VERSION_FLAG -silent
