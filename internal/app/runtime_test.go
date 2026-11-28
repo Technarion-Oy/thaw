@@ -84,10 +84,10 @@ func TestIsDialogCancelled(t *testing.T) {
 	if isDialogCancelled(nil) {
 		t.Error("isDialogCancelled(nil) = true, want false")
 	}
-	if !isDialogCancelled(errors.New("cancelled by user")) {
-		t.Error("isDialogCancelled('cancelled by user') = false, want true")
+	if !isDialogCancelled(errors.New("cancelled by user")) { //nolint:misspell // exact upstream cfd.ErrorCancelled message
+		t.Error("isDialogCancelled(cfd cancel msg) = false, want true")
 	}
-	if !isDialogCancelled(errors.New("dialog: Cancelled By User")) {
+	if !isDialogCancelled(errors.New("dialog: Cancelled By User")) { //nolint:misspell // exact upstream cfd.ErrorCancelled message
 		t.Error("isDialogCancelled(mixed case) = false, want true")
 	}
 	if isDialogCancelled(errors.New("permission denied")) {

@@ -80,7 +80,7 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 	if app.savedWindowState != nil {
 		if app.savedWindowState.Maximized {
 			// Do not combine WindowStateMaximised with WindowXY: Wails calls
-			// setPosition(X, Y) after maximise() on macOS/Windows, shifting the
+			// setPosition(X, Y) after maximizing on macOS/Windows, shifting the
 			// maximized window off-frame.
 			winOpts.StartState = application.WindowStateMaximised
 		} else {

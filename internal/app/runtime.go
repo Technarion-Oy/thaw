@@ -100,13 +100,13 @@ func toOpenFileFilters(filters []fileFilter, goos string) ([]application.FileFil
 
 // isDialogCancelled reports whether err represents a user cancellation from a
 // native file/directory dialog. On Windows, Wails v3 returns cfd.ErrorCancelled
-// ("cancelled by user") whereas macOS and Linux return ("", nil); normalizing
-// here keeps all platforms consistent for callers.
+// (British-spelled upstream error string) whereas macOS and Linux return
+// ("", nil); normalizing here keeps all platforms consistent for callers.
 func isDialogCancelled(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "cancelled by user")
+	return strings.Contains(strings.ToLower(err.Error()), "cancelled by user") //nolint:misspell // exact upstream cfd.ErrorCancelled message
 }
 
 // emit sends a Wails runtime event to the frontend. It is a no-op when App has
