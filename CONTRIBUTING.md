@@ -158,15 +158,16 @@ wails3 task package                           # full OS package (.app / NSIS / b
 wails3 generate bindings -ts -i -clean=true
 
 # Tests
-go test ./...                     # all Go unit tests
+go test ./...                     # all Go unit tests + release/artifact guards
 go test -race ./...               # with race detector
 cd frontend && npm test           # frontend (vitest)
+go test -tags wails_e2e -v ./e2e/...  # real-app Wails v3 E2E smoke suite (requires built frontend/dist)
 
 # Docs
 make docs                         # regenerate TypeDoc + gomarkdoc reference
 ```
 
-Integration tests live in `internal/integration/` and require a live Snowflake connection (gated behind the `integration` build tag).
+Integration tests live in `internal/integration/` and require a live Snowflake connection (gated behind the `integration` build tag). Real-app Wails v3 E2E smoke tests live in `e2e/` (gated behind the `wails_e2e` build tag; see [`docs/concepts/testing.md`](docs/concepts/testing.md) and [`e2e/README.md`](e2e/README.md)).
 
 ### Lint & security (run before pushing)
 
@@ -177,7 +178,7 @@ gosec -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
       -exclude-dir=frontend -exclude-dir=internal/integration ./...
 ```
 
-These also run in CI on every pull request and on pushes to `main` (plus a weekly cron). A Wails build check (`build-check.yml`) likewise verifies the app compiles, links, and bundles on each PR and `main` push — it builds `linux/amd64` on the self-hosted runners with the frontend obfuscation/minify passes skipped (`THAW_FAST_BUILD=1`) for speed. The Snowflake integration tests run weekly or on manual dispatch only. See `.github/workflows/`.
+These also run in CI on every pull request and on pushes to `main` (plus a weekly cron). A Wails build check (`build-check.yml`) verifies the app compiles, links, and bundles on each PR and `main` push (`linux/amd64` with `THAW_FAST_BUILD=1`), and the real-app E2E smoke workflow (`e2e-smoke.yml`) launches the compiled binary under Xvfb/openbox to verify startup, native menu event delivery, live IPC round-trips, and window state restore on PRs and Wails bumps (plus a guard asserting release/signing workflows never compile with Wails's `mcp` tag). The Snowflake integration tests run weekly or on manual dispatch only. See `.github/workflows/`.
 
 ### Dependency updates (Renovate)
 

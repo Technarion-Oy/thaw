@@ -39,6 +39,44 @@ Live-connection tests are in `internal/integration/`, gated behind the `integrat
 go test -tags integration ./internal/integration/...
 ```
 
+## Real-app Wails v3 E2E smoke tests (`e2e/`)
+
+Unit tests mock the generated `frontend/bindings/` layer; `e2e/` exercises the **real compiled desktop binary** (Go backend + embedded React/TypeScript frontend + native Wails v3 runtime) using Wails v3's built-in app-control driver (`-tags mcp`).
+
+> **Unrelated to `internal/mcp/`:** Wails v3's upstream `-tags mcp` app-control server is purely a local test/automation driver and has zero overlap with Thaw's own Snowflake MCP server (`internal/mcp/`). The suite lives under `e2e/` and uses the distinct Go build tag `wails_e2e` so the two are never confused.
+
+What the smoke suite (`e2e/smoke_test.go`) verifies against a live app instance in an isolated temp profile directory:
+
+1. **App startup** — binary launches cleanly, Wails app-control server initializes, main window opens, React mounts the first-launch License Agreement gate (`GetLicenseText`), and clicking Accept persists `AcceptLicense` via generated bindings and reveals the workspace.
+2. **Native menu event delivery** — triggers real native menu callbacks wired in `internal/app/menu.go` through a non-production event hook (`wails_e2e_driver.go`): verifies connection-gated items stay disabled offline (`Tag Management…`), radio items with payloads switch `data-theme` (`View → Appearance → Light / Dark`), and `Help → About Thaw…` opens `AboutModal` with live `GetAppInfo()` data.
+3. **Live IPC round-trips** — invokes bound methods on both `thaw/internal/app.App` (`GetAppInfo`, `IsConnected`, `IsLicenseAccepted`, `SaveEditorPrefs`/`GetEditorPrefs`) and `thaw/internal/sqleditor.Service` (`AnalyzeSqlSyntax`, `GetSqlStatementRanges`, `GetSnowflakeKeywords`) across the real Wails v3 runtime bridge.
+4. **Window state persistence & restore** — resizes the window, closes cleanly so `WindowClosing` persists `session.json`, relaunches against the same isolated state directory, and asserts the resized dimensions are restored.
+
+### Running locally
+
+```bash
+# 1. Build the embedded frontend bundle once (THAW_FAST_BUILD skips slow minification)
+cd frontend && THAW_FAST_BUILD=1 npm run build && cd ..
+
+# 2. Run the E2E smoke suite (auto-builds a temporary `-tags mcp` binary)
+go test -tags wails_e2e -v -count=1 ./e2e/...
+```
+
+To reuse a prebuilt non-production test binary (as CI does), pass `THAW_E2E_BINARY`:
+
+```bash
+go build -tags mcp -buildvcs=false -o build/bin/thaw-wails-e2e .
+THAW_E2E_BINARY=$PWD/build/bin/thaw-wails-e2e go test -tags wails_e2e -v -count=1 ./e2e/...
+```
+
+### CI and release-build security guards
+
+- `.github/workflows/e2e-smoke.yml` runs the full smoke suite on PRs, `main` pushes, and Renovate Wails bumps inside the Ubuntu 26.04 container under `dbus-run-session` + `xvfb-run` + `openbox` (GTK4 + WebKitGTK 6.0).
+- Three layers guarantee Wails's `-tags mcp` app-control driver can **never** ship in a release binary:
+  1. `internal/app/wails_e2e_guard.go` (`//go:build production && mcp`) fails compilation if both tags are ever combined.
+  2. All platform Taskfiles (`build/*/Taskfile.yml`) compile non-dev builds with `-tags production`.
+  3. `e2e/release_guard_test.go` (no build tag — runs in `go test ./...`, `build-check.yml`, and `e2e-smoke.yml`) asserts `.github/workflows/build.yml`, `.github/workflows/manual-release.yml`, and `.github/workflows/macos-sign-test.yml` never enable `mcp`, proves `go build -tags production,mcp ./internal/app` fails to compile, and enforces zero overlap between `e2e/` and `internal/mcp/`.
+
 ## Generated-artifact guards
 
 - `TestSemanticMapAccuracy` (in `internal/architecture`) fails if an annotated domain path no longer exists — regenerate with `go generate ./internal/architecture/` after moving/removing annotated files.

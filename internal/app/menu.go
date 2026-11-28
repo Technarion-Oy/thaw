@@ -42,6 +42,7 @@ func buildMenu(app *App) *application.Menu {
 		if accelerator != "" {
 			item.SetAccelerator(accelerator)
 		}
+		app.recordWailsE2EMenuAction(label, func() { cb(nil) })
 		return item
 	}
 
@@ -127,12 +128,15 @@ func buildMenu(app *App) *application.Menu {
 	systemItem = appearanceMenu.AddRadio("System", true).OnClick(func(_ *application.Context) {
 		setAppearance(systemItem, "system")
 	})
+	app.recordWailsE2EMenuAction("System", func() { setAppearance(systemItem, "system") })
 	lightItem = appearanceMenu.AddRadio("Light", false).OnClick(func(_ *application.Context) {
 		setAppearance(lightItem, "light")
 	})
+	app.recordWailsE2EMenuAction("Light", func() { setAppearance(lightItem, "light") })
 	darkItem = appearanceMenu.AddRadio("Dark", false).OnClick(func(_ *application.Context) {
 		setAppearance(darkItem, "dark")
 	})
+	app.recordWailsE2EMenuAction("Dark", func() { setAppearance(darkItem, "dark") })
 
 	appearanceMenu.AddSeparator()
 

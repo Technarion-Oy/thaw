@@ -67,6 +67,17 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 
 	appMenu := buildMenu(app)
 	wailsApp.Menu.Set(appMenu)
+	app.registerWailsE2EMenuDriver(func(label string) (found, enabled bool) {
+		liveMenu := wailsApp.Menu.GetApplicationMenu()
+		if liveMenu == nil {
+			return false, false
+		}
+		item := liveMenu.FindByLabel(label)
+		if item == nil {
+			return false, false
+		}
+		return true, item.Enabled()
+	})
 
 	winOpts := application.WebviewWindowOptions{
 		Title:              "Thaw — Snowflake Manager",

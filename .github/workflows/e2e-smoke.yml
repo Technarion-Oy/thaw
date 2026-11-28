@@ -1,0 +1,143 @@
+name: Wails E2E Smoke Tests
+
+# Least-privilege default: read-only token unless a job opts into more.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "Taskfile.yml"
+      - "build/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-smoke.yml"
+      - ".github/workflows/build.yml"
+      - ".github/workflows/manual-release.yml"
+      - ".github/workflows/macos-sign-test.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "frontend/**"
+      - "Taskfile.yml"
+      - "build/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-smoke.yml"
+      - ".github/workflows/build.yml"
+      - ".github/workflows/manual-release.yml"
+      - ".github/workflows/macos-sign-test.yml"
+  workflow_dispatch:
+
+# Cancel an in-progress run when a new commit is pushed to the same ref.
+concurrency:
+  group: e2e-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+
+jobs:
+  e2e-smoke:
+    name: Real-app Wails v3 E2E smoke (linux/amd64)
+    runs-on: self-hosted
+    container: ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget gcc pkg-config ca-certificates
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # cache: false — matches every other self-hosted container workflow in this repo.
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install GTK4, WebKitGTK 6.0, and headless X11 stack
+        run: |
+          apt-get update
+          apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            libx11-dev \
+            xvfb \
+            xauth \
+            dbus-x11 \
+            openbox \
+            fonts-dejavu-core
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      # Verify release/signing workflows never pass Wails's `mcp` app-control
+      # tag, `production,mcp` fails at compile time, and `e2e/` stays decoupled
+      # from Thaw's Snowflake `internal/mcp/` server.
+      - name: Run release-tag and isolation guards
+        run: go test -race -v -count=1 ./e2e/...
+
+      # Build the real React/TypeScript frontend bundle embedded via main.go.
+      # THAW_FAST_BUILD skips slow minification/obfuscation passes (this is a
+      # test binary, never a shipping artifact).
+      - name: Build frontend bundle
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+        env:
+          THAW_FAST_BUILD: "1"
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      # Compile the non-production E2E binary with Wails v3's upstream `mcp`
+      # app-control driver tag. Combining `production` and `mcp` is rejected at
+      # compile time by internal/app/wails_e2e_guard.go.
+      - name: Build Wails E2E binary
+        run: |
+          mkdir -p build/bin
+          go build -tags mcp -buildvcs=false -o build/bin/thaw-wails-e2e .
+        env:
+          CGO_ENABLED: "1"
+
+      # Run the real compiled app under a virtual X11 display + lightweight WM
+      # (openbox) so GTK4 window sizing and geometry restore behave identically
+      # to a real Linux desktop session.
+      - name: Run real-app E2E smoke suite
+        env:
+          THAW_E2E_BINARY: ${{ github.workspace }}/build/bin/thaw-wails-e2e
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+          NO_AT_BRIDGE: "1"
+          XDG_RUNTIME_DIR: /tmp/xdg-runtime
+        run: |
+          mkdir -p /tmp/xdg-runtime && chmod 700 /tmp/xdg-runtime
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1080x24 -ac" bash -c '
+            openbox &
+            WM_PID=$!
+            trap "kill $WM_PID 2>/dev/null || true" EXIT
+            sleep 0.5
+            go test -tags wails_e2e -v -count=1 -timeout 180s ./e2e/...
+          '
+
+      - name: Unlock permissions for host runner agent
+        if: always()
+        run: chmod -R 777 $GITHUB_WORKSPACE/../../_actions || true
