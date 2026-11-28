@@ -42,6 +42,22 @@ func buildMenu(app *App) *application.Menu {
 		if accelerator != "" {
 			item.SetAccelerator(accelerator)
 		}
+		app.recordWailsE2EMenuAction(label, func() { cb(nil) })
+		return item
+	}
+
+	addRadio := func(m *application.Menu, label string, checked bool, cb func(*application.Context)) *application.MenuItem {
+		item := m.AddRadio(label, checked).OnClick(cb)
+		app.recordWailsE2EMenuAction(label, func() { cb(nil) })
+		return item
+	}
+
+	addCheckbox := func(m *application.Menu, label string, checked bool, cb func(*application.Context)) *application.MenuItem {
+		item := m.AddCheckbox(label, checked).OnClick(cb)
+		app.recordWailsE2EMenuAction(label, func() {
+			item.SetChecked(!item.Checked())
+			cb(nil)
+		})
 		return item
 	}
 
@@ -124,13 +140,13 @@ func buildMenu(app *App) *application.Menu {
 		app.emit("menu:theme", value)
 	}
 
-	systemItem = appearanceMenu.AddRadio("System", true).OnClick(func(_ *application.Context) {
+	systemItem = addRadio(appearanceMenu, "System", true, func(_ *application.Context) {
 		setAppearance(systemItem, "system")
 	})
-	lightItem = appearanceMenu.AddRadio("Light", false).OnClick(func(_ *application.Context) {
+	lightItem = addRadio(appearanceMenu, "Light", false, func(_ *application.Context) {
 		setAppearance(lightItem, "light")
 	})
-	darkItem = appearanceMenu.AddRadio("Dark", false).OnClick(func(_ *application.Context) {
+	darkItem = addRadio(appearanceMenu, "Dark", false, func(_ *application.Context) {
 		setAppearance(darkItem, "dark")
 	})
 
@@ -196,7 +212,7 @@ func buildMenu(app *App) *application.Menu {
 	queryLogMenu := toolsMenu.AddSubmenu("Query Log")
 
 	var queryLogEnabled *application.MenuItem
-	queryLogEnabled = queryLogMenu.AddCheckbox("Enable Query Log", false).OnClick(func(_ *application.Context) {
+	queryLogEnabled = addCheckbox(queryLogMenu, "Enable Query Log", false, func(_ *application.Context) {
 		app.emit("menu:query-log-toggle", queryLogEnabled.Checked())
 	})
 	app.setQueryLogMenuCheck = func(checked bool) {
@@ -212,13 +228,13 @@ func buildMenu(app *App) *application.Menu {
 		logInternal.SetChecked(selected == logInternal)
 		app.emit("menu:query-log-filter", value)
 	}
-	logAll = queryLogMenu.AddRadio("Log All Queries", true).OnClick(func(_ *application.Context) {
+	logAll = addRadio(queryLogMenu, "Log All Queries", true, func(_ *application.Context) {
 		setLogFilter(logAll, "all")
 	})
-	logUser = queryLogMenu.AddRadio("Log User Queries Only", false).OnClick(func(_ *application.Context) {
+	logUser = addRadio(queryLogMenu, "Log User Queries Only", false, func(_ *application.Context) {
 		setLogFilter(logUser, "user")
 	})
-	logInternal = queryLogMenu.AddRadio("Log Internal Queries Only", false).OnClick(func(_ *application.Context) {
+	logInternal = addRadio(queryLogMenu, "Log Internal Queries Only", false, func(_ *application.Context) {
 		setLogFilter(logInternal, "internal")
 	})
 

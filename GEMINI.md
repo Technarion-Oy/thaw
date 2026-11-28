@@ -82,8 +82,9 @@ wails3 task package                           # full OS package (.app / NSIS / b
 go mod tidy
 
 # Go tests
-go test ./...                        # all unit tests + generated-artifact guards
+go test ./...                        # all unit tests + release/artifact guards
 go test -race ./...                  # with race detector
+go test -tags wails_e2e -v ./e2e/... # real-app Wails v3 E2E smoke suite (needs frontend/dist)
 go test -tags integration ./internal/integration/...   # live Snowflake required
 
 # Code generation (committed; CI fails if stale)

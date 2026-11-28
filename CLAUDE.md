@@ -52,8 +52,9 @@ wails3 generate bindings -ts -i -clean=true     # regenerate frontend/bindings/ 
 go mod tidy
 
 # Go tests
-go test ./...                        # all
+go test ./...                        # all unit tests + release/artifact guards
 go test -race ./...                  # race detector
+go test -tags wails_e2e -v ./e2e/... # real-app Wails v3 E2E smoke suite (needs frontend/dist)
 go test -tags integration ./internal/integration/...   # live Snowflake required
 
 # Docs
