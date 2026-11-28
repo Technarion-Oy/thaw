@@ -1,18 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const runtimeMocks = vi.hoisted(() => ({
-  Browser: {
-    OpenURL: vi.fn(),
-  },
-  Clipboard: {
-    Text: vi.fn(),
-    SetText: vi.fn(),
-  },
-  Events: {
-    Emit: vi.fn(),
-    On: vi.fn(),
-  },
-}));
+const runtimeMocks = vi.hoisted(() => {
+  class MockRuntimeError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "RuntimeError";
+    }
+  }
+  return {
+    Browser: {
+      OpenURL: vi.fn(),
+    },
+    Call: {
+      RuntimeError: MockRuntimeError,
+    },
+    Clipboard: {
+      Text: vi.fn(),
+      SetText: vi.fn(),
+    },
+    Events: {
+      Emit: vi.fn(),
+      On: vi.fn(),
+    },
+  };
+});
 
 vi.mock("@wailsio/runtime", () => runtimeMocks);
 
@@ -96,6 +107,13 @@ describe("wailsRuntime wrapper", () => {
     runtimeMocks.Browser.OpenURL.mockResolvedValue(undefined);
     BrowserOpenURL("https://example.com");
     expect(runtimeMocks.Browser.OpenURL).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("formats RuntimeError via String(err) without a RuntimeError prefix", () => {
+    const err = new runtimeMocks.Call.RuntimeError("SQL compilation error: table not found");
+    expect(String(err)).toBe("SQL compilation error: table not found");
+    expect(`${err}`).toBe("SQL compilation error: table not found");
+    expect(err.message).toBe("SQL compilation error: table not found");
   });
 });
 

@@ -6,11 +6,14 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"thaw/internal/session"
 )
@@ -90,6 +93,49 @@ func TestIsDialogCancelled(t *testing.T) {
 	if isDialogCancelled(errors.New("permission denied")) {
 		t.Error("isDialogCancelled('permission denied') = true, want false")
 	}
+}
+
+func TestLimitAssetConcurrencySkipsWailsPaths(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	mw := limitAssetConcurrency(1)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/assets/slow.js" {
+			close(started)
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Occupy the sole asset concurrency slot.
+	assetDone := make(chan struct{})
+	go func() {
+		defer close(assetDone)
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/assets/slow.js", nil))
+	}()
+	<-started
+
+	// A /wails/runtime IPC call must bypass the semaphore and finish immediately.
+	ipcDone := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/wails/runtime", nil))
+		ipcDone <- rec.Code
+	}()
+
+	select {
+	case code := <-ipcDone:
+		if code != http.StatusOK {
+			t.Fatalf("/wails/runtime status = %d, want 200", code)
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("/wails/runtime blocked behind saturated asset semaphore")
+	}
+
+	close(release)
+	<-assetDone
 }
 
 func TestRuntimeHelpersSafeWithNilApp(t *testing.T) {

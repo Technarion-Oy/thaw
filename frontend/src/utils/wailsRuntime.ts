@@ -11,9 +11,20 @@
 
 import {
   Browser,
+  Call,
   Clipboard,
   Events,
 } from "@wailsio/runtime";
+
+// Wails v2 rejected failed IPC calls with the plain Go error string; v3 rejects
+// with a RuntimeError (extends Error, name = "RuntimeError"), so `String(e)` /
+// `${e}` across ~500 UI call sites would otherwise show a "RuntimeError: "
+// prefix. Override `toString` once here to return the clean Go error message.
+if (Call?.RuntimeError?.prototype) {
+  Call.RuntimeError.prototype.toString = function toString(): string {
+    return this.message;
+  };
+}
 
 /** Subscribe to a backend Wails event. Returns an unsubscribe callback. */
 export function EventsOn(

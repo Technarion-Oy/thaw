@@ -13,9 +13,7 @@ on:
       - "go.sum"
       - "frontend/**"
       - "Taskfile.yml"
-      - "build/config.yml"
-      - "build/Taskfile.yml"
-      - "build/linux/Taskfile.yml"
+      - "build/**"
       - ".github/workflows/build-check.yml"
   pull_request:
     branches: [main]
@@ -25,9 +23,7 @@ on:
       - "go.sum"
       - "frontend/**"
       - "Taskfile.yml"
-      - "build/config.yml"
-      - "build/Taskfile.yml"
-      - "build/linux/Taskfile.yml"
+      - "build/**"
       - ".github/workflows/build-check.yml"
   workflow_dispatch:
 

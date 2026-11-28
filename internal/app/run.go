@@ -5,6 +5,7 @@ package app
 import (
 	"embed"
 	"net/http"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -47,6 +48,12 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 		ShouldQuit: func() bool {
+			// Note (Linux GTK4): ShouldQuit runs on the GTK main thread via
+			// InvokeSync, whereas GTK4 question dialogs dispatch via InvokeAsync.
+			// Normal window close goes through the WindowClosing hook (goroutine)
+			// first and sets closeConfirmed, and DeclineLicense has no active
+			// queries; do not add a Linux quit() caller while queries may run
+			// without first confirming off the GTK main thread.
 			if !app.confirmClose() {
 				return false
 			}
@@ -101,12 +108,20 @@ func Run(assets embed.FS, thirdPartyNotices, licenseText string) error {
 // WKWebView requests the whole unbundled module graph (300+ files) at once and
 // Wails proxies each over its own TCP connection to Vite; that burst overflows
 // Vite's listen backlog (kern.ipc.somaxconn = 128 on macOS), connections are
-// reset, module imports fail, and the window stays blank white. Harmless for
-// production builds, where assets are served from the embedded FS.
+// reset, module imports fail, and the window stays blank white.
+//
+// In Wails v3, Assets.Middleware sits outside the /wails/runtime IPC transport
+// handler, and bound calls are HTTP POSTs held open until Go returns. Bypassing
+// /wails/ paths guarantees long-running IPC calls (WaitForQueryResult,
+// migration, pip install) never consume asset slots or block cancel calls.
 func limitAssetConcurrency(n int) application.Middleware {
 	sem := make(chan struct{}, n)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/wails/") {
+				next.ServeHTTP(w, r)
+				return
+			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			next.ServeHTTP(w, r)

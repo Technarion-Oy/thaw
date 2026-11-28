@@ -70,7 +70,8 @@ function makeStepState(): StepState {
   return { status: "idle", log: [], error: null };
 }
 
-// Wails rejects a failing IPC call with a plain string carrying the Go error.
+// Wails v3 rejects a failing IPC call with a RuntimeError carrying the Go error
+// message (wailsRuntime.ts overrides toString() to return the clean message).
 // Backend pip errors are two blocks — "install from requirements.txt failed: …"
 // then a blank line and the explanation — so the text must survive intact.
 function errText(e: unknown): string {
