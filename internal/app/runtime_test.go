@@ -68,7 +68,7 @@ func TestRuntimeHelpersSafeWithNilContext(t *testing.T) {
 	if _, err := a.openDirectoryDialog(openDialogOpts{title: "Dir"}); !errors.Is(err, errRuntimeNotInitialized) {
 		t.Errorf("openDirectoryDialog err = %v, want %v", err, errRuntimeNotInitialized)
 	}
-	if _, err := a.confirmDialog(nil, confirmDialogOpts{title: "Confirm"}); !errors.Is(err, errRuntimeNotInitialized) {
+	if _, err := a.confirmDialog(confirmDialogOpts{title: "Confirm"}); !errors.Is(err, errRuntimeNotInitialized) {
 		t.Errorf("confirmDialog err = %v, want %v", err, errRuntimeNotInitialized)
 	}
 }

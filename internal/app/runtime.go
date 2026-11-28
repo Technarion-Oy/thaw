@@ -3,7 +3,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -121,14 +120,11 @@ func (a *App) openDirectoryDialog(opts openDialogOpts) (string, error) {
 }
 
 // confirmDialog displays a native question dialog and returns the clicked button label.
-func (a *App) confirmDialog(ctx context.Context, opts confirmDialogOpts) (string, error) {
-	if ctx == nil {
-		ctx = a.ctx
-	}
-	if ctx == nil {
+func (a *App) confirmDialog(opts confirmDialogOpts) (string, error) {
+	if a.ctx == nil {
 		return "", errRuntimeNotInitialized
 	}
-	return wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+	return wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
 		Type:          wailsruntime.QuestionDialog,
 		Title:         opts.title,
 		Message:       opts.message,
