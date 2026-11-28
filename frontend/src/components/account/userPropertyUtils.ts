@@ -5,7 +5,7 @@
 // the column-index lookups and quoting are unit-testable (see
 // userPropertyUtils.test.ts) — mirroring the keyPairUtils.ts split in this dir.
 
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import type { EditableTag } from "../shared/TagsRow";
 import { parseAllowedValues } from "../tag/allowedValues";
 
@@ -31,7 +31,8 @@ export function nameOptionsFromShow(res: snowflake.QueryResult | null): NameOpti
   const iSc      = cols.indexOf("schema_name");
   const iAllowed = cols.indexOf("allowed_values");
   if (iName < 0) return [];
-  return (res?.rows ?? []).map((r) => {
+  return (res?.rows ?? []).map((raw) => {
+    const r = raw ?? [];
     const nm = String(r[iName]);
     const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
     const sc = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
@@ -49,7 +50,8 @@ export function userTagsToEditable(res: snowflake.QueryResult | null): EditableT
   const ci = (n: string) => cols.indexOf(n);
   const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"), vlI = ci("tag_value");
   if (nmI < 0) return [];
-  return (res?.rows ?? []).map((row): EditableTag => {
+  return (res?.rows ?? []).map((rawRow): EditableTag => {
+    const row = rawRow ?? [];
     const tdb = dbI >= 0 && row[dbI] != null ? String(row[dbI]) : "";
     const tsc = scI >= 0 && row[scI] != null ? String(row[scI]) : "";
     const tnm = String(row[nmI] ?? "");
@@ -89,7 +91,8 @@ export function parsePolicyReferences(res: snowflake.QueryResult | null): Policy
   const dbI = ci("policy_db"), scI = ci("policy_schema"), nmI = ci("policy_name"), kI = ci("policy_kind");
   if (nmI < 0 || kI < 0) return [];
   const out: PolicyRef[] = [];
-  for (const r of res?.rows ?? []) {
+  for (const raw of res?.rows ?? []) {
+    const r = raw ?? [];
     const kind = POLICY_KIND_MAP[String(r[kI] ?? "").toUpperCase()];
     if (!kind) continue;
     const db = dbI >= 0 && r[dbI] != null ? String(r[dbI]) : "";
@@ -114,11 +117,14 @@ export function parseMfaMethods(res: snowflake.QueryResult | null): MfaMethod[] 
   const nI = ci("name"), tI = ci("type"), cI = ci("comment"), lI = ci("last_used");
   if (nI < 0) return [];
   return (res?.rows ?? [])
-    .map((r): MfaMethod => ({
-      name: String(r[nI] ?? ""),
-      type: tI >= 0 && r[tI] != null ? String(r[tI]) : "",
-      comment: cI >= 0 && r[cI] != null ? String(r[cI]) : "",
-      lastUsed: lI >= 0 && r[lI] != null ? String(r[lI]) : "",
-    }))
+    .map((raw): MfaMethod => {
+      const r = raw ?? [];
+      return {
+        name: String(r[nI] ?? ""),
+        type: tI >= 0 && r[tI] != null ? String(r[tI]) : "",
+        comment: cI >= 0 && r[cI] != null ? String(r[cI]) : "",
+        lastUsed: lI >= 0 && r[lI] != null ? String(r[lI]) : "",
+      };
+    })
     .filter((m) => m.name !== "");
 }

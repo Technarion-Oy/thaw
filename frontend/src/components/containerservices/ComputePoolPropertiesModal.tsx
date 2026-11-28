@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Modal, Spin, message } from "antd";
 import {
   AlterComputePool, AlterComputePoolProperty, DescribeComputePool, ListComputePoolNodes,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { EditRow, InfoRow, SECTION_HEAD } from "../common/PropertyRows";
 import LazyResultTable from "../shared/LazyResultTable";
 import TagsRow from "../shared/TagsRow";

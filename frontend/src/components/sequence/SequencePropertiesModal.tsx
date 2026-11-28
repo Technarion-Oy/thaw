@@ -9,8 +9,8 @@ import {
 import {
   NumberOutlined, EditOutlined, CheckOutlined, CloseOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterSequence } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetObjectProperties, AlterSequence } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 

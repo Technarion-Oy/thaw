@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { create } from "zustand";
-import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/app/App";
-import type { config } from "../../wailsjs/go/models";
+import { GetAdminLockedFlags, GetFeatureFlags } from "../../bindings/thaw/internal/app/app";
+import type * as config from "../../bindings/thaw/internal/config/models";
 
 // Optimistic defaults: every feature enabled until the backend responds,
 // except opt-in features whose backend default is false (e.g. mcpServer).

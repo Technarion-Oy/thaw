@@ -7,7 +7,7 @@ import {
   Form, Input, Select, Checkbox, Button, Space, Switch, Collapse,
 } from "antd";
 import { CodeOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateProcedureSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateProcedureSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
@@ -15,7 +15,7 @@ import SqlPreview from "../shared/SqlPreview";
 import MonacoSqlField from "../shared/MonacoSqlField";
 import DataTypeAutoComplete from "../shared/DataTypeAutoComplete";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { procedure } from "../../../wailsjs/go/models";
+import type * as procedure from "../../../bindings/thaw/internal/procedure/models";
 
 const LANGUAGES = ["SQL", "PYTHON", "JAVA", "JAVASCRIPT", "SCALA"];
 const NULL_HANDLING = ["CALLED ON NULL INPUT", "RETURNS NULL ON NULL INPUT"];

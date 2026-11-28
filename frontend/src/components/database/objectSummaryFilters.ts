@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: Object Browser & Administration
 
-import type { table } from "../../../wailsjs/go/models";
+import type * as table from "../../../bindings/thaw/internal/table/models";
 import type { FilterValue, SortOrder } from "antd/es/table/interface";
 
 /**
@@ -62,8 +62,8 @@ export function schemaFilters(data: table.TableSummary[]) {
  * truncated). That is neither empty nor non-empty, so such a row matches neither
  * option rather than being counted as empty.
  */
-export function matchesRowFilter(value: string, rows?: number) {
-  if (rows === undefined) return false;
+export function matchesRowFilter(value: string, rows?: number | null) {
+  if (rows == null) return false;
   return value === "empty" ? rows === 0 : rows > 0;
 }
 
@@ -72,9 +72,9 @@ export function matchesRowFilter(value: string, rows?: number) {
  * both directions: antd negates the comparator for a descending sort, so the
  * unknown-vs-known verdict is pre-negated to survive it.
  */
-export function compareCounts(a: number | undefined, b: number | undefined, order?: SortOrder) {
-  if (a === undefined || b === undefined) {
-    const last = (a === undefined ? 1 : 0) - (b === undefined ? 1 : 0);
+export function compareCounts(a: number | null | undefined, b: number | null | undefined, order?: SortOrder) {
+  if (a == null || b == null) {
+    const last = (a == null ? 1 : 0) - (b == null ? 1 : 0);
     return order === "descend" ? -last : last;
   }
   return a - b;

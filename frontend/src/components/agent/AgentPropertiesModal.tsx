@@ -10,7 +10,7 @@ import {
   ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined, ReloadOutlined, SaveOutlined,
   FolderOpenOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterAgent, DescribeAgent } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterAgent, DescribeAgent } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 import Editor from "@monaco-editor/react";
@@ -18,7 +18,7 @@ import StageFilePicker from "../shared/StageFilePicker";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { buildProfileJson, parseProfileJson } from "./profile";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

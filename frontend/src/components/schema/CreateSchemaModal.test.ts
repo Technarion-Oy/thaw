@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 
 // ObjectNameCaseControl calls GetSnowflakeKeywords() at module load time — stub
 // it out rather than requiring a browser `window` for this pure-function test.
-vi.mock("../../../wailsjs/go/sqleditor/Service", () => ({
+vi.mock("../../../bindings/thaw/internal/sqleditor/service", () => ({
   GetSnowflakeKeywords: () => Promise.resolve([]),
 }));
 

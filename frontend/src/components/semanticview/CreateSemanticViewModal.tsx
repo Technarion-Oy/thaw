@@ -7,7 +7,7 @@ import { Form, Input, InputNumber, Checkbox, Alert, Collapse, Typography } from 
 import { ApartmentOutlined } from "@ant-design/icons";
 import {
   BuildCreateSemanticViewSql, ExecDDL, ListDatabases,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -140,8 +140,8 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     const remapRows = (rows: ExpressionRow[]) => rows.map((e) => ({
       ...e,
       tableAlias: remapAlias(e.tableAlias, diff),
-      using: e.using.filter((u) => completeRelNames.has(u)),
-      nonAdditiveBy: e.nonAdditiveBy
+      using: (e.using ?? []).filter((u) => completeRelNames.has(u)),
+      nonAdditiveBy: (e.nonAdditiveBy ?? [])
         .map((d) => ({ ...d, dimension: remapQualified(d.dimension, diff) }))
         .filter((d) => d.dimension),
     }));
@@ -164,7 +164,7 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     const completeNames = new Set(next.filter(isCompleteRelationship).map((r) => r.name.trim()));
     setMetrics((ms) => ms.map((m) => ({
       ...m,
-      using: m.using.map((u) => remapAlias(u, diff)).filter((u) => completeNames.has(u)),
+      using: (m.using ?? []).map((u) => remapAlias(u, diff)).filter((u) => completeNames.has(u)),
     })));
   };
 
@@ -174,7 +174,7 @@ export default function CreateSemanticViewModal({ db, schema, onClose, onSuccess
     const completeNames = new Set(next.filter(isCompleteExpression).map(qualifiedNameOf));
     setMetrics((ms) => ms.map((m) => ({
       ...m,
-      nonAdditiveBy: m.nonAdditiveBy
+      nonAdditiveBy: (m.nonAdditiveBy ?? [])
         .map((d) => ({ ...d, dimension: remapAlias(d.dimension, diff) }))
         .filter((d) => completeNames.has(d.dimension)),
     })));

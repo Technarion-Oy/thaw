@@ -25,7 +25,7 @@ supported: OAUTH2, CLOUD_PROVIDER_TOKEN, PASSWORD, GENERIC_STRING, SYMMETRIC_KEY
 - `ListSecurityIntegrations()` — populates the OAuth security integration select
 - `GetQuotedIdentifiersIgnoreCase()` — feeds `ObjectNameCaseControl` in Create
 
-**`secret.SecretConfig` type** (from `wailsjs/go/models`): `secretType`, `oauthScopes`, `oauthRefreshToken`, `oauthTokenEndpoint`, `securityIntegration`, `username`, `password`, `secretString`, `token`.
+**`secret.SecretConfig` type** (from `bindings/thaw/internal/*/models`): `secretType`, `oauthScopes`, `oauthRefreshToken`, `oauthTokenEndpoint`, `securityIntegration`, `username`, `password`, `secretString`, `token`.
 
 **Shared components:** `ObjectNameCaseControl` (Create only), `SqlPreview`, `MultiInput` (for OAuth scope list).
 

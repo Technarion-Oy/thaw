@@ -5,13 +5,13 @@
 import { useState } from "react";
 import { Form, Input, Checkbox, Alert } from "antd";
 import { RobotOutlined } from "@ant-design/icons";
-import { BuildCreateModelSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateModelSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import ModelSourcePicker, { invalidateModelsCache } from "./ModelSourcePicker";
-import type { model as modelModels } from "../../../wailsjs/go/models";
+import type * as modelModels from "../../../bindings/thaw/internal/model/models";
 
 interface Props {
   db: string;

@@ -8,7 +8,7 @@ import StageFilePicker from "../shared/StageFilePicker";
 import SpecEditor from "./SpecEditor";
 import ServiceSpecForm from "./ServiceSpecForm";
 import { specProblems } from "./specDoc";
-import type { service as svcModels } from "../../../wailsjs/go/models";
+import type * as svcModels from "../../../bindings/thaw/internal/service/models";
 
 const { Text } = Typography;
 

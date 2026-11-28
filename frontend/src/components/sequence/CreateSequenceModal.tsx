@@ -7,13 +7,13 @@ import { Form, Input, InputNumber, Select } from "antd";
 import { NumberOutlined } from "@ant-design/icons";
 import {
   BuildCreateSequenceSql, ExecDDL,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { sequence } from "../../../wailsjs/go/models";
+import type * as sequence from "../../../bindings/thaw/internal/sequence/models";
 
 interface Props {
   db: string;

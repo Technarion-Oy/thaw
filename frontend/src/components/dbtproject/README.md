@@ -34,7 +34,7 @@ preview and executed via `ExecDDL` on submit.
 - `SqlPreview` — read-only monospace SQL preview block
 - `SourceLocationPicker` — lists available stages in the schema, lets user pick a path
 
-**Domain types:** `dbtproject.CreateConfig`, `dbtproject.DbtVersionInfo` from `wailsjs/go/models`.
+**Domain types:** `dbtproject.CreateConfig`, `dbtproject.DbtVersionInfo` from `bindings/thaw/internal/*/models`.
 
 ## Gotchas
 

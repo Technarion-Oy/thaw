@@ -15,18 +15,18 @@ Unicode true
 ##   * launches Thaw automatically when the copy finishes.
 ##
 ## The output artifact name is unchanged (thaw-<arch>-installer.exe). The CI
-## pipeline (build.yml / manual-release.yml) signs the app binary, then re-runs
-## makensis over this script to repackage the installer around the signed
-## thaw.exe, then signs the installer (issue #820) — see the "Repackage
-## installer with the signed binary" step in those workflows.
+## pipeline (build.yml / manual-release.yml) runs `wails3 task windows:build` to
+## compile thaw.exe, signs thaw.exe, then runs `wails3 task
+## windows:create:nsis:installer` (which runs makensis over this script around
+## the signed thaw.exe), then signs the installer (issue #820).
 ##
-## wails_tools.nsh is regenerated on every `wails build --nsis` from the
-## ProjectInfo in wails.json — do NOT edit or commit it. This file, by
-## contrast, is preserved by Wails once present and is the only place to
+## wails_tools.nsh is regenerated from build/config.yml by
+## `wails3 task windows:build` / `windows:create:nsis:installer` — do NOT edit
+## or commit it. This file, by contrast, is preserved and is the only place to
 ## customise the installer.
 ##
-## Local development / debugging (from this directory, after one `wails build
-## --target windows/amd64 --nsis` to populate wails_tools.nsh):
+## Local development / debugging (from this directory, after one `wails3 task
+## windows:build ARCH=amd64` to populate wails_tools.nsh):
 ##   > makensis -DARG_WAILS_AMD64_BINARY=..\..\bin\thaw.exe project.nsi
 ####
 

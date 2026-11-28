@@ -22,7 +22,7 @@ Follow this procedure when extending or modifying Thaw's localhost MCP server (`
    - **Always registered** (metadata + readonly + explain_only)
    - **Mode-gated** (`readonly` / `explain_only`): register in **both** `buildServer` and `session.updateMode`, AND add the tool name to `modeSpecificToolNames` in `server.go` so live mode switches remove and re-register it cleanly.
    - **Dependency-gated**: guard on `cfg.WorkspaceRoot != ""`, `emit != nil`, `editorCtx != nil`, `fnStore != nil`, or `nb != nil`.
-3. If the tool requires new `*App` IPC wiring (for example pushing frontend UI state into a store), add a thin delegator in `internal/app/` and run `wails generate module`.
+3. If the tool requires new `*App` IPC wiring (for example pushing frontend UI state into a store), add a thin delegator in `internal/app/` and run `wails3 generate bindings -ts -i -clean=true`.
 
 ## 3. Write Unit Tests
 Add tests in the corresponding `internal/mcp/*_tools_test.go` covering:

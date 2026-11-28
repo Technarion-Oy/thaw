@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { Modal, Table, Tag, Spin, Alert, Space, Typography, Statistic, Row, Col, Divider } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { WarningOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { RunExplain } from "../../../wailsjs/go/app/App";
-import type { queryprofile } from "../../../wailsjs/go/models";
+import { RunExplain } from "../../../bindings/thaw/internal/app/app";
+import type * as queryprofile from "../../../bindings/thaw/internal/queryprofile/models";
 
 const { Text } = Typography;
 
@@ -175,7 +175,7 @@ export default function ExplainModal({ sql, tabId, onClose }: Props) {
   }, [sql, tabId]);
 
   const shortSql = sql.length > 80 ? `${sql.slice(0, 78)}…` : sql;
-  const flatNodes = result?.plan ? flattenNodes(result.plan.Operations ?? []) : [];
+  const flatNodes = result?.plan ? flattenNodes((result.plan.Operations ?? []).map((op) => op ?? [])) : [];
   const diags = result?.diagnostics ?? [];
 
   return (

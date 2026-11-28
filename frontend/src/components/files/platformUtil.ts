@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { GetPlatformOS } from "../../../wailsjs/go/app/App";
+import { GetPlatformOS } from "../../../bindings/thaw/internal/app/app";
 
 // Module-level cache for platform OS (compile-time constant, fetched once).
 let _platformOS: string | null = null;

@@ -32,8 +32,8 @@ import {
   DropBackupPolicy,
   AlterBackupPolicy,
   GetQuotedIdentifiersIgnoreCase,
-} from "../../../wailsjs/go/app/App";
-import type { backup } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as backup from "../../../bindings/thaw/internal/backup/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import { escapeTextLit } from "../shared/sqlEscape";
 import dayjs from "dayjs";

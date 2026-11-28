@@ -8,8 +8,8 @@ import { MoreOutlined, TableOutlined } from "@ant-design/icons";
 import {
   AlterComputePool, DropComputePool, ListComputePoolInstanceFamilies, ListComputePoolsDetailed,
   StopAllComputePoolServices,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { friendlyError } from "../common/errors";
 import ContainerTabLayout from "./ContainerTabLayout";
 import CreateComputePoolModal from "./CreateComputePoolModal";

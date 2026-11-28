@@ -3,7 +3,7 @@
 // @thaw-domain: AI Tooling
 
 import { create } from "zustand";
-import { GetAISchemaContextEnabled } from "../../wailsjs/go/app/App";
+import { GetAISchemaContextEnabled } from "../../bindings/thaw/internal/app/app";
 
 interface AIPrefsState {
   /**

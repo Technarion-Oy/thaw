@@ -7,9 +7,9 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { SyncOutlined, DeleteOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { GetTableColumnsWithTypes } from "../../../wailsjs/go/app/App";
-import { GetSnowflakeKeywords } from "../../../wailsjs/go/sqleditor/Service";
-import { snowflake } from "../../../wailsjs/go/models";
+import { GetTableColumnsWithTypes } from "../../../bindings/thaw/internal/app/app";
+import { GetSnowflakeKeywords } from "../../../bindings/thaw/internal/sqleditor/service";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useQueryStore } from "../../store/queryStore";
@@ -106,7 +106,7 @@ export default function InsertMappingModal() {
       if (tCols.length === 0) {
         setLoadingTarget(true);
         try {
-          tCols = await GetTableColumnsWithTypes(target.db, target.schema, target.name);
+          tCols = (await GetTableColumnsWithTypes(target.db, target.schema, target.name)) ?? [];
           setTargetCols(tCols);
         } catch (e) {
           message.error(`Failed to load target columns: ${e}`);
@@ -132,12 +132,12 @@ export default function InsertMappingModal() {
         );
         setAllSourceCols((prev) => {
           const next = [...prev];
-          results.forEach(({ i, sCols }) => { next[i] = sCols; });
+          results.forEach(({ i, sCols }) => { next[i] = sCols ?? []; });
           return next;
         });
         setAllMappings((prev) => {
           const next = [...prev];
-          results.forEach(({ i, sCols }) => { next[i] = buildAutoMap(tCols, sCols); });
+          results.forEach(({ i, sCols }) => { next[i] = buildAutoMap(tCols, sCols ?? []); });
           return next;
         });
       } catch (e) {

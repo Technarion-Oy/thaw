@@ -5,14 +5,14 @@
 import { useState } from "react";
 import { Form, Input, Select, Collapse } from "antd";
 import { TagsOutlined } from "@ant-design/icons";
-import { BuildCreateTagSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateTagSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import TagPropagationFields from "./TagPropagationFields";
-import type { tag as tagModels } from "../../../wailsjs/go/models";
+import type * as tagModels from "../../../bindings/thaw/internal/tag/models";
 
 interface Props {
   db: string;

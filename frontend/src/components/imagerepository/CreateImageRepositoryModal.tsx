@@ -5,12 +5,12 @@
 import { useState } from "react";
 import { Form, Input, Checkbox } from "antd";
 import { ContainerOutlined } from "@ant-design/icons";
-import { BuildCreateImageRepositorySql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateImageRepositorySql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { imagerepository as irModels } from "../../../wailsjs/go/models";
+import type * as irModels from "../../../bindings/thaw/internal/imagerepository/models";
 
 interface Props {
   db: string;

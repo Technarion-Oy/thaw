@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 // This test is the guard that keeps a static call from creeping back in. The
 // <Modal> component is fine and unaffected — only the helpers are matched.
 //
-// Vite's glob import gives us every source file as raw text; `wailsjs/` sits
+// Vite's glob import gives us every source file as raw text; `bindings/` sits
 // outside src/ and so is never matched, and `generated/` holds registry data,
 // not UI.
 const SOURCES = import.meta.glob("../**/*.{ts,tsx}", {

@@ -17,7 +17,7 @@ import {
   SavePipRegistryConfig,
   ResetPipRegistryConfig,
   PickCACertFile,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { SecretStorageIndicator } from "../settings/SecretStorageIndicator";
 
 const { Title, Text } = Typography;

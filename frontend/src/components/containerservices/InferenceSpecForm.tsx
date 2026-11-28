@@ -2,7 +2,7 @@
 // @thaw-domain: Snowpark & Developer Workflows
 
 import { useEffect, useState } from "react";
-import { ListImageRepositories } from "../../../wailsjs/go/app/App";
+import { ListImageRepositories } from "../../../bindings/thaw/internal/app/app";
 import StageFilePicker from "../shared/StageFilePicker";
 import { Bool, Grid, Group, KV, Num, Sel, Str, Tags, numberish, useSpec } from "../service/specFields";
 import { rowsOf } from "./computePools";

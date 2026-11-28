@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Alert, Button, Space, Table, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { SECTION_HEAD } from "./PropertyRows";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -22,7 +22,7 @@ export function tableFromResult(res: snowflake.QueryResult | null) {
   }));
   const data = (res?.rows ?? []).map((row, ri) => {
     const obj: Record<string, unknown> = { key: ri };
-    row.forEach((cell, ci) => { obj[String(ci)] = cell; });
+    (row ?? []).forEach((cell, ci) => { obj[String(ci)] = cell; });
     return obj;
   });
   return { columns, data };
@@ -35,7 +35,7 @@ export function tableFromResult(res: snowflake.QueryResult | null) {
 export default function LazyResultTable({ title, noun, load }: {
   title: string;
   noun: string;
-  load: () => Promise<snowflake.QueryResult>;
+  load: () => Promise<snowflake.QueryResult | null>;
 }) {
   const [res, setRes] = useState<snowflake.QueryResult | null>(null);
   const [loading, setLoading] = useState(false);

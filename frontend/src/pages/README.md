@@ -149,7 +149,7 @@ reopened with `Cmd+Shift+T` / `Ctrl+Shift+T`.
 
 ### IPC entry points called directly by QueryPage
 
-All are imported from `wailsjs/go/app/App` or `wailsjs/go/sqleditor/Service`:
+All are imported from `bindings/thaw/internal/app/app` or `bindings/thaw/internal/sqleditor/service`:
 
 `StartQuery`, `WaitForQueryResult`, `CancelQuery`, `GetSqlStatementRanges`,
 `GetSessionContext`, `InitTabSession`, `CloseTabSession`, `GetSessionInitMode`,

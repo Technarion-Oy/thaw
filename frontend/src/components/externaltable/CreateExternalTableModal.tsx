@@ -14,7 +14,7 @@ import {
 import {
   BuildCreateExternalTableSql, ExecDDL,
   ListDatabases, ListUserSchemas, ListObjects, ListStages, ListStageEntries,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
@@ -22,7 +22,8 @@ import TagInput from "../shared/TagInput";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import { formatBytes } from "../../utils/formatBytes";
-import type { externaltable, snowflake } from "../../../wailsjs/go/models";
+import type * as externaltable from "../../../bindings/thaw/internal/externaltable/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

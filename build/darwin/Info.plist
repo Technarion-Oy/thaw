@@ -4,66 +4,30 @@
         <key>CFBundlePackageType</key>
         <string>APPL</string>
         <key>CFBundleName</key>
-        <string>{{.Info.ProductName}}</string>
+        <string>Thaw</string>
         <key>CFBundleExecutable</key>
-        <string>{{.OutputFilename}}</string>
+        <string>thaw</string>
         <key>CFBundleIdentifier</key>
-        <string>com.technarion.{{.Name}}</string>
+        <string>com.technarion.thaw</string>
         <key>CFBundleVersion</key>
-        <string>{{.Info.ProductVersion}}</string>
+        <string>0.10.0</string>
         <key>CFBundleGetInfoString</key>
-        <string>{{.Info.Comments}}</string>
+        <string>Snowflake Manager — Free Software (GNU GPL v3)</string>
         <key>CFBundleShortVersionString</key>
-        <string>{{.Info.ProductVersion}}</string>
+        <string>0.10.0</string>
         <key>CFBundleIconFile</key>
-        <string>iconfile</string>
+        <string>icons</string>
         <key>LSMinimumSystemVersion</key>
-        <string>10.13.0</string>
+        <string>12.0.0</string>
         <key>NSHighResolutionCapable</key>
         <string>true</string>
         <key>NSHumanReadableCopyright</key>
-        <string>{{.Info.Copyright}}</string>
+        <string>Copyright © 2026 Technarion Oy. Licensed under GPL-3.0-or-later.</string>
         <key>NSDocumentsFolderUsageDescription</key>
         <string>Thaw needs access to your Documents folder to read a private key file you select for Snowflake key-pair authentication.</string>
         <key>NSDesktopFolderUsageDescription</key>
         <string>Thaw needs access to your Desktop folder to read a private key file you select for Snowflake key-pair authentication.</string>
         <key>NSDownloadsFolderUsageDescription</key>
         <string>Thaw needs access to your Downloads folder to read a private key file you select for Snowflake key-pair authentication.</string>
-        {{if .Info.FileAssociations}}
-        <key>CFBundleDocumentTypes</key>
-        <array>
-          {{range .Info.FileAssociations}}
-          <dict>
-            <key>CFBundleTypeExtensions</key>
-            <array>
-              <string>{{.Ext}}</string>
-            </array>
-            <key>CFBundleTypeName</key>
-            <string>{{.Name}}</string>
-            <key>CFBundleTypeRole</key>
-            <string>{{.Role}}</string>
-            <key>CFBundleTypeIconFile</key>
-            <string>{{.IconName}}</string>
-          </dict>
-          {{end}}
-        </array>
-        {{end}}
-        {{if .Info.Protocols}}
-        <key>CFBundleURLTypes</key>
-        <array>
-          {{range .Info.Protocols}}
-            <dict>
-                <key>CFBundleURLName</key>
-                <string>com.technarion.{{.Scheme}}</string>
-                <key>CFBundleURLSchemes</key>
-                <array>
-                    <string>{{.Scheme}}</string>
-                </array>
-                <key>CFBundleTypeRole</key>
-                <string>{{.Role}}</string>
-            </dict>
-          {{end}}
-        </array>
-        {{end}}
     </dict>
 </plist>

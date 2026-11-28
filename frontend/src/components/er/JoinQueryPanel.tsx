@@ -4,8 +4,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button, Select, Tag, Collapse, Checkbox } from "antd";
 import { CloseOutlined, CodeOutlined } from "@ant-design/icons";
-import { BuildJoinSQL } from "../../../wailsjs/go/app/App";
-import type { erdesigner } from "../../../wailsjs/go/models";
+import { BuildJoinSQL } from "../../../bindings/thaw/internal/app/app";
+import type * as erdesigner from "../../../bindings/thaw/internal/erdesigner/models";
 import { tableKey, type JoinQueryState, type JoinEntry, type JoinPath } from "./erTypes";
 
 // Typed Wails IPC wrapper — see ERDiagramModal.tsx for explanation.

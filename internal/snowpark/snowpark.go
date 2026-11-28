@@ -28,8 +28,6 @@ import (
 	"thaw/internal/filesystem"
 	"thaw/internal/secrets"
 	"thaw/internal/snowflake"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // SnowparkCondaEnv is the name of the conda environment used for Snowpark.
@@ -789,18 +787,63 @@ func ensureKernelScript() (string, error) {
 // (empty string means that field did not change).
 type SyncTabContextFunc func(tabId, role, warehouse, database, schema string)
 
+// FileFilter describes one file-type filter for native open/save dialogs.
+type FileFilter struct {
+	DisplayName string
+	Pattern     string
+}
+
+// Runtime decouples Snowpark from the desktop runtime (events and native file
+// dialogs) so internal/snowpark stays Wails-free and unit-testable. Any nil
+// hook degrades gracefully (events become no-ops; dialogs return an error).
+type Runtime struct {
+	Emit     func(eventName string, data any)
+	OnEvent  func(eventName string, callback func(data any))
+	OpenFile func(title string, filters []FileFilter) (string, error)
+	SaveFile func(title, defaultFilename string, filters []FileFilter) (string, error)
+}
+
+var errDialogUnavailable = errors.New("file dialog runtime not initialized")
+
 // Service manages Snowpark/Jupyter notebook operations.
 type Service struct {
 	ctx            context.Context
+	rt             Runtime
 	syncTabContext SyncTabContextFunc
 }
 
-// NewService creates a Service. ctx is the Wails application context used for
-// dialogs and event emission. syncTabContext is called when a kernel's session
-// context drifts from the tab's session (may be nil if tab-session sync is
-// not needed).
-func NewService(ctx context.Context, syncTabContext SyncTabContextFunc) *Service {
-	return &Service{ctx: ctx, syncTabContext: syncTabContext}
+// NewService creates a Service. ctx is the application context used for
+// Snowflake queries. rt supplies the desktop event/dialog hooks.
+// syncTabContext is called when a kernel's session context drifts from the
+// tab's session (may be nil if tab-session sync is not needed).
+func NewService(ctx context.Context, rt Runtime, syncTabContext SyncTabContextFunc) *Service {
+	return &Service{ctx: ctx, rt: rt, syncTabContext: syncTabContext}
+}
+
+func (s *Service) emit(eventName string, data any) {
+	if s.rt.Emit != nil {
+		s.rt.Emit(eventName, data)
+	}
+}
+
+func (s *Service) onEvent(eventName string, callback func(data any)) {
+	if s.rt.OnEvent != nil {
+		s.rt.OnEvent(eventName, callback)
+	}
+}
+
+func (s *Service) openFile(title string, filters []FileFilter) (string, error) {
+	if s.rt.OpenFile == nil {
+		return "", errDialogUnavailable
+	}
+	return s.rt.OpenFile(title, filters)
+}
+
+func (s *Service) saveFile(title, defaultFilename string, filters []FileFilter) (string, error) {
+	if s.rt.SaveFile == nil {
+		return "", errDialogUnavailable
+	}
+	return s.rt.SaveFile(title, defaultFilename, filters)
 }
 
 // ─── pure helpers ─────────────────────────────────────────────────────────────
@@ -1270,13 +1313,9 @@ func deletePipSecrets() {
 
 // PickCACertFile opens a file picker for certificate files and returns the chosen path.
 func (s *Service) PickCACertFile() (string, error) {
-	path, err := wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select CA Certificate",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Certificate Files (*.pem, *.crt, *.cer)", Pattern: "*.pem;*.crt;*.cer"},
-		},
+	return s.openFile("Select CA Certificate", []FileFilter{
+		{DisplayName: "Certificate Files (*.pem, *.crt, *.cer)", Pattern: "*.pem;*.crt;*.cer"},
 	})
-	return path, err
 }
 
 // ─── system python discovery ──────────────────────────────────────────────────
@@ -1518,7 +1557,7 @@ func (s *Service) streamAndCapture(cmd *exec.Cmd, eventName string) ([]string, [
 	}
 
 	emit := func(line string) {
-		wailsruntime.EventsEmit(s.ctx, eventName, line)
+		s.emit(eventName, line)
 	}
 
 	var (
@@ -1698,23 +1737,17 @@ func (s *Service) pipInstallCmd(args ...string) (*exec.Cmd, error) {
 
 // PickRequirementsFile opens a file dialog to select a pip requirements file.
 func (s *Service) PickRequirementsFile() (string, error) {
-	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select requirements file",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
-			{DisplayName: "All Files", Pattern: "*.*"},
-		},
+	return s.openFile("Select requirements file", []FileFilter{
+		{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
+		{DisplayName: "All Files", Pattern: "*.*"},
 	})
 }
 
 // PickPyprojectFile opens a file dialog to select a pyproject.toml / TOML file.
 func (s *Service) PickPyprojectFile() (string, error) {
-	return wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select pyproject.toml",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "TOML (*.toml)", Pattern: "*.toml"},
-			{DisplayName: "All Files", Pattern: "*.*"},
-		},
+	return s.openFile("Select pyproject.toml", []FileFilter{
+		{DisplayName: "TOML (*.toml)", Pattern: "*.toml"},
+		{DisplayName: "All Files", Pattern: "*.*"},
 	})
 }
 
@@ -1729,7 +1762,7 @@ func (s *Service) InstallRequirementsFile(path string) error {
 	if err != nil {
 		return err
 	}
-	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install -r %s", path))
+	s.emit("snowpark:package-output", fmt.Sprintf("$ pip install -r %s", path))
 	lines, err := s.streamCombined(cmd, "snowpark:package-output")
 	if err != nil {
 		return s.explainPipFailure(fmt.Errorf("install from %s failed: %w", filepath.Base(path), err), lines)
@@ -1751,7 +1784,7 @@ func (s *Service) InstallPyprojectFile(path string) error {
 	}
 	// Emit the authoritative command so the UI never has to guess the directory
 	// pip actually receives (vs. the selected pyproject.toml file path).
-	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", fmt.Sprintf("$ pip install %s", dir))
+	s.emit("snowpark:package-output", fmt.Sprintf("$ pip install %s", dir))
 	lines, err := s.streamCombined(cmd, "snowpark:package-output")
 	if err != nil {
 		return s.explainPipFailure(fmt.Errorf("install from %s failed: %w", filepath.Base(dir), err), lines)
@@ -1804,12 +1837,8 @@ func (s *Service) envPythonVersion() string {
 // can detect cancel before touching the log, mirroring the pick→install flow of
 // the other dependency-file operations.
 func (s *Service) PickFreezeOutputFile() (string, error) {
-	return wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
-		Title:           "Save requirements.txt",
-		DefaultFilename: "requirements.txt",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
-		},
+	return s.saveFile("Save requirements.txt", "requirements.txt", []FileFilter{
+		{DisplayName: "Requirements (*.txt)", Pattern: "*.txt"},
 	})
 }
 
@@ -1832,7 +1861,7 @@ func (s *Service) freezeToFile(path string) error {
 	if err != nil {
 		return err
 	}
-	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output", "$ pip freeze")
+	s.emit("snowpark:package-output", "$ pip freeze")
 	lines, _, err := s.streamAndCapture(cmd, "snowpark:package-output")
 	if err != nil {
 		return fmt.Errorf("pip freeze: %w", err)
@@ -1856,7 +1885,7 @@ func (s *Service) freezeToFile(path string) error {
 	}
 	// Emit the summary as the final event on the same ordered channel so it
 	// always lands after the streamed package lines (no UI ordering race).
-	wailsruntime.EventsEmit(s.ctx, "snowpark:package-output",
+	s.emit("snowpark:package-output",
 		fmt.Sprintf("✓ Wrote %d packages to %s", len(reqs), path))
 	return nil
 }
@@ -1896,7 +1925,7 @@ func (s *Service) InstallCondaEnv() error {
 
 	// Skip if already exists.
 	if out, _ := exec.Command(condaPath, "env", "list").Output(); strings.Contains(string(out), SnowparkCondaEnv) {
-		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
+		s.emit("snowpark:install-output",
 			fmt.Sprintf("Conda environment '%s' already exists, skipping creation.", SnowparkCondaEnv))
 		return nil
 	}
@@ -1911,7 +1940,7 @@ func (s *Service) InstallCondaEnv() error {
 	if IsAppleSilicon() {
 		// Apple M-series: force x86_64 to avoid pyOpenSSL ffi.callback crash.
 		cmd.Env = append(os.Environ(), "CONDA_SUBDIR=osx-64")
-		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
+		s.emit("snowpark:install-output",
 			"Apple Silicon detected — creating x86_64 environment (CONDA_SUBDIR=osx-64).")
 	}
 	if err := s.streamCommand(cmd); err != nil {
@@ -1923,7 +1952,7 @@ func (s *Service) InstallCondaEnv() error {
 		cfgCmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
 			"conda", "config", "--env", "--set", "subdir", "osx-64")
 		if e := s.streamCommand(cfgCmd); e != nil {
-			wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
+			s.emit("snowpark:install-output",
 				"[warn] conda config --env --set subdir osx-64: "+e.Error())
 		}
 	}
@@ -1983,7 +2012,7 @@ func (s *Service) InstallVenvEnv() error {
 
 	// Skip if already exists.
 	if _, err := os.Stat(venvPythonBin(venvPath)); err == nil {
-		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
+		s.emit("snowpark:install-output",
 			fmt.Sprintf("Virtual environment already exists at %s, skipping.", venvPath))
 		return nil
 	}
@@ -2000,7 +2029,7 @@ func (s *Service) InstallVenvEnv() error {
 		}
 	}
 
-	wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
+	s.emit("snowpark:install-output",
 		fmt.Sprintf("Creating venv at %s…", venvPath))
 	if err := os.MkdirAll(filepath.Dir(venvPath), 0o700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
@@ -2102,12 +2131,8 @@ const minimalNotebook = `{
 
 // NewNotebook shows a save dialog, writes a blank notebook, and returns the path and content.
 func (s *Service) NewNotebook() (string, error) {
-	path, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
-		Title:           "New Notebook",
-		DefaultFilename: "notebook.ipynb",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Jupyter Notebooks (*.ipynb)", Pattern: "*.ipynb"},
-		},
+	path, err := s.saveFile("New Notebook", "notebook.ipynb", []FileFilter{
+		{DisplayName: "Jupyter Notebooks (*.ipynb)", Pattern: "*.ipynb"},
 	})
 	if err != nil || path == "" {
 		return "", err
@@ -2124,13 +2149,9 @@ func (s *Service) NewNotebook() (string, error) {
 
 // PickNotebookFile opens a file picker for .ipynb files and returns the chosen path.
 func (s *Service) PickNotebookFile() (string, error) {
-	path, err := wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Open Notebook",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Jupyter Notebooks (*.ipynb)", Pattern: "*.ipynb"},
-		},
+	return s.openFile("Open Notebook", []FileFilter{
+		{DisplayName: "Jupyter Notebooks (*.ipynb)", Pattern: "*.ipynb"},
 	})
-	return path, err
 }
 
 // ReadNotebook reads an .ipynb file and returns its raw JSON content.
@@ -2408,14 +2429,12 @@ func (s *Service) StartDapProxy() error {
 
 	// CRITICAL: Wrap inside sync.Once to prevent duplicate listeners/memory leaks!
 	dapProxyOnce.Do(func() {
-		wailsruntime.EventsOn(s.ctx, "dap:client-to-backend", func(optionalData ...interface{}) {
+		s.onEvent("dap:client-to-backend", func(data any) {
 			dapMutex.Lock()
 			defer dapMutex.Unlock()
-			if len(optionalData) > 0 {
-				if msg, ok := optionalData[0].(string); ok {
-					if dapConn != nil {
-						_, _ = dapConn.Write([]byte(msg))
-					}
+			if msg, ok := data.(string); ok {
+				if dapConn != nil {
+					_, _ = dapConn.Write([]byte(msg))
 				}
 			}
 		})
@@ -2428,11 +2447,11 @@ func (s *Service) StartDapProxy() error {
 
 			n, err := dapConn.Read(buf)
 			if err != nil {
-				wailsruntime.EventsEmit(s.ctx, "dap:disconnected", err.Error())
+				s.emit("dap:disconnected", err.Error())
 				break
 			}
 			// Encode to Base64 to guarantee that binary data/multi-byte chars are never corrupted!
-			wailsruntime.EventsEmit(s.ctx, "dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
+			s.emit("dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
 		}
 	}()
 
@@ -2486,16 +2505,16 @@ func (s *Service) DebugNotebookCell(tabId string, cellId string, code string) (N
 			_ = json.Unmarshal([]byte(line), &payload)
 
 			// 1. Tell React what the filepath is so it can set breakpoints
-			wailsruntime.EventsEmit(s.ctx, "dap:debug-ready", map[string]string{
+			s.emit("dap:debug-ready", map[string]string{
 				"filepath": payload.Filepath,
 			})
 
 			// 2. Start the TCP Proxy in a goroutine and tell React it's open (or failed!)
 			go func() {
 				if err := s.StartDapProxy(); err != nil {
-					wailsruntime.EventsEmit(s.ctx, "dap:proxy-ready", err.Error())
+					s.emit("dap:proxy-ready", err.Error())
 				} else {
-					wailsruntime.EventsEmit(s.ctx, "dap:proxy-ready", "")
+					s.emit("dap:proxy-ready", "")
 				}
 			}()
 		} else if strings.Contains(line, "error") {
@@ -2522,7 +2541,7 @@ func (s *Service) DebugNotebookCell(tabId string, cellId string, code string) (N
 			lastJSON = strings.TrimPrefix(line, kernelDebugResultMarker)
 		} else if line != "" {
 			// Non-empty, non-sentinel, non-result line → real-time user stdout.
-			wailsruntime.EventsEmit(s.ctx, "notebook:debug:output", line)
+			s.emit("notebook:debug:output", line)
 		}
 	}
 
@@ -2586,7 +2605,7 @@ func (s *Service) syncKernelContext(tabId string, sess *notebookSession, ctx *No
 			s.syncTabContext(tabId, role, wh, db, schema)
 		}
 		sess.lastCtx = newCtx
-		wailsruntime.EventsEmit(s.ctx, "notebook:session:context:changed", newCtx)
+		s.emit("notebook:session:context:changed", newCtx)
 	} else {
 		sess.lastCtx = newCtx
 	}

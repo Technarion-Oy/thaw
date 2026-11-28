@@ -34,13 +34,17 @@ Two workarounds in `SqlEditor.tsx`'s `handleMount`, both load-bearing — don't 
 
 For multi-statement SQL, `Execute` uses an inner `execCtx` (fresh context), so the outer `qidChan` (single-statement async mode) never fires. Per-statement query IDs are tracked via per-statement goroutines + a `sync.WaitGroup` in `internal/app/query.go`'s `StartQuery`.
 
-## `wailsjs/` is auto-generated
+## `frontend/bindings/` is auto-generated
 
-Never edit files under `frontend/wailsjs/` by hand — they are overwritten by `wails generate module`.
+Never edit files under `frontend/bindings/` by hand — they are overwritten by `wails3 generate bindings -ts -i -clean=true`.
 
 ## `frontend/dist/.gitkeep` must stay committed
 
-`//go:embed all:frontend/dist` in `main.go` is evaluated during `wails generate module` (binding generation), which runs **before** the frontend build. If `frontend/dist` is empty or missing, the Go build fails with "contains no embeddable files". The committed `.gitkeep` satisfies the embed on clean checkouts — never delete it.
+`//go:embed all:frontend/dist` in `main.go` is evaluated during `wails3 generate bindings` and Go builds, which can run **before** the frontend build. If `frontend/dist` is empty or missing, Go fails with "contains no embeddable files". The committed `.gitkeep` satisfies the embed on clean checkouts — never delete it.
+
+## Never render untrusted or external content in an `<iframe>` (Wails v3)
+
+In Wails v3, child frames (`<iframe>`) are **not** blocked from issuing bound-method HTTP calls to `/wails/runtime` on any platform, and same-origin child frames on Linux WebKitGTK can reach the native message handler directly. Never embed untrusted, user-supplied, or remote web pages in an `<iframe>` inside Thaw's webview; always open external URLs in the user's system browser via `BrowserOpenURL` from `frontend/src/utils/wailsRuntime.ts`.
 
 ## `internal/architecture/semantic_map.go` is generated
 
@@ -120,10 +124,14 @@ Thaw is **not** App-Sandboxed (no `.entitlements`, no sandbox keys in `build/dar
 
 The fix, and the rule for any future direct-read feature:
 
-- **Prefer a native open panel.** A user selection through `wailsruntime.OpenFileDialog` (→ `NSOpenPanel`) confers implicit, path-scoped consent that the OS **persists across launches** via the `com.apple.macl` xattr on the file. That is why the key field's **Browse** button (`App.PickPrivateKeyFile`) makes reconnects keep working with no bookmark machinery. Security-scoped bookmarks are **not** an option — they need App-Sandbox and Wails v2 doesn't expose them.
+- **Prefer a native open panel.** A user selection through `a.openFileDialog` (wrapping Wails v3's `OpenFileDialog` → `NSOpenPanel`, with `AllowsOtherFileTypes` enabled when no extension filters are set) confers implicit, path-scoped consent that the OS **persists across launches** via the `com.apple.macl` xattr on the file. That is why the key field's **Browse** button (`App.PickPrivateKeyFile`) makes reconnects keep working with no bookmark machinery. Security-scoped bookmarks are **not** an option — they need App-Sandbox and Wails doesn't expose them.
 - **Give an actionable error when a read is denied anyway** (saved connections, imported profiles, post-hoc TCC revocations all bypass the picker). `keyReadHint(runtime.GOOS, path, err)` wraps a darwin `os.ErrPermission` with a message pointing at Browse / System Settings → Privacy & Security → Files & Folders / moving the key to `~/.thaw` or `~/.snowflake`. It takes `goos` as an argument so the branch is unit-testable on any platform.
 - **Declare usage strings.** `Info.plist` carries `NSDocumentsFolderUsageDescription` / `NSDesktopFolderUsageDescription` / `NSDownloadsFolderUsageDescription` so if a programmatic read *does* trigger a TCC prompt, the user sees a rationale instead of a silent denial. Do **not** reach for Full Disk Access (wildly oversized) or silently copy key material into the config dir.
 
-## `wails dev` blank white window: asset requests must stay concurrency-capped
+## `wails3 dev` blank white window: asset requests must stay concurrency-capped (never `/wails/`)
 
-Under `wails dev` the WKWebView requests Vite's whole unbundled module graph (300+ files) at once, and Wails' `ExternalAssetHandler` proxies each over its own TCP connection. That burst overflows Vite's listen backlog (`kern.ipc.somaxconn` = 128 on macOS): the proxy logs `Proxy error: dial tcp [::1]:5173: connect: connection reset by peer`, the failed modules make `/src/main.tsx` fail to import, and `#root` stays empty — a white window with no error boundary. `limitAssetConcurrency(32)` in `internal/app/run.go` (wired as `AssetServer.Middleware`) caps in-flight asset requests to prevent it; do not remove it. Production builds (embedded assets) and the browser dev URL (`localhost:34115`, where the browser limits connections per host) are unaffected.
+Under `wails3 dev` the WKWebView requests Vite's whole unbundled module graph (300+ files) at once, and Wails' dev asset proxy forwards each over its own TCP connection. That burst overflows Vite's listen backlog (`kern.ipc.somaxconn` = 128 on macOS): the proxy logs `Proxy error: dial tcp [::1]:5173: connect: connection reset by peer`, the failed modules make `/src/main.tsx` fail to import, and `#root` stays empty — a white window with no error boundary. `limitAssetConcurrency(32)` in `internal/app/run.go` (wired as `Assets.Middleware`) caps in-flight asset requests to prevent it; do not remove it. **Critical for Wails v3**: `Assets.Middleware` wraps `/wails/runtime` IPC POSTs too (which stay open until the Go method returns), so `limitAssetConcurrency` **must bypass `/wails/` paths** — otherwise long-running IPC calls (`WaitForQueryResult`, migration, pip install) can exhaust the semaphore and starve cancel calls and assets.
+
+## Wails v2 → v3 `localStorage` origin change on macOS & Linux
+
+Wails v3 changed the custom-scheme webview origin on macOS and Linux from `wails://wails` (v2) to `wails://localhost` (v3). Because `localStorage` is scoped per origin, upgrading from a Wails v2 build to a Wails v3 build starts with fresh `localStorage` on macOS and Linux (`thaw-query-store`, `thaw-connection`, `thaw-theme`, `thaw-panel-layout`, `thaw-editor-tab-prefs`, ER layouts) — Windows is unaffected (`http://wails.localhost` and the WebView2 data path are unchanged). Users upgrading from v2 on macOS/Linux should save any unsaved scratch tabs to disk before upgrading; backend-persisted files (`config.json`, `session.json`, `~/.snowflake/config.toml`, OS keychain secrets) are unaffected.

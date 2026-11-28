@@ -11,7 +11,7 @@ import {
   UseWarehouse,
   UseDatabase,
   UseSchema,
-} from "../../wailsjs/go/app/App";
+} from "../../bindings/thaw/internal/app/app";
 import { useQueryStore } from "./queryStore";
 
 export interface TabSessionContext {
@@ -129,7 +129,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (get().roles.length > 0) return;
     set({ loadingRoles: true });
     try {
-      const roles = await ListAvailableRoles();
+      const roles = (await ListAvailableRoles()) ?? [];
       set({ roles });
     } catch (e) {
       set({ error: String(e) });
@@ -142,7 +142,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (get().warehouses.length > 0) return;
     set({ loadingWarehouses: true });
     try {
-      const warehouses = await ListWarehouses();
+      const warehouses = (await ListWarehouses()) ?? [];
       set({ warehouses });
     } catch (e) {
       set({ error: String(e) });
@@ -155,7 +155,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (get().databases.length > 0) return;
     set({ loadingDatabases: true });
     try {
-      const databases = await ListDatabases();
+      const databases = (await ListDatabases()) ?? [];
       set({ databases });
     } catch (e) {
       set({ error: String(e) });
@@ -170,7 +170,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (schemasForDatabase === database && get().schemas.length > 0) return;
     set({ loadingSchemas: true });
     try {
-      const schemas = await ListSchemas(database);
+      const schemas = (await ListSchemas(database)) ?? [];
       set({ schemas, schemasForDatabase: database });
     } catch (e) {
       set({ error: String(e) });

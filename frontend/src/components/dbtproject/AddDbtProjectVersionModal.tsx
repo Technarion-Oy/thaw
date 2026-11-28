@@ -10,7 +10,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import {
   BuildAddDbtProjectVersionSql,
   ExecDDL,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import SourceLocationPicker from "./SourceLocationPicker";
 import SqlPreview from "../shared/SqlPreview";
 

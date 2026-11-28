@@ -11,8 +11,9 @@ import {
 } from "@ant-design/icons";
 import {
   ImportTableData, PickDataFilesByFormat, ReadFileHead, ListFileFormats,
-} from "../../../wailsjs/go/app/App";
-import { snowflake, fileformat } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as fileformat from "../../../bindings/thaw/internal/fileformat/models";
 import FileFormatFields, { BASE_DEFAULTS } from "../database/FileFormatFields";
 
 const { Text } = Typography;
@@ -394,7 +395,8 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
   useEffect(() => {
     setLoadingFormats(true);
     ListFileFormats(db, schema)
-      .then((fmts) => {
+      .then((rawFmts) => {
+        const fmts = rawFmts ?? [];
         setAvailableFormats(fmts);
         if (fmts.length > 0) {
           setFormatSource("named");
@@ -458,7 +460,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     setImporting(true);
     try {
       // Map fileformat.FileFormatConfig to snowflake.FormatTypeOptions
-      const options = snowflake.FormatTypeOptions.createFrom({
+      const options: snowflake.FormatTypeOptions = {
         compression: cfg.compression,
         trimSpace: cfg.trimSpace,
         replaceInvalidCharacters: cfg.replaceInvalid,
@@ -490,9 +492,9 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
         binaryAsText: cfg.binaryAsText,
         useLogicalType: cfg.useLogicalType,
         useVectorizedScanner: cfg.useVectorizedScanner,
-      });
+      };
 
-      const r = await ImportTableData(snowflake.ImportTableParams.createFrom({
+      const r = await ImportTableData({
         database: db,
         schema,
         table: effectiveTable,
@@ -502,7 +504,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
         createTable,
         options,
         namedFormat: formatSource === "named" ? (selectedNamedFormat ?? "") : "",
-      }));
+      });
       setResult({ rowsLoaded: r.rowsLoaded, filesLoaded: r.filesLoaded, tableName: effectiveTable });
       if (createTable) onSuccess();
     } catch (e) {

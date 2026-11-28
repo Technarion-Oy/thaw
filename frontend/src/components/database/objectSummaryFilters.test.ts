@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { KIND_FILTERS, schemaFilters, matchesRowFilter, applyFilters, registryKind, compareCounts } from "./objectSummaryFilters";
 import { KIND_VAR } from "../sidebar/objectIcons";
 import { OBJECT_KINDS } from "../../generated/objectKinds";
-import type { table } from "../../../wailsjs/go/models";
+import type * as table from "../../../bindings/thaw/internal/table/models";
 
 const row = (schema: string) => ({ schema } as table.TableSummary);
 

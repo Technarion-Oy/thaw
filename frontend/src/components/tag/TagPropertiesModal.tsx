@@ -9,9 +9,9 @@ import {
 import {
   TagsOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTag, GetTagReferences } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterTag, GetTagReferences } from "../../../bindings/thaw/internal/app/app";
 import TagPropagationFields, { ALLOWED_VALUES_SEQUENCE } from "./TagPropagationFields";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -438,7 +438,7 @@ export default function TagPropertiesModal({ db, schema, name, onClose }: Props)
                 }))}
                 dataSource={refs.rows.map((row) => {
                   const obj: Record<number, unknown> = {};
-                  row.forEach((cell, ci) => { obj[ci] = cell; });
+                  (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
                   return obj;
                 })}
               />

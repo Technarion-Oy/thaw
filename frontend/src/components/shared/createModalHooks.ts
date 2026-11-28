@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { DependencyList } from "react";
-import { GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
+import { GetQuotedIdentifiersIgnoreCase } from "../../../bindings/thaw/internal/app/app";
 
 /**
  * Reads the session's QUOTED_IDENTIFIERS_IGNORE_CASE flag once on mount. Fed to

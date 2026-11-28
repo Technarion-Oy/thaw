@@ -19,7 +19,7 @@ import {
   ListExportableDatabases,
   ListUserSchemas,
   RevealInFinder,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { useGitStore } from "../../store/gitStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -31,7 +31,7 @@ import {
 } from "./overloadNaming";
 import PathTemplateField from "./PathTemplateField";
 import { validateTemplate } from "./pathTemplate";
-import type { ddl } from "../../../wailsjs/go/models";
+import type * as ddl from "../../../bindings/thaw/internal/ddl/models";
 
 const { Text } = Typography;
 

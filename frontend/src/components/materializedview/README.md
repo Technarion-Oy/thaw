@@ -29,7 +29,7 @@ sidebar context menu in `layout/Sidebar.tsx` via `App.AlterMaterializedView`.
 - `GetObjectProperties(db, schema, "MATERIALIZED VIEW", name)` — properties panel data
 - `AlterMaterializedView(db, schema, name, clause)` — `SUSPEND` / `RESUME` / `SET SECURE` / `UNSET SECURE` / `SET COMMENT …` / `UNSET COMMENT`
 
-**`materializedview.MaterializedViewConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`, `orReplace`, `secure`, `ifNotExists`, `copyGrants`, `comment`, `clusterBy`, `tags` (`{name, value}[]`), `query`. The Create modal keeps form state in a local `MVConfig` (the generated class carries a `convertValues` method — see Gotchas — that a plain literal can't satisfy) and casts to the generated type only at the IPC boundary.
+**`materializedview.MaterializedViewConfig` type** from `bindings/thaw/internal/*/models`: `name`, `caseSensitive`, `orReplace`, `secure`, `ifNotExists`, `copyGrants`, `comment`, `clusterBy`, `tags` (`{name, value}[]`), `query`. The Create modal keeps form state in a local `MVConfig` (the generated class carries a `convertValues` method — see Gotchas — that a plain literal can't satisfy) and casts to the generated type only at the IPC boundary.
 
 **Shared components:** `ObjectNameCaseControl` for case-sensitivity; inline SQL preview block. **Stores used:** `themeStore` (Monaco editor theme).
 

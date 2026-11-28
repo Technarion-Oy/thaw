@@ -13,9 +13,9 @@ import {
   ListSupportedDbtVersions,
   BuildAlterDbtProjectSetSql,
   ExecDDL,
-} from "../../../wailsjs/go/app/App";
-import { dbtproject } from "../../../wailsjs/go/models";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as dbtproject from "../../../bindings/thaw/internal/dbtproject/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import SqlPreview from "../shared/SqlPreview";
 
 interface Props {
@@ -94,12 +94,12 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
     let stale = false;
     clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(() => {
-      const cfg = new dbtproject.AlterSetConfig({
+      const cfg: dbtproject.AlterSetConfig = {
         dbtVersion,
         defaultTarget,
         externalAccessIntegrations: integrations,
         comment,
-      });
+      };
       BuildAlterDbtProjectSetSql(db, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
         .then((sqls) => { if (!stale) setStatements(sqls ?? []); })
         .catch(() => { if (!stale) setStatements([]); });

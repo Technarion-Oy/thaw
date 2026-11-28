@@ -7,7 +7,7 @@ import type { ColumnsType } from "antd/es/table";
 import { MoreOutlined } from "@ant-design/icons";
 import {
   AlterService, DropService, ListServiceEndpoints, ListServiceInstances, ListServicesInAccount,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { friendlyError } from "../common/errors";
 import LazyResultTable from "../shared/LazyResultTable";
 import ServicePropertiesModal from "../service/ServicePropertiesModal";

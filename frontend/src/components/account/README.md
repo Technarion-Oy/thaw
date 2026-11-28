@@ -26,7 +26,7 @@ Provides the UI for administering Snowflake account objects that are not schema-
 
 ## Patterns & integration
 
-- **IPC**: All calls go through `wailsjs/go/app/App` to `internal/app` delegators, which forward to `internal/users`, `internal/warehouse`, `internal/queryhistory`, `internal/keypair`, and `internal/snowflake`.
+- **IPC**: All calls go through `bindings/thaw/internal/app/app` to `internal/app` delegators, which forward to `internal/users`, `internal/warehouse`, `internal/queryhistory`, `internal/keypair`, and `internal/snowflake`.
 - **Stores**: `useConnectionStore` (current role/warehouse context), `useFeatureFlagsStore` (gate checks), `useDiffStore`/`useGitStore` (DDL export paths in `AccountPanel`).
 - **Feature flags**: `userRoleManagement`, `warehouseManagement`, `warehouseCreditUsage`, `queryActivityHistory`, `integrationsManagement`, `backupPoliciesAndSets` — all checked from `useFeatureFlagsStore`. When a flag is disabled, the corresponding tree node or button is hidden.
 - **No privilege pre-checks**: admin actions (create/edit/drop users, create integrations, warehouse metering) are *not* gated by up-front Snowflake privilege probes — those checks were unreliable. Every action is offered; if the current role lacks the privilege, the IPC call fails and the error surfaces via `message.error` or inline under the edited field. The former `Can*` IPC methods and their client-side role-hierarchy walkers have been deleted.

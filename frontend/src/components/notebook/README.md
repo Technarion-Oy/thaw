@@ -24,7 +24,7 @@ notebook deployment to Snowflake.
 
 ## Patterns & integration
 
-- **IPC**: all kernel calls (`StartNotebookSession`, `RunNotebookCell`, `RunNotebookCellSql`, `StopNotebookSession`, `GetNotebookCompletions`, `GetNotebookHover`, `CheckPythonSyntax`, `DebugNotebookCell`, `StopDapProxy`, `SaveNotebookBreakpoints`, `LoadNotebookBreakpoints`, `GetKernelPythonVersion`) come from `wailsjs/go/app/App`.
+- **IPC**: all kernel calls (`StartNotebookSession`, `RunNotebookCell`, `RunNotebookCellSql`, `StopNotebookSession`, `GetNotebookCompletions`, `GetNotebookHover`, `CheckPythonSyntax`, `DebugNotebookCell`, `StopDapProxy`, `SaveNotebookBreakpoints`, `LoadNotebookBreakpoints`, `GetKernelPythonVersion`) come from `bindings/thaw/internal/app/app`.
 - **Kernel state bridge**: `NotebookTab` pushes `{ kernelReady, kernelStarting, kernelError, kernelName, onRestartKernel }` into `notebookToolbarStore` so the unified `Toolbar` (in `QueryPage`) can render `NotebookToolbarSlot` without prop-drilling.
 - **SQL cell results**: SQL cells render `ResultGrid` with the `standalone` prop, which suppresses `setTableRows()` / `resetGrid()` to avoid contaminating the main query tab's `gridStore`.
 - **Clipboard**: a module-level `installCopyHandler` patches `Cmd+C` on each cell container to route markdown/output text-selection copies through `ClipboardSetText` (WKWebView blocks native clipboard API). A cell's Monaco **code buffer** goes through the shared `patchMonacoClipboard(editor)` (called from the cell's `onMount`), which gates on `codeEditor.hasTextFocus()` — so Cmd/Ctrl+V/C/X in a cell's find/replace/rename fields bubbles to the global handler in `App.tsx` instead of hitting the code buffer.

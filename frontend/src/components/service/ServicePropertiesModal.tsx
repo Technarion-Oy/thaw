@@ -15,7 +15,7 @@ import {
   GetObjectProperties, AlterService, ListServiceEndpoints, GetServiceContainers, GetServiceLogs,
   ListServiceInstances, ListServiceVolumes, ListServiceRoles, ListServiceRoleGrants,
   GrantServiceRole, RevokeServiceRole, RedeployService, ListRoles, ListDatabaseRoles,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import LazyResultTable from "../shared/LazyResultTable";
 import StageFilePicker from "../shared/StageFilePicker";
@@ -24,7 +24,8 @@ import { useObjectTags } from "../shared/useObjectTags";
 import SpecEditor from "./SpecEditor";
 import ServiceSpecForm from "./ServiceSpecForm";
 import { specProblems } from "./specDoc";
-import { service as svcModels, type snowflake } from "../../../wailsjs/go/models";
+import type * as svcModels from "../../../bindings/thaw/internal/service/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -162,7 +163,7 @@ function EditRow({ label, value, numeric, options, canUnset, onSave, onUnset }: 
 // Read one named column (case-insensitive) from every row of a QueryResult.
 function column(res: snowflake.QueryResult | null, name: string): string[] {
   const idx = (res?.columns ?? []).findIndex((c) => c.toLowerCase() === name);
-  return idx < 0 ? [] : (res?.rows ?? []).map((r) => String(r[idx] ?? ""));
+  return idx < 0 ? [] : (res?.rows ?? []).map((r) => String(r?.[idx] ?? ""));
 }
 
 // ─── ServiceRoleGrants (per service role chip editor) ────────────────────────
@@ -219,9 +220,9 @@ function ServiceRoleGrants({ db, schema, name, role, accountRoles }: {
   const add = async () => {
     setBusy(true);
     try {
-      await GrantServiceRole(db, schema, name, svcModels.ServiceRoleGrant.createFrom({
+      await GrantServiceRole(db, schema, name, {
         role, granteeKind: kind, parent: kind === "ROLE" ? "" : parent.trim(), grantee: grantee.trim(),
-      }));
+      });
       message.success(`Granted ${role} to ${grantee}`);
       setGrantee("");
       await reload();
@@ -482,9 +483,9 @@ export default function ServicePropertiesModal({ db, schema, name, onClose, focu
       onOk: async () => {
         setRedeploying(true);
         try {
-          await RedeployService(db, schema, name, svcModels.ServiceConfig.createFrom({
+          await RedeployService(db, schema, name, {
             specSource, specInline: specDraft ?? "", specStage, specFile,
-          }));
+          } as svcModels.ServiceConfig);
           message.success("Service redeployed.");
           setSpecDraft(null);
           await reload();

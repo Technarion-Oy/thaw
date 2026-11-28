@@ -10,10 +10,10 @@ import {
   BlockOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterMaterializedView } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterMaterializedView } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { ConfirmSwitch } from "../common/ConfirmSwitch";
 
 const { Text } = Typography;

@@ -32,9 +32,9 @@ with the `gridStore` singleton for shared selection/search/formatting state.
 ## Patterns & integration
 
 **IPC calls:**
-- `ExplainModal.tsx` — `RunExplain` from `wailsjs/go/app/App`.
-- `QueryProfileModal.tsx` — `GetQueryOperatorStats` from `wailsjs/go/app/App`.
-- `QueryLogPane.tsx` — `GetQueryLogEntries`, `ClearQueryLog`, `ExportQueryLog` (redacts secrets in the exported file) from `wailsjs/go/app/App`; `ClipboardSetText` from `utils/wailsRuntime`.
+- `ExplainModal.tsx` — `RunExplain` from `bindings/thaw/internal/app/app`.
+- `QueryProfileModal.tsx` — `GetQueryOperatorStats` from `bindings/thaw/internal/app/app`.
+- `QueryLogPane.tsx` — `GetQueryLogEntries`, `ClearQueryLog`, `ExportQueryLog` (redacts secrets in the exported file) from `bindings/thaw/internal/app/app`; `ClipboardSetText` from `utils/wailsRuntime`.
 - `ResultGrid.tsx` — `ClipboardSetText` from `utils/wailsRuntime` (WKWebView clipboard workaround).
 - `CellDetailPanel.tsx` — `ClipboardSetText` from `utils/wailsRuntime` (copy button).
 

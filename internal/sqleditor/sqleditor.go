@@ -17,7 +17,7 @@
 //	┌──────────────────────────────────────────────────────────────────────────┐
 //	│ frontend  sqlDiagnostics.ts   (Monaco onDidChangeContent → fan-out/merge)  │
 //	└──────────────────────────────────────────────────────────────────────────┘
-//	             │  Wails IPC  (wailsjs/go/sqleditor/Service.*)
+//	             │  Wails IPC  (bindings/thaw/internal/sqleditor/service.*)
 //	             ▼
 //	   sqleditor.Service          (service.go — stateless thin delegators)
 //	             │

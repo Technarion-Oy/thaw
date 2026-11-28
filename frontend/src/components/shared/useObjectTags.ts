@@ -2,8 +2,8 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useCallback, useEffect, useState } from "react";
-import { GetObjectTagReferences, ListAccountTags } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetObjectTagReferences, ListAccountTags } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { quoteQualifiedIdent } from "./ObjectNameCaseControl";
 import { quoteTextLit } from "./sqlEscape";
 import type { EditableTag } from "./TagsRow";
@@ -49,7 +49,8 @@ export function parseObjectTags(res: snowflake.QueryResult | null, kind: string)
   const dbI = ci("tag_database"), scI = ci("tag_schema"), nmI = ci("tag_name"),
     vlI = ci("tag_value"), lvI = ci("level");
   const self = selfLevel(kind);
-  return (res?.rows ?? []).map((row): EditableTag => {
+  return (res?.rows ?? []).map((rawRow): EditableTag => {
+    const row = rawRow ?? [];
     const tdb = dbI >= 0 ? String(row[dbI] ?? "") : "";
     const tsc = scI >= 0 ? String(row[scI] ?? "") : "";
     const tnm = nmI >= 0 ? String(row[nmI] ?? "") : "";
@@ -78,7 +79,8 @@ function tagNameOptions(res: snowflake.QueryResult | null): TagNameOption[] | un
   const iSc = cols.indexOf("schema_name");
   const iAllowed = cols.indexOf("allowed_values");
   if (iName < 0) return undefined;
-  const opts = (res?.rows ?? []).map((r) => {
+  const opts = (res?.rows ?? []).map((raw) => {
+    const r = raw ?? [];
     const nm = String(r[iName]);
     const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
     const sc = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";

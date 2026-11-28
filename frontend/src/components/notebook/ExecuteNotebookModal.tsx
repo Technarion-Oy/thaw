@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, Button, Space, Typography, message, Tooltip, Alert } from "antd";
 import { PlayCircleOutlined, PlusOutlined, DeleteOutlined, WarningOutlined } from "@ant-design/icons";
-import { ExecuteNotebook, GetNotebookQueryWarehouse } from "../../../wailsjs/go/app/App";
+import { ExecuteNotebook, GetNotebookQueryWarehouse } from "../../../bindings/thaw/internal/app/app";
 import SetNotebookWarehouseModal from "./SetNotebookWarehouseModal";
 
 const { Text } = Typography;

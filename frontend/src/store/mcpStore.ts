@@ -2,8 +2,8 @@
 // @thaw-domain: MCP Server
 
 import { create } from "zustand";
-import { ListMCPSessions } from "../../wailsjs/go/app/App";
-import type { mcp } from "../../wailsjs/go/models";
+import { ListMCPSessions } from "../../bindings/thaw/internal/app/app";
+import type * as mcp from "../../bindings/thaw/internal/mcp/models";
 
 interface MCPState {
   sessions: mcp.SessionInfo[];

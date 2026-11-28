@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Form, Input, Checkbox, Alert, Typography } from "antd";
 import { PartitionOutlined } from "@ant-design/icons";
-import { BuildCreateMCPServerSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateMCPServerSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";

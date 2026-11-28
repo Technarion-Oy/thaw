@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button, Select, Input, Checkbox, Spin } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { ListObjects } from "../../../wailsjs/go/app/App";
+import { ListObjects } from "../../../bindings/thaw/internal/app/app";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -220,8 +220,9 @@ export default function WhenConditionBuilder({ db, schema, value, onChange }: Wh
   useEffect(() => {
     ListObjects(db, schema)
       .then((objs) => {
-        setStreams(objs.filter(o => o.kind?.toUpperCase() === "STREAM").map(o => o.name));
-        setTasks(objs.filter(o => o.kind?.toUpperCase() === "TASK").map(o => o.name));
+        const list = objs ?? [];
+        setStreams(list.filter(o => o.kind?.toUpperCase() === "STREAM").map(o => o.name));
+        setTasks(list.filter(o => o.kind?.toUpperCase() === "TASK").map(o => o.name));
       })
       .catch(() => {})
       .finally(() => setLoading(false));

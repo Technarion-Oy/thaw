@@ -3,8 +3,8 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate, SaveGitExportOverloadNaming } from "../../wailsjs/go/app/App";
-import type { gitrepo } from "../../wailsjs/go/models";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth, GitStageFile, GitUnstageFile, GitStageAll, GitUnstageAll, GitDiscardFile, OpenFolderInNewInstance, AddRecentDir, ClearRecentDirs, SaveGitAuthor, SaveGitExportPathTemplate, SaveGitExportOverloadNaming } from "../../bindings/thaw/internal/app/app";
+import type * as gitrepo from "../../bindings/thaw/internal/gitrepo/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
 export type PushParams = gitrepo.PushParams;

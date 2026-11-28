@@ -7,14 +7,14 @@ import { Form, Input, Select, Space, InputNumber, Radio, Switch, Typography } fr
 import { FileSearchOutlined } from "@ant-design/icons";
 import {
   BuildCreateCortexSearchServiceSql, ExecDDL, ListWarehouses,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import MonacoSqlField from "../shared/MonacoSqlField";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { cortexsearchservice } from "../../../wailsjs/go/models";
+import type * as cortexsearchservice from "../../../bindings/thaw/internal/cortexsearchservice/models";
 
 interface Props {
   db: string;
@@ -108,7 +108,7 @@ export default function CreateCortexSearchServiceModal({ db, schema, onClose, on
   const canSubmit =
     cfg.name.trim().length > 0 &&
     (multi
-      ? cfg.vectorIndexes.filter((v) => v.trim().length > 0).length > 0
+      ? (cfg.vectorIndexes ?? []).filter((v) => v.trim().length > 0).length > 0
       : cfg.searchColumn.trim().length > 0) &&
     cfg.warehouse.trim().length > 0 &&
     cfg.targetLag.trim().length > 0 &&

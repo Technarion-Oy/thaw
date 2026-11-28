@@ -13,9 +13,9 @@ import {
 import {
   ListAccountTags, GetAllTagReferences, SetObjectTag, UnsetObjectTag,
   ListDatabases, ListUserSchemas, ListObjects, GetTableColumns,
-} from "../../../wailsjs/go/app/App";
-import { tag as tagModels } from "../../../wailsjs/go/models";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as tagModels from "../../../bindings/thaw/internal/tag/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { parseAllowedValues } from "./allowedValues";
 
 const { Text } = Typography;
@@ -30,8 +30,8 @@ function colIdx(res: snowflake.QueryResult | null, name: string): number {
   return res.columns.findIndex((c) => c.toLowerCase() === name.toLowerCase());
 }
 
-function cell(row: unknown[], idx: number): string {
-  if (idx < 0 || idx >= row.length) return "";
+function cell(row: unknown[] | null, idx: number): string {
+  if (!row || idx < 0 || idx >= row.length) return "";
   const v = row[idx];
   return v === null || v === undefined ? "" : String(v);
 }
@@ -114,13 +114,14 @@ function toRefRows(res: snowflake.QueryResult | null): RefRow[] {
 }
 
 function refObjectRef(r: RefRow): tagModels.ObjectTagRef {
-  return tagModels.ObjectTagRef.createFrom({
+  return {
     domain: r.domain,
     database: r.objectDatabase,
     schema: r.objectSchema,
     name: r.objectName,
     column: r.columnName,
-  });
+    parentKind: "",
+  };
 }
 
 function objectPath(r: RefRow): string {
@@ -288,14 +289,14 @@ function ApplyTagModal({ catalog, onClose, onApplied }: ApplyTagModalProps) {
     setBusy(true);
     setError(null);
     try {
-      const ref = tagModels.ObjectTagRef.createFrom({
+      const ref: tagModels.ObjectTagRef = {
         domain,
         database: showDatabase ? database : "",
         schema: showSchema ? schema : "",
         name: domain === "DATABASE" ? database : (showName ? objName : ""),
         column: isColumn ? column : "",
         parentKind: isColumn ? selectedParentKind : "",
-      });
+      };
       await SetObjectTag(ref, selectedTag.database, selectedTag.schema, selectedTag.name, value);
       message.success("Tag applied");
       onApplied();
@@ -617,7 +618,7 @@ export default function TagManagementModal({ onClose }: Props) {
     const colCount = catalog.columns?.length ?? 0;
     const rows = catalog.rows.map((row, n) => {
       const obj: Record<string, unknown> = { __k: n };
-      row.forEach((c, ci) => { obj[ci] = c; });
+      (row ?? []).forEach((c, ci) => { obj[ci] = c; });
       return obj;
     });
     if (!s) return rows;

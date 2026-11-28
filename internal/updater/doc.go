@@ -7,7 +7,7 @@
 // running build using semantic versioning, and resolves the release page URL so
 // the user can download the new version manually.
 //
-// It deliberately contains NO download-and-apply logic. Wails v2 has no updater
+// It deliberately contains NO download-and-apply logic. Wails has no built-in updater
 // or restart API, so full self-update is deferred to the Wails v3 migration (see
 // issue #568). The HTTP call is proxy-aware (system/IE proxy on Windows &
 // macOS, environment variables on Linux) with a direct-connection fallback so a

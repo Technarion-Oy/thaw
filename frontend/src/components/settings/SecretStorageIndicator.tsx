@@ -4,8 +4,8 @@
 import { useEffect, useState } from "react";
 import { Typography } from "antd";
 import { LockOutlined, WarningOutlined } from "@ant-design/icons";
-import { GetSecretStorageInfo } from "../../../wailsjs/go/app/App";
-import { secrets } from "../../../wailsjs/go/models";
+import { GetSecretStorageInfo } from "../../../bindings/thaw/internal/app/app";
+import * as secrets from "../../../bindings/thaw/internal/secrets/models";
 
 const { Text } = Typography;
 

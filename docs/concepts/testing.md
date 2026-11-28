@@ -26,9 +26,10 @@ npm run build        # full production build (also catches type/obfuscation issu
 The Vitest suite runs in CI on every push/PR that touches `frontend/**` via
 `.github/workflows/frontend-tests.yml` (self-hosted Linux container, `npm ci`
 + `vitest run`, JUnit results published to the PR). There is no Wails runtime in
-CI, so tests that call generated `wailsjs/` IPC bindings must mock them — mock
-the exact module the code imports (e.g. `wailsjs/go/sqleditor/Service`), or the
-binding throws and the code under test silently hits its fallback path.
+CI, so tests that call generated `bindings/` IPC bindings must mock them — mock
+the exact module the code imports (e.g. `bindings/thaw/internal/sqleditor/service`
+or `bindings/thaw/internal/app/app`), or the binding loads `@wailsio/runtime` in
+Node and throws.
 
 ## Integration tests
 

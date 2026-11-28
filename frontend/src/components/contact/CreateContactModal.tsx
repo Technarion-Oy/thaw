@@ -5,7 +5,7 @@
 import { useState, useEffect } from "react";
 import { Form, Input, Checkbox, Alert, Select, Radio } from "antd";
 import { ContactsOutlined } from "@ant-design/icons";
-import { BuildCreateContactSql, ExecDDL, ListUsers } from "../../../wailsjs/go/app/App";
+import { BuildCreateContactSql, ExecDDL, ListUsers } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";

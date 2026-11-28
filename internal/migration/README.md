@@ -62,8 +62,8 @@ func GenerateScript(items []MigrationDiffItem, database string, strategy TableMi
 ## Patterns & integration
 
 - `ScanSource`, `Analyze`, and `GenerateScript` are also exposed via MCP tools (`scan_migration_source`, `analyze_migration`, `generate_migration_script`) in `internal/mcp/migration_tools.go`, using a no-op emit callback since MCP does not stream progress events.
-- `Service` is instantiated in `internal/app/run.go` and registered as a Wails bound service; its methods are accessible from `wailsjs/go/migration/Service`.
-- The `emit` callback passed to `NewService` is `wailsruntime.EventsEmit`; the frontend listens for `migration:analyze:progress` and `migration:exec:progress`.
+- `Service` is owned by `App` (`internal/app/app.go`) and exposed via thin delegators in `internal/app/migration.go`; frontend imports from `bindings/thaw/internal/app/app`.
+- The `emit` callback passed to `NewService` wraps `App.emit`; the frontend listens for `migration:analyze:progress` and `migration:exec:progress`.
 - `Analyze` uses `GET_DDL('database', X, true)` (database-level dump) instead of per-object calls because: (a) it is more efficient; (b) per-object `GET_DDL` for streams wraps `ON TABLE` references in a single double-quoted identifier that does not match the local DDL.
 - DDL comparison is done after `normalizeDDL`: strips block/line comments, collapses whitespace, uppercases, and strips trailing semicolons to avoid false positives from cosmetic formatting differences. Comment stripping, `USE DATABASE`/`USE SCHEMA` context tracking, and `CREATE OR REPLACE` detection all run over the `internal/sqltok` token stream (not regexes), so nested block comments and comment-like sequences inside string literals are handled correctly.
 - `Execute` sorts objects by `executionPriority` (DATABASE → SCHEMA → SEQUENCE → TABLE → … → TASK → PIPE) before deployment. Objects that fail with "does not exist" or "not authorized" are deferred to the next pass (up to `maxPasses`, default 5).

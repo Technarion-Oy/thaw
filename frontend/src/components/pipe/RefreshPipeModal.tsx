@@ -5,8 +5,8 @@ import {
   Modal, Form, Input, DatePicker, Space, Typography, Button, Alert,
 } from "antd";
 import { SyncOutlined } from "@ant-design/icons";
-import { BuildRefreshPipeSql, ExecDDL } from "../../../wailsjs/go/app/App";
-import type { pipe } from "../../../wailsjs/go/models";
+import { BuildRefreshPipeSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
+import type * as pipe from "../../../bindings/thaw/internal/pipe/models";
 import dayjs from "dayjs";
 
 const { Text } = Typography;

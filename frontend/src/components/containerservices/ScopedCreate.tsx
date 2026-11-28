@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, Form, Modal, Select } from "antd";
-import { ListDatabases, ListUserSchemas } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserSchemas } from "../../../bindings/thaw/internal/app/app";
 import { useSessionStore } from "../../store/sessionStore";
 
 interface Props {
@@ -26,7 +26,7 @@ export default function ScopedCreate({ title, onClose, children }: Props) {
   const [schema, setSchema] = useState(sess.schema);
   const [chosen, setChosen] = useState(false);
 
-  useEffect(() => { ListDatabases().then(setDbs).catch(() => setDbs([])); }, []);
+  useEffect(() => { ListDatabases().then((dbs) => setDbs(dbs ?? [])).catch(() => setDbs([])); }, []);
   useEffect(() => {
     if (!db) return;
     let live = true;
@@ -35,8 +35,9 @@ export default function ScopedCreate({ title, onClose, children }: Props) {
     ListUserSchemas(db)
       .then((xs) => {
         if (!live) return;
-        setSchemas(xs);
-        setSchema((cur) => (xs.includes(cur) ? cur : ""));
+        const list = xs ?? [];
+        setSchemas(list);
+        setSchema((cur) => (list.includes(cur) ? cur : ""));
       })
       .catch(() => live && setSchemas([]));
     return () => { live = false; };

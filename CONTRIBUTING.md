@@ -1,6 +1,6 @@
 # Contributing to Thaw
 
-Thanks for contributing! Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend embedded as a single binary).
+Thanks for contributing! Thaw is a native desktop Snowflake manager built with **Wails v3** (Go backend + React/TypeScript frontend embedded as a single binary).
 
 This guide covers **how to branch, commit, open a PR, and write code & docs**. For the conceptual map of the codebase, read the [`docs/concepts/`](docs/concepts/) guides and the per-module `README.md` in each `internal/<pkg>/` and `frontend/src/<dir>/` folder.
 
@@ -12,16 +12,16 @@ This guide covers **how to branch, commit, open a PR, and write code & docs**. F
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Go | ≥ 1.22 | `brew install go` |
+| Go | ≥ 1.26 | `brew install go` |
 | Node.js | ≥ 20 | `brew install node` |
-| Wails CLI | ≥ 2.9 | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
+| Wails CLI | v3.1+ | `go install github.com/wailsapp/wails/v3/cmd/wails3@latest` |
 
-Verify with `wails doctor`. First-time setup:
+Verify with `wails3 doctor`. First-time setup:
 
 ```bash
 go mod tidy
 cd frontend && npm install && cd ..
-wails dev          # hot-reload backend + frontend
+wails3 dev          # hot-reload backend + frontend
 ```
 
 ---
@@ -120,8 +120,8 @@ These are summarized here; full detail lives in [`docs/concepts/patterns.md`](do
 ### Adding a Go → frontend IPC method
 
 1. Add a public method on `*App` (receiver `a *App`) in the `internal/app/<domain>.go` file matching its domain (query methods → `query.go`, object listing → `objects.go`). All files in `internal/app/` are `package app`, so methods bind regardless of file.
-2. Run `wails generate module` to regenerate `frontend/wailsjs/`.
-3. Import from `"../../../wailsjs/go/app/App"` in the component.
+2. Run `wails3 generate bindings -ts -i -clean=true` to regenerate `frontend/bindings/`.
+3. Import from `"../../../bindings/thaw/internal/app/app"` in the component.
 
 ### Thin-delegator pattern
 
@@ -139,7 +139,7 @@ Domain packages expose `Build*Sql(...) (string, error)` builders and `Parse*(res
 
 ### Adding a feature flag
 
-Feature flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **View → Enabled Features…**. All flags default to enabled (an `Initialized` sentinel prevents Go's zero-value `false` from disabling features on fresh installs). Steps: add the bool field + set it in `DefaultFeatureFlags()`, bump `flagsVersion`, add `MigrateFlags()` logic, run `wails generate module`, add a `<FlagRow>` in `FeatureFlagsModal.tsx`, then gate the feature in its component. See [`internal/config/README.md`](internal/config/README.md).
+Feature flags live in `internal/config/config.go` (`FeatureFlags`) and surface via **View → Enabled Features…**. All flags default to enabled (an `Initialized` sentinel prevents Go's zero-value `false` from disabling features on fresh installs). Steps: add the bool field + set it in `DefaultFeatureFlags()`, bump `flagsVersion`, add `MigrateFlags()` logic, run `wails3 generate bindings -ts -i -clean=true`, add a `<FlagRow>` in `FeatureFlagsModal.tsx`, then gate the feature in its component. See [`internal/config/README.md`](internal/config/README.md).
 
 ---
 
@@ -150,11 +150,12 @@ Feature flags live in `internal/config/config.go` (`FeatureFlags`) and surface v
 cd frontend && npx tsc --noEmit
 
 # Full builds
-cd frontend && npm run build      # frontend only
-wails build                       # frontend + Go binary → build/bin/
+cd frontend && npm run build                  # frontend only
+wails3 task build                             # frontend + Go binary → build/bin/
+wails3 task package                           # full OS package (.app / NSIS / binary) → build/bin/
 
 # Regenerate Wails bindings after changing internal/app/ signatures
-wails generate module
+wails3 generate bindings -ts -i -clean=true
 
 # Tests
 go test ./...                     # all Go unit tests
@@ -180,7 +181,7 @@ These also run in CI on every pull request and on pushes to `main` (plus a weekl
 
 ### Dependency updates (Renovate)
 
-Dependency PRs are opened by Renovate, run self-hosted from [`.github/workflows/renovate.yml`](.github/workflows/renovate.yml) on our own runners (twice daily, plus manual dispatch with a dry-run option). Behaviour is configured in [`.github/renovate.json`](.github/renovate.json); the open/queued list lives on the **Dependency Dashboard** issue. Updates arrive batched (Go modules, frontend dev tooling, GitHub Actions, …) on Mondays, titled `chore: …` so they do not trigger a release. Security fixes are exempt from the schedule and are titled `fix:` so the patched build actually ships. Framework-level bumps wait for approval on the dashboard instead of opening a PR: the `go` directive, the CI Node/Python versions, and **major** updates of React and Ant Design (their minor/patch updates are grouped and open a PR like anything else). Review a Renovate PR like any other: CI must be green, and a Wails bump additionally needs `wails generate module` plus a check that `frontend/wailsjs/` is unchanged or committed. A Wails PR also rewrites the four pinned `go install …/cmd/wails@vX.Y.Z` steps in the build workflows, so the CLI cannot skew from the library. Renovate is pinned to Wails v2 minors/patches (`<3.0.0`) until the v3 port (#23) lands. `THIRD_PARTY_NOTICES.md` is regenerated inside the update branch automatically — Renovate runs `scripts/regen_third_party_notices.sh` as a post-upgrade task — so `TestThirdPartyNoticesUpToDate` stays green without a manual commit. Use that same script locally after changing dependencies; it installs `frontend/node_modules` before generating. Its output is host-independent — the Go half is collected once per shipped platform (macOS, Linux, Windows) and merged — so regenerating on a Mac or a Windows box produces exactly the file CI expects.
+Dependency PRs are opened by Renovate, run self-hosted from [`.github/workflows/renovate.yml`](.github/workflows/renovate.yml) on our own runners (twice daily, plus manual dispatch with a dry-run option). Behaviour is configured in [`.github/renovate.json`](.github/renovate.json); the open/queued list lives on the **Dependency Dashboard** issue. Updates arrive batched (Go modules, frontend dev tooling, GitHub Actions, …) on Mondays, titled `chore: …` so they do not trigger a release. Security fixes are exempt from the schedule and are titled `fix:` so the patched build actually ships. Framework-level bumps wait for approval on the dashboard instead of opening a PR: the `go` directive, the CI Node/Python versions, and **major** updates of React and Ant Design (their minor/patch updates are grouped and open a PR like anything else). Review a Renovate PR like any other: CI must be green, and a Wails bump additionally needs `wails3 generate bindings -ts -i -clean=true` plus a check that `frontend/bindings/` is unchanged or committed. A Wails PR groups `github.com/wailsapp/wails/v3`, `@wailsio/runtime`, and the four pinned `go install …/cmd/wails3@vX.Y.Z` steps in the build workflows so the CLI, Go library, and JS runtime move in lockstep (gated behind Dependency Dashboard approval so weekly minors can be reviewed before merging). `THIRD_PARTY_NOTICES.md` is regenerated inside the update branch automatically — Renovate runs `scripts/regen_third_party_notices.sh` as a post-upgrade task — so `TestThirdPartyNoticesUpToDate` stays green without a manual commit. Use that same script locally after changing dependencies; it installs `frontend/node_modules` before generating. Its output is host-independent — the Go half is collected once per shipped platform (macOS, Linux, Windows) and merged — so regenerating on a Mac or a Windows box produces exactly the file CI expects.
 
 A PR touching `.github/renovate.json` or the workflow runs `renovate-config-validator --strict` automatically; locally, `npx --package renovate@44.252.7 renovate-config-validator --strict` from the repo root does the same. Use that exact version — `--strict` schema rules differ between releases, so `@latest` can pass locally and still fail CI. It is the version pinned in the workflow, and Renovate updates this line together with the workflow's pins. The bot authenticates as the release GitHub App (`APP_ID` / `APP_PRIVATE_KEY`) — see the permission list in the workflow header before enabling it. Renovate itself runs on Node 24 (its own requirement) but pins **npm 10** to match the Node 20 the app builds with: npm majors resolve nested dependencies differently, so a lockfile written by npm 11 fails `npm ci` on every build job. If the build workflows move to Node 24, drop that pin.
 

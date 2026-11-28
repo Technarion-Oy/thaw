@@ -10,9 +10,9 @@ import {
   GetLogPrefsLocked,
   RevealLogFile,
   UpdateLogPrefs,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { useLogPrefsStore } from "../../store/logPrefsStore";
-import type { config } from "../../../wailsjs/go/models";
+import type * as config from "../../../bindings/thaw/internal/config/models";
 
 const { Text } = Typography;
 

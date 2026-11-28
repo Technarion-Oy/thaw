@@ -30,14 +30,14 @@ git gutter decorations, the tab bar, editor preferences, and the cross-tab searc
 
 ## Patterns & integration
 
-**IPC calls (from `wailsjs/go/app/App`):**
+**IPC calls (from `bindings/thaw/internal/app/app`):**
 `GetObjectDDL`, `ListObjects`, `ListSchemas`, `GetTableColumns`, `GetTableColumnsWithTypes`,
 `GetSchemaForeignKeys`, `GetUserDDL`, `GetAISuggestion`, `GetFunctionSuggestions`,
 `GetFunctionTooltip`, `GetAllFunctionNames`, `GetEditorPrefs`,
 `GitGetHeadFileContent`. (Data types are not fetched over IPC — they come from
 the bundled artifact `src/generated/snowflakeDataTypes.ts`.)
 
-**IPC calls (from `wailsjs/go/sqleditor/Service`):**
+**IPC calls (from `bindings/thaw/internal/sqleditor/service`):**
 `AnalyzeSqlSyntax`, `ParseJoinTableRefs`, `ComputeJoinOnConditions`, `AnalyzeSqlSemantics`,
 `GetSqlStatementRanges`, `GetIdentifierAtColumn`, `GetActiveFunctionCall`,
 `ParseSignatureParams`, `ValidateDataTypes`,

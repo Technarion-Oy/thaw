@@ -7,12 +7,12 @@ import {
   Form, Input, Select, Checkbox, Button, Space,
 } from "antd";
 import { GlobalOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateNetworkRuleSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateNetworkRuleSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { networkrule as nrModels } from "../../../wailsjs/go/models";
+import type * as nrModels from "../../../bindings/thaw/internal/networkrule/models";
 
 interface Props {
   db: string;
@@ -80,11 +80,11 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const updateValue = (i: number, v: string) =>
-    set("valueList", cfg.valueList.map((x, idx) => (idx === i ? v : x)));
+    set("valueList", (cfg.valueList ?? []).map((x, idx) => (idx === i ? v : x)));
 
-  const addValue = () => set("valueList", [...cfg.valueList, ""]);
+  const addValue = () => set("valueList", [...(cfg.valueList ?? []), ""]);
 
-  const removeValue = (i: number) => set("valueList", cfg.valueList.filter((_, idx) => idx !== i));
+  const removeValue = (i: number) => set("valueList", (cfg.valueList ?? []).filter((_, idx) => idx !== i));
 
   // VALUE_LIST is a required parameter on CREATE NETWORK RULE, so at least one
   // non-blank identifier must be supplied. (An existing rule's list can later be
@@ -93,7 +93,7 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
     cfg.name.trim().length > 0 &&
     cfg.type.trim().length > 0 &&
     cfg.mode.trim().length > 0 &&
-    cfg.valueList.some((v) => v.trim() !== "");
+    (cfg.valueList ?? []).some((v) => v.trim() !== "");
 
   const handleRun = () => {
     if (!canSubmit) return;
@@ -173,7 +173,7 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
           help="Network identifiers for this rule (at least one is required). The expected format depends on the chosen type."
         >
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
-            {cfg.valueList.map((v, i) => (
+            {(cfg.valueList ?? []).map((v, i) => (
               <Space key={i} align="baseline" style={{ width: "100%" }}>
                 <Input
                   placeholder={placeholder}
@@ -181,7 +181,7 @@ export default function CreateNetworkRuleModal({ db, schema, onClose, onSuccess 
                   onChange={(e) => updateValue(i, e.target.value)}
                   style={{ width: 360 }}
                 />
-                {cfg.valueList.length > 1 && (
+                {(cfg.valueList ?? []).length > 1 && (
                   <Button
                     type="text"
                     size="small"

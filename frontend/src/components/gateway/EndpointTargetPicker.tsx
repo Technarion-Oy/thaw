@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from "react";
 import { Select } from "antd";
-import { ListDatabases, ListUserSchemas, ListObjects, ListServiceEndpoints } from "../../../wailsjs/go/app/App";
+import { ListDatabases, ListUserSchemas, ListObjects, ListServiceEndpoints } from "../../../bindings/thaw/internal/app/app";
 import { quoteIfNecessary } from "../editor/sqlEditorUtils";
 import { parseEndpointRef } from "../service/specDoc";
 
@@ -49,11 +49,11 @@ export default function EndpointTargetPicker({ defaultDb, defaultSchema, value, 
 
   const [loadingServices, setLoadingServices] = useState(false);
   const [loadingEndpoints, setLoadingEndpoints] = useState(false);
-  useEffect(() => { ListDatabases().then(setDatabases).catch(() => {}); }, []);
+  useEffect(() => { ListDatabases().then((dbs) => setDatabases(dbs ?? [])).catch(() => {}); }, []);
 
   useEffect(() => {
     if (!db) { setSchemas([]); return; }
-    ListUserSchemas(raw(db)).then(setSchemas).catch(() => setSchemas([]));
+    ListUserSchemas(raw(db)).then((s) => setSchemas(s ?? [])).catch(() => setSchemas([]));
   }, [db]);
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function EndpointTargetPicker({ defaultDb, defaultSchema, value, 
       .then((res) => {
         const cols = res?.columns ?? [];
         const idx = cols.findIndex((c) => c.toLowerCase() === "name");
-        const names = idx >= 0 ? (res?.rows ?? []).map((r) => String(r[idx] ?? "")).filter(Boolean) : [];
+        const names = idx >= 0 ? (res?.rows ?? []).map((r) => String(r?.[idx] ?? "")).filter(Boolean) : [];
         setEndpoints(names);
       })
       .catch(() => setEndpoints([]))

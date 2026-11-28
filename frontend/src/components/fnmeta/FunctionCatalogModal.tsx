@@ -5,10 +5,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Modal, Input, Button, Tag, Spin, Segmented, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, FunctionOutlined, EnterOutlined } from "@ant-design/icons";
-import { GetAllFunctionNames, GetFunctionTooltip } from "../../../wailsjs/go/app/App";
+import { GetAllFunctionNames, GetFunctionTooltip } from "../../../bindings/thaw/internal/app/app";
 import { BrowserOpenURL } from "../../utils/wailsRuntime";
 import { insertAtCursor } from "../editor/editorRef";
-import type { fnmeta } from "../../../wailsjs/go/models";
+import type * as fnmeta from "../../../bindings/thaw/internal/fnmeta/models";
 
 const { Text } = Typography;
 
@@ -32,7 +32,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
   useEffect(() => {
     GetAllFunctionNames()
       .then((fns) => {
-        const sorted = [...fns].sort((a, b) => a.functionName.localeCompare(b.functionName));
+        const sorted = [...(fns ?? [])].sort((a, b) => a.functionName.localeCompare(b.functionName));
         setAllFns(sorted);
       })
       .catch(() => {})

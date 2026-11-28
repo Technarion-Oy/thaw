@@ -5,13 +5,13 @@
 import { useEffect, useState } from "react";
 import { Form, Input, Checkbox, Select } from "antd";
 import { AppstoreOutlined } from "@ant-design/icons";
-import { BuildCreateStreamlitSql, ExecDDL, ListWarehouses } from "../../../wailsjs/go/app/App";
+import { BuildCreateStreamlitSql, ExecDDL, ListWarehouses } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
 import StageFilePicker from "../shared/StageFilePicker";
-import type { streamlit as stModels } from "../../../wailsjs/go/models";
+import type * as stModels from "../../../bindings/thaw/internal/streamlit/models";
 
 interface Props {
   db: string;

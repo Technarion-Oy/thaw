@@ -25,8 +25,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder, ExportGraphDDL } from "../../../wailsjs/go/app/App";
-import type { tasks } from "../../../wailsjs/go/models";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder, ExportGraphDDL } from "../../../bindings/thaw/internal/app/app";
+import type * as tasks from "../../../bindings/thaw/internal/tasks/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
 import CopyTaskModal from "./CopyTaskModal";
@@ -578,8 +578,9 @@ export default function TaskGraphModal({ db, schema, taskName, onClose, onViewPr
       }
       await ClipboardSetText(result.ddl);
       message.success(`DDL for ${result.taskCount} task${result.taskCount !== 1 ? "s" : ""} copied to clipboard`);
-      if (result.failedTasks.length > 0) {
-        message.error(`Failed to fetch DDL for: ${result.failedTasks.join(", ")}`);
+      const failed = result.failedTasks ?? [];
+      if (failed.length > 0) {
+        message.error(`Failed to fetch DDL for: ${failed.join(", ")}`);
       }
       return true;
     } catch (err) {

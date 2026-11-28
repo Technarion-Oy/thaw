@@ -12,7 +12,8 @@ on:
       - "go.mod"
       - "go.sum"
       - "frontend/**"
-      - "wails.json"
+      - "Taskfile.yml"
+      - "build/**"
       - ".github/workflows/build-check.yml"
   pull_request:
     branches: [main]
@@ -21,7 +22,8 @@ on:
       - "go.mod"
       - "go.sum"
       - "frontend/**"
-      - "wails.json"
+      - "Taskfile.yml"
+      - "build/**"
       - ".github/workflows/build-check.yml"
   workflow_dispatch:
 
@@ -80,20 +82,19 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install system dependencies
-        run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+        run: apt-get update && apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libx11-dev
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 
       - name: Download Go dependencies
         run: go mod download
 
-      # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
-      # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
+      # Wails v3 defaults to GTK4 + WebKitGTK 6.0 on Linux (no build tag needed).
       # THAW_FAST_BUILD skips the slow Terser/obfuscator frontend passes (~2 min
       # saved) — this check verifies compile+link+bundle, not shipping artifacts.
       - name: Build Wails app
-        run: wails build -platform linux/amd64 -tags webkit2_41
+        run: wails3 task linux:build ARCH=amd64
         env:
           THAW_FAST_BUILD: "1"
           NODE_OPTIONS: --max-old-space-size=6144
@@ -106,6 +107,9 @@ jobs:
       # `bash scripts/regen_third_party_notices.sh`). The generator lists the Go
       # modules for every shipped platform and merges them, so this Linux job
       # accepts a file regenerated on macOS or Windows too.
+      - name: Run Wails shell and architecture tests
+        run: go test -race -count=1 ./internal/app/... ./internal/snowpark/... ./internal/architecture/...
+
       - name: Verify third-party notices are up to date
         run: go test -run TestThirdPartyNoticesUpToDate -count=1 ./.
 

@@ -10,8 +10,8 @@ import type * as monaco from "monaco-editor";
 import Editor from "@monaco-editor/react";
 import {
   ListDatabases, ListSchemas, ListObjects, GetTableColumns,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import { useThemeStore } from "../../store/themeStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 

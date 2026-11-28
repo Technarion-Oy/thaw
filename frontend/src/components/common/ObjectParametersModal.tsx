@@ -9,10 +9,10 @@ import {
 import { ConfirmSwitch } from "./ConfirmSwitch";
 import { friendlyError } from "./errors";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import {
   GetObjectParameters, SetObjectParameter, UnsetObjectParameter,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 
 export type ParamObjectType = "DATABASE" | "SCHEMA" | "TABLE" | "WAREHOUSE" | "TASK" | "USER";
 

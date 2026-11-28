@@ -6,11 +6,11 @@ Welcome to Thaw. This guide gets you from a fresh clone to making your first cha
 
 | Tool | Version |
 |------|---------|
-| Go | ≥ 1.22 |
+| Go | ≥ 1.26 |
 | Node.js | ≥ 20 |
-| Wails CLI | ≥ 2.9 (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`) |
+| Wails CLI | v3.1+ (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`) |
 
-Run `wails doctor` to confirm your toolchain is healthy.
+Run `wails3 doctor` to confirm your toolchain is healthy.
 
 ## 2. Set up the project
 
@@ -22,15 +22,16 @@ cd frontend && npm install && cd ..
 ## 3. Run in development
 
 ```bash
-wails dev
+wails3 dev
 ```
 
-Both the Go backend and the Vite/React frontend hot-reload. The first run regenerates `frontend/wailsjs/` from your Go structs.
+Both the Go backend and the Vite/React frontend hot-reload. Run `wails3 generate bindings -ts -i -clean=true` whenever you change Go IPC method signatures.
 
 ## 4. Build a production binary
 
 ```bash
-wails build      # output in build/bin/
+wails3 task package   # full OS package (.app / NSIS / binary) in build/bin/
+wails3 task build     # binary only in build/bin/
 ```
 
 The production frontend build minifies (Terser) and obfuscates (`javascript-obfuscator`); the build script allocates 6 GB of Node heap.
@@ -56,7 +57,7 @@ A typical "add a backend feature surfaced in the UI" loop:
 
 1. Add the real logic + a `Build*Sql`/`Parse*` to the right `internal/<domain>` package, with unit tests.
 2. Add a thin-delegator method on `*App` in `internal/app/<domain>.go`.
-3. `wails generate module` to regenerate bindings.
+3. `wails3 generate bindings -ts -i -clean=true` to regenerate bindings.
 4. Wire the new binding into a component; subscribe to any emitted events.
 5. Update the relevant docs **in the same PR** (see [CONTRIBUTING](../../CONTRIBUTING.md)).
 6. `go test ./...`, `cd frontend && npx tsc --noEmit && npm test`, lint, then open a PR.
@@ -66,6 +67,6 @@ A typical "add a backend feature surfaced in the UI" loop:
 - **Branch** off `main` with a `feat/`/`fix/`/`chore/` prefix; **never** amend, rebase, or force-push.
 - **Commit** with Conventional Commits (`feat`/`fix`/`perf` trigger releases).
 - **Docs travel with code** — update README/FEATURES/CLAUDE/GEMINI/.agents/module-README/concepts as part of the change.
-- **Never edit** `frontend/wailsjs/` or `internal/architecture/semantic_map.go` by hand (both generated).
+- **Never edit** `frontend/bindings/` or `internal/architecture/semantic_map.go` by hand (both generated).
 
 Full workflow rules: [`CONTRIBUTING.md`](../../CONTRIBUTING.md). Test details: [Testing](testing.md).

@@ -10,8 +10,8 @@ import {
   AlertOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PauseCircleOutlined, PlayCircleOutlined, ThunderboltOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterAlert, ExecuteAlert } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetObjectProperties, AlterAlert, ExecuteAlert } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 

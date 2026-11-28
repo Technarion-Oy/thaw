@@ -9,10 +9,10 @@ import {
 import {
   AuditOutlined, EditOutlined, CheckOutlined, CloseOutlined, ThunderboltOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterEventTable, GetEventTableParameters } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterEventTable, GetEventTableParameters } from "../../../bindings/thaw/internal/app/app";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -199,7 +199,7 @@ export default function EventTablePropertiesModal({ db, schema, name, onClose }:
     const keyCi = cols.indexOf("key");
     const valCi = cols.indexOf("value");
     if (keyCi < 0 || valCi < 0) return "";
-    const row = (params.rows ?? []).find((r) => String(r[keyCi] ?? "").toLowerCase() === key.toLowerCase());
+    const row = (params.rows ?? []).find((r) => String(r?.[keyCi] ?? "").toLowerCase() === key.toLowerCase());
     return row ? String(row[valCi] ?? "") : "";
   };
 

@@ -10,7 +10,7 @@ import {
 } from "@ant-design/icons";
 import type { Tab } from "../../store/queryStore";
 import { useQueryStore } from "../../store/queryStore";
-import { GetTabSessionID } from "../../../wailsjs/go/app/App";
+import { GetTabSessionID } from "../../../bindings/thaw/internal/app/app";
 import { useConnectionStore } from "../../store/connectionStore";
 import { getEditorInstance } from "./editorRef";
 import { tabDisplayTitle } from "./tabTitle";

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Modal, Space, Spin, Typography } from "antd";
 import { CameraOutlined } from "@ant-design/icons";
-import { AlterSnapshot, DescribeSnapshot } from "../../../wailsjs/go/app/App";
+import { AlterSnapshot, DescribeSnapshot } from "../../../bindings/thaw/internal/app/app";
 import { EditRow, InfoRow, SECTION_HEAD } from "../common/PropertyRows";
 import { rowsOf, type ResultRow } from "../containerservices/computePools";
 

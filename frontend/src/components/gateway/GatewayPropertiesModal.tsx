@@ -9,12 +9,12 @@ import {
 import {
   NodeIndexOutlined, ReloadOutlined, CopyOutlined, SaveOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, DescribeGateway, AlterGateway } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, DescribeGateway, AlterGateway } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
 import SpecEditor from "../service/SpecEditor";
 import { specProblems } from "../service/specDoc";
 import GatewaySpecForm from "./GatewaySpecForm";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

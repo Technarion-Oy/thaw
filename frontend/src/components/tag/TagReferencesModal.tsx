@@ -4,8 +4,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Modal, Button, Space, Typography, Alert, Table, Empty, Spin } from "antd";
 import { TagsOutlined, ReloadOutlined } from "@ant-design/icons";
-import { GetObjectTagReferences, GetColumnTagReferences } from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { GetObjectTagReferences, GetColumnTagReferences } from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -42,7 +42,7 @@ function ResultTable({ result }: { result: snowflake.QueryResult }) {
       }))}
       dataSource={result.rows.map((row) => {
         const obj: Record<number, unknown> = {};
-        row.forEach((cell, ci) => { obj[ci] = cell; });
+        (row ?? []).forEach((cell, ci) => { obj[ci] = cell; });
         return obj;
       })}
     />
@@ -70,7 +70,7 @@ function filterToColumn(result: snowflake.QueryResult, column: string): snowflak
   const idx = (result.columns ?? []).findIndex((c) => c.toUpperCase() === "COLUMN_NAME");
   if (idx < 0) return result;
   const want = column.toLowerCase();
-  const rows = (result.rows ?? []).filter((r) => String(r[idx] ?? "").toLowerCase() === want);
+  const rows = (result.rows ?? []).filter((r) => String(r?.[idx] ?? "").toLowerCase() === want);
   return { ...result, rows } as snowflake.QueryResult;
 }
 
@@ -104,7 +104,7 @@ export default function TagReferencesModal({ db, schema, name, kind, args, colum
     if (columnMode || hasColumns) {
       tasks.push(
         GetColumnTagReferences(kind, db, schema, name)
-          .then((r) => setColumnRefs(column ? filterToColumn(r, column) : r))
+          .then((r) => setColumnRefs(column && r ? filterToColumn(r, column) : r))
           .catch((e) => setColumnErr(String(e))),
       );
     }

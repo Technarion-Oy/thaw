@@ -7,8 +7,8 @@ import { Select, Tree, Space, Typography, Spin } from "antd";
 import { FolderOutlined, FileOutlined } from "@ant-design/icons";
 import {
   ListDatabases, ListUserSchemas, ListStages, ListStageEntries,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import { quoteIdent } from "./ObjectNameCaseControl";
 

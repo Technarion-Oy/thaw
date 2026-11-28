@@ -7,14 +7,15 @@ import {
   Form, Input, InputNumber, Select, Checkbox, Typography, Collapse,
 } from "antd";
 import { AuditOutlined } from "@ant-design/icons";
-import { BuildCreateEventTableSql, ExecDDL, GetCollations } from "../../../wailsjs/go/app/App";
+import { BuildCreateEventTableSql, ExecDDL, GetCollations } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import TagInput from "../shared/TagInput";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { eventtable, snowflake } from "../../../wailsjs/go/models";
+import type * as eventtable from "../../../bindings/thaw/internal/eventtable/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

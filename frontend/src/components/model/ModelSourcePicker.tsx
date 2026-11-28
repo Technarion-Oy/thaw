@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Form, Input, Select } from "antd";
-import { ListModels } from "../../../wailsjs/go/app/App";
+import { ListModels } from "../../../bindings/thaw/internal/app/app";
 import StageFilePicker from "../shared/StageFilePicker";
 
 // `SHOW MODELS IN ACCOUNT` is an account-wide scan, and this picker remounts on

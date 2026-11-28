@@ -29,7 +29,7 @@ Hosts the wizard-style creation modals and property sheets for schema objects ac
 
 ## Patterns & integration
 
-- **IPC**: all calls go through `wailsjs/go/app/App`. SQL building for column DDL uses `BuildAddColumnSql` (and related `Build*ColumnSql` methods) from `internal/column`; execution uses `ExecDDL`. Other object creation calls `ExecDDL` directly with the form-assembled DDL string (for objects without a dedicated builder package).
+- **IPC**: all calls go through `bindings/thaw/internal/app/app`. SQL building for column DDL uses `BuildAddColumnSql` (and related `Build*ColumnSql` methods) from `internal/column`; execution uses `ExecDDL`. Other object creation calls `ExecDDL` directly with the form-assembled DDL string (for objects without a dedicated builder package).
 - **SQL preview pattern**: `AddColumnModal` debounces `BuildAddColumnSql` IPC calls to show a live SQL preview below the form — identical to the dbtproject modal pattern. The preview component from `../shared/SqlPreview.tsx` is used for rendering.
 - **Schemas**: the schema counterpart of `CreateDatabaseModal` is `CreateSchemaModal` in `../schema/` (database context menu → **Create Schema…**).
 - **Shared components**: `ObjectNameCaseControl` and `DataTypeSelect` from `../shared/` are imported by `AddColumnModal` and `CreateDatabaseModal`.

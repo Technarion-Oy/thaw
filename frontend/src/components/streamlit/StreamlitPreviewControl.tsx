@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Space, Typography, Tooltip, message } from "antd";
 import { PlayCircleOutlined, StopOutlined, GlobalOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { StartStreamlitPreview, StopStreamlitPreview } from "../../../wailsjs/go/app/App";
+import { StartStreamlitPreview, StopStreamlitPreview } from "../../../bindings/thaw/internal/app/app";
 import { BrowserOpenURL, EventsOn } from "../../utils/wailsRuntime";
 
 const { Text } = Typography;

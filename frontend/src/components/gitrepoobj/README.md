@@ -20,7 +20,7 @@ elsewhere in the codebase (e.g. dbtproject modals).
 
 ## Patterns & integration
 
-- **IPC**: `BuildCreateGitRepositorySql`, `BuildModifyGitRepositorySql`, `ExecDDL`, `GetObjectProperties`, `ListApiIntegrations`, `ListSecretsInAccount`, `GetQuotedIdentifiersIgnoreCase`, `SetGitCommitFilter`, `GetGitCommitFilter` — all from `wailsjs/go/app/App`.
+- **IPC**: `BuildCreateGitRepositorySql`, `BuildModifyGitRepositorySql`, `ExecDDL`, `GetObjectProperties`, `ListApiIntegrations`, `ListSecretsInAccount`, `GetQuotedIdentifiersIgnoreCase`, `SetGitCommitFilter`, `GetGitCommitFilter` — all from `bindings/thaw/internal/app/app`.
 - **SQL preview**: every field change triggers a backend SQL builder call; the preview `<pre>` block in the modal body always shows what will be executed before the user clicks Create/Apply. This avoids any SQL construction in the frontend.
 - **Secret inline creation**: both Create and Modify modals mount `CreateSecretModal` (from `components/secret/`) conditionally; after `onSuccess(fqn)` the secrets dropdown reloads and the new FQN is auto-selected.
 - **No store usage**: these modals are purely local-state. The Sidebar triggers them via context-menu handlers and provides `db`, `schema`, and (for Modify/Filter) `name` as props.

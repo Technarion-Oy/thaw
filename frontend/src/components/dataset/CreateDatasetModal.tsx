@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Form, Input, Checkbox, Alert } from "antd";
 import { DotChartOutlined } from "@ant-design/icons";
-import { BuildCreateDatasetSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateDatasetSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";

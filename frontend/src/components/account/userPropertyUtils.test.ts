@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import { quoteIdent, nameOptionsFromShow, userTagsToEditable, parseMfaMethods, parsePolicyReferences } from "./userPropertyUtils";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 // Minimal QueryResult shim — only columns/rows are read by the parsers.
 const qr = (columns: string[], rows: unknown[][]): snowflake.QueryResult =>

@@ -16,7 +16,7 @@ frontend. It owns:
   per-tab login would re-send the spent code and fail (issue #804). Such tabs
   never close the client and are skipped by eviction; MCP sessions, which need
   their own independent connection, are rejected for that auth instead.
-- All exported IPC methods callable from `frontend/wailsjs/go/app/App.ts`.
+- All exported IPC methods callable from `frontend/bindings/thaw/internal/app/app.ts`.
 
 Real business logic (SQL building, result parsing, validation) lives in
 `internal/<domain>` packages. Most `*App` methods are **thin delegators**:
@@ -27,8 +27,8 @@ nil-check → delegate → return.
 | File | Contents |
 |------|----------|
 | `app.go` | `App` struct definition, `NewApp`, `startup`/`shutdown` lifecycle, `Connect`/`CancelConnect`/`Disconnect`/`IsConnected`, tab-session management (`getOrInitTabSession`, `InitTabSession`, `CloseTabSession`, `evictIfNeeded`, `evictIdleSessions`, `runIdleEvictionLoop`, `applySessionConfig`), `GetAppInfo`, `GetThirdPartyNotices` (returns the embedded `THIRD_PARTY_NOTICES.md` bundle of dependency license texts for the About dialog; the content is embedded in `main.go` and threaded through `Run` → `NewApp`). Reads the `--workdir=<dir>` launch arg (set by "Open Folder in New Window") into the immutable `workdirOverridden` flag; the folder itself lives only in `cachedExportDir`. `startup` roots this instance there and retitles the window. In an override window `GetGitConfig`/`SaveGitConfig` (in `git.go`) treat the per-repo/instance-local fields specially so a stale snapshot can't corrupt the shared config or the wrong repo (see `git.go`). |
-| `run.go` | `Run(assets embed.FS, thirdPartyNotices, licenseText string)` — the sole exported entry point called by `main.go`. Initialises crash reporting, restores window state, calls `buildMenu`, calls `wails.Run`. Also registers `sqleditor.NewService()` in the `Bind` array. |
-| `runtime.go` | Thin unexported helpers isolating every `github.com/wailsapp/wails/v2/pkg/runtime` call in `internal/app/` (`emit`, `openFileDialog`, `openMultipleFilesDialog`, `saveFileDialog`, `openDirectoryDialog`, `confirmDialog`, `restoreWindowState`, `windowState`, `setWindowTitle`, `updateApplicationMenu`, `quit`, `logErrorf`) plus decoupled option/filter structs (`fileFilter`, `openDialogOpts`, `saveDialogOpts`, `confirmDialogOpts`). Nil-`ctx`-safe so unit tests can construct `&App{}` directly without a Wails runtime; `TestWailsRuntimeIsolatedToRuntimeFile` in `runtime_test.go` guards that no other file in `internal/app/` imports `wailsruntime` directly. |
+| `run.go` | `Run(assets embed.FS, thirdPartyNotices, licenseText string)` — the sole exported entry point called by `main.go`. Initialises crash reporting, creates the Wails v3 `application.App` with `Services` (`app` and `sqleditor.NewService()`), attaches the native menu (`buildMenu`), creates the main window with restored position/maximized state, `UseApplicationMenu: true`, `MacTitleBarHiddenInset`, and `WindowClosing`/`ShouldQuit` hooks, and calls `wailsApp.Run()`. Keeps `limitAssetConcurrency(32)` as `Assets.Middleware`. |
+| `runtime.go` | Thin unexported helpers isolating Wails v3 runtime calls (`emit`, `onEvent`, `openFileDialog`, `openMultipleFilesDialog`, `saveFileDialog`, `openDirectoryDialog`, `confirmDialog`, `windowState`, `setWindowTitle`, `quit`, `logErrorf`) plus decoupled option/filter structs (`fileFilter`, `openDialogOpts`, `saveDialogOpts`, `confirmDialogOpts`). Nil-`wailsApp`-safe so unit tests can construct `&App{}` directly without a Wails runtime; `TestWailsRuntimeIsolatedToShellFiles` in `runtime_test.go` guards that only the four shell files (`app.go`, `run.go`, `runtime.go`, `menu.go`) import `github.com/wailsapp/wails/v3/...` and no file imports `wails/v2`. |
 | `menu.go` | `buildMenu(*App)` — constructs the native macOS/Windows menu bar. All menu actions emit `menu:*` Wails events; no direct state mutation. Includes **Help → Check for Updates…** (`menu:check-for-update`). Items fronting Snowflake-only features are added via the local `addConnectionItem` helper: they start `Disabled` (the app launches disconnected) and are toggled by the `app.setMenuConnected` callback that `buildMenu` assigns — the same callback-on-`App` pattern as `setQueryLogMenuCheck`. `Connect` calls `setMenuConnected(true)` only after the client is published (a failed/canceled connect enables nothing); `Disconnect` calls `setMenuConnected(false)`. Both call sites are nil-guarded because tests build an `App` without a menu. The gated set is pinned by `TestBuildMenuStartsDisconnected` in `menu_test.go` — add a Snowflake-only item through `addConnectionItem` and update that list. `addConnectionItem` also forwards any extra args as the event payload and returns the item, which is how the six **Snowpark → Container Services ▸** items (#939) share one `menu:container-services` event and are told apart by the tab name they carry (`pools`/`services`/`jobs`/`images`/`snapshots`/`gateways`). Those six are gated on the connection **and** on the `containerServices` feature flag, via a second `buildMenu`-assigned callback, `app.setMenuFeatureFlags`; both inputs feed one `refresh()` closure, and `App.syncMenuFeatureFlags` pushes the effective flags from `startup` and from `SaveFeatureFlags`. |
 | `updater.go` | `CheckForUpdate()` IPC (on-demand, always live) and the `startUpdateChecker` background goroutine (called at the end of `startup`; delayed, throttled by `updateCheckInterval`, skipped for `dev` builds). Delegates the GitHub fetch/semver compare to `internal/updater`, caches results in `config.UpdateCheckState`, and emits `update:available` when a newer release exists. |
 | `license.go` | First-launch license agreement IPC: `GetLicenseText` (returns the embedded `LICENSE` threaded through `Run` → `NewApp`), `IsLicenseAccepted` (reads `config.LicenseAccepted`; frontend gate shows when false), `AcceptLicense` (persists `LicenseAccepted = true`), `DeclineLicense` (`a.quit()`). Frontend gate: `frontend/src/components/setup/LicenseAgreement.tsx`. |
@@ -192,8 +192,8 @@ package:
 ### IPC flow
 
 ```
-Frontend wailsjs/go/app/App.ts
-   ↓  Wails runtime
+Frontend bindings/thaw/internal/app/app.ts
+   ↓  Wails v3 runtime (@wailsio/runtime)
 *App method in internal/app/<domain>.go
    ↓  nil-check
 domain-package func(ctx, *snowflake.Client, …)
@@ -202,7 +202,7 @@ internal/snowflake.Client + result types in the domain package
 ```
 
 `sqleditor.Service` is bound alongside `App` (see `run.go`); its methods are
-imported from `wailsjs/go/sqleditor/Service`.
+imported from `bindings/thaw/internal/sqleditor/service`.
 
 ### Wails events emitted from `internal/app`
 
@@ -223,9 +223,9 @@ imported from `wailsjs/go/sqleditor/Service`.
 - **All files are `package app`.** Wails binds the whole method set regardless
   of which `.go` file a method lives in. New domain files just need to be placed
   in `internal/app/` with `package app`.
-- **`wails generate module`** must be run after changing any public method
-  signature or adding/removing methods, to keep `frontend/wailsjs/` in sync.
-- **Never edit `frontend/wailsjs/` by hand** — it is fully overwritten by the
+- **`wails3 generate bindings -ts -i -clean=true`** must be run after changing any public method
+  signature or adding/removing methods, to keep `frontend/bindings/` in sync.
+- **Never edit `frontend/bindings/` by hand** — it is fully overwritten by the
   generator.
 - **`app.go` only**: the `App` struct definition, lifecycle (`startup`/`shutdown`),
   `Connect`/`Disconnect`, and tab-session machinery must all stay in `app.go`.

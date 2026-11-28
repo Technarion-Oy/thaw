@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { Modal, Button, Tooltip, message } from "antd";
 import { InfoCircleOutlined, CopyOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { GetAppInfo } from "../../../wailsjs/go/app/App";
+import { GetAppInfo } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText, BrowserOpenURL } from "../../utils/wailsRuntime";
-import type { app } from "../../../wailsjs/go/models";
+import type * as app from "../../../bindings/thaw/internal/app/models";
 import ThirdPartyNoticesModal from "./ThirdPartyNoticesModal";
 
 interface Props { onClose: () => void; }

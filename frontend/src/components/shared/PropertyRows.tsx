@@ -9,7 +9,7 @@
 import { useState, useEffect } from "react";
 import { Button, Input, Select, Space, Typography, Tooltip, Popconfirm } from "antd";
 import { EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 
@@ -45,7 +45,7 @@ export function paramValue(params: snowflake.QueryResult | null, key: string): s
   const keyCi = cols.indexOf("key");
   const valCi = cols.indexOf("value");
   if (keyCi < 0 || valCi < 0) return "";
-  const row = (params.rows ?? []).find((r) => String(r[keyCi] ?? "").toLowerCase() === key.toLowerCase());
+  const row = (params.rows ?? []).find((r) => String(r?.[keyCi] ?? "").toLowerCase() === key.toLowerCase());
   return row ? String(row[valCi] ?? "") : "";
 }
 
@@ -202,7 +202,7 @@ export function SelectRow({ label, value, options, busy, onSet, onUnset }: {
 export function PickerRow({ label, value, load, busy, onSet, onUnset }: {
   label: string;
   value: string;
-  load: () => Promise<string[]>;
+  load: () => Promise<string[] | null>;
   busy: boolean;
   onSet: (name: string) => void;
   onUnset: () => void;

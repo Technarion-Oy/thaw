@@ -38,7 +38,7 @@ Closes #
 - [ ] `go test ./...`
 - [ ] `cd frontend && npx tsc --noEmit`
 - [ ] `cd frontend && npm test`
-- [ ] Manually verified in the running app (`wails dev`)
+- [ ] Manually verified in the running app (`wails3 dev`)
 
 ## Checklist
 

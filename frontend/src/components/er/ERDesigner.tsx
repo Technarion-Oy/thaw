@@ -4,10 +4,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { App as AntApp, Modal, Button, Input, Select, Checkbox, AutoComplete } from "antd";
 import { PlusOutlined, DeleteOutlined, CopyOutlined, LinkOutlined, SwapOutlined, UndoOutlined, RedoOutlined } from "@ant-design/icons";
-import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../wailsjs/go/app/App";
+import { ExecuteQuery, ListUserSchemas, UpdateERDesignerState, ClearERDesignerState } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
-import type { snowflake } from "../../../wailsjs/go/models";
-import { mcp } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as mcp from "../../../bindings/thaw/internal/mcp/models";
 // Lazy — pulls in @xyflow/@dagrejs (the canvas renderer) only when shown.
 const ERCanvas = lazy(() => import("./ERCanvas"));
 import { initFromERData, normalizeDataType, mergeAITablesIntoDesigner, changedTableIdsFromMerge } from "./erCanvasLayout";
@@ -207,7 +207,7 @@ function generateDiffSQL(
   const stmts: string[] = [];
 
   // ── Pure-create mode (no baseline tables) ────────────────────────────────────
-  if (!baseline || baseline.tables.length === 0) {
+  if (!baseline || (baseline.tables ?? []).length === 0) {
     for (const t of tables) {
       if (!t.schema || !t.name.trim() || t.columns.length === 0) continue;
       const s = createTableSQL(t);
@@ -223,8 +223,12 @@ function generateDiffSQL(
     string,
     { schema: string; name: string; columns: snowflake.ERColumn[] }
   >();
-  for (const t of baseline.tables) {
-    baselineMap.set(baselineTableKey(t.schema, t.name), t);
+  for (const t of baseline.tables ?? []) {
+    baselineMap.set(baselineTableKey(t.schema, t.name), {
+      schema: t.schema,
+      name: t.name,
+      columns: t.columns ?? [],
+    });
   }
 
   // Baseline FK lookup keyed by "SCHEMA.TABLE.COL"
@@ -510,7 +514,7 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
   const baselineCols = useMemo(() => {
     const m = new Map<string, Set<string>>();
     for (const bt of initialData?.tables ?? []) {
-      m.set(baselineTableKey(bt.schema, bt.name), new Set(bt.columns.map((c) => c.name.trim().toUpperCase())));
+      m.set(baselineTableKey(bt.schema, bt.name), new Set((bt.columns ?? []).map((c) => c.name.trim().toUpperCase())));
     }
     return m;
   }, [initialData]);
@@ -568,29 +572,25 @@ export default function ERDesigner({ database, initialData, mergedData, onClose,
 
   useEffect(() => {
     ListUserSchemas(database)
-      .then((s) => setSchemas(s.filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
+      .then((s) => setSchemas((s ?? []).filter((n) => n.toUpperCase() !== "INFORMATION_SCHEMA")))
       .catch(() => {});
   }, [database]);
 
   // ── Sync designer state to backend for MCP tools ──────────────────────────
 
   const pushState = useCallback((tbls: DesignerTable[]) => {
-    const out = tbls.map((t) =>
-      new mcp.ERDesignerTableOut({
-        schema: t.schema,
-        name: t.name,
-        columns: t.columns.map((c) =>
-          new mcp.ERDesignerColumnOut({
-            name: c.name,
-            dataType: c.dataType,
-            isPK: c.isPK,
-            notNull: c.notNull,
-            fkRef: c.fkRef || undefined,
-            defaultValue: c.defaultValue || undefined,
-          }),
-        ),
-      }),
-    );
+    const out: mcp.ERDesignerTableOut[] = tbls.map((t) => ({
+      schema: t.schema,
+      name: t.name,
+      columns: t.columns.map((c): mcp.ERDesignerColumnOut => ({
+        name: c.name,
+        dataType: c.dataType,
+        isPK: c.isPK,
+        notNull: c.notNull,
+        fkRef: c.fkRef || undefined,
+        defaultValue: c.defaultValue || undefined,
+      })),
+    }));
     UpdateERDesignerState(database, out).catch(() => {});
   }, [database]);
 

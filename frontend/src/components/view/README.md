@@ -28,7 +28,7 @@ driven from the sidebar context menu.
 - `GetObjectTagReferences("VIEW", db, schema, name, "")` — current tag applications (no-latency `INFORMATION_SCHEMA.TAG_REFERENCES`)
 - `AlterView(db, schema, name, clause)` — `RENAME TO …` / `SET SECURE` / `UNSET SECURE` / `SET COMMENT …` / `UNSET COMMENT` / `SET CHANGE_TRACKING = TRUE|FALSE` / `SET TAG …` / `UNSET TAG …`
 
-**`view.ViewConfig` type** from `wailsjs/go/models`: `name`, `caseSensitive`,
+**`view.ViewConfig` type** from `bindings/thaw/internal/*/models`: `name`, `caseSensitive`,
 `orReplace`, `secure`, `recursive`, `ifNotExists`, `copyGrants`, `comment`,
 `columns`, `tags` (`{name, value}[]`), `query`. The Create modal keeps form state
 in a local `VConfig` (the generated class carries a `convertValues` method that a

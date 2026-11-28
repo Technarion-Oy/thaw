@@ -16,7 +16,7 @@ Follow this checklist before committing, pushing, or opening a PR in Thaw. Full 
 
 ## 2. Generated-Artifact & Dependency Checks
 Run any applicable generators so CI guard tests stay green:
-- Changed `internal/app/` or bound `Service` signatures → `wails generate module`
+- Changed `internal/app/` or bound `Service` signatures → `wails3 generate bindings -ts -i -clean=true`
 - Added/moved/removed semantic-map annotated files → `go generate ./internal/architecture/`
 - Changed `internal/objectkind/kinds.go` → `go generate ./internal/objectkind/`
 - Changed `internal/snowflake/datatypes.go` → `go generate ./internal/snowflake/`

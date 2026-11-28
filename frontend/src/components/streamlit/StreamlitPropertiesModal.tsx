@@ -9,12 +9,12 @@ import {
 import {
   AppstoreOutlined, EditOutlined, CheckOutlined, CloseOutlined, CopyOutlined, LinkOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterStreamlit, GetSnowsightURL } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText, BrowserOpenURL } from "../../utils/wailsRuntime";
 import { quoteIdent, identToken } from "../shared/ObjectNameCaseControl";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 

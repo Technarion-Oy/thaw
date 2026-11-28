@@ -26,8 +26,8 @@ import {
   ListDirectory,
   ListUserSchemas,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
-import type { dbt } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as dbt from "../../../bindings/thaw/internal/dbt/models";
 
 const { Text } = Typography;
 
@@ -624,7 +624,7 @@ export default function DbtProjectModal({ onClose }: Props) {
     if (result) {
       // Group files by directory prefix
       const grouped: Record<string, string[]> = {};
-      for (const f of result.filesCreated) {
+      for (const f of result.filesCreated ?? []) {
         const parts = f.split("/");
         const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
         grouped[dir] = grouped[dir] ?? [];
@@ -637,17 +637,17 @@ export default function DbtProjectModal({ onClose }: Props) {
             type="success"
             showIcon
             message="Project created successfully"
-            description={`${result.filesCreated.length} file${result.filesCreated.length !== 1 ? "s" : ""} written to ${result.projectDir}`}
+            description={`${(result.filesCreated ?? []).length} file${(result.filesCreated ?? []).length !== 1 ? "s" : ""} written to ${result.projectDir}`}
           />
 
-          {result.warnings.length > 0 && (
+          {(result.warnings ?? []).length > 0 && (
             <Alert
               type="warning"
               showIcon
-              message={`${result.warnings.length} warning${result.warnings.length !== 1 ? "s" : ""}`}
+              message={`${(result.warnings ?? []).length} warning${(result.warnings ?? []).length !== 1 ? "s" : ""}`}
               description={
                 <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  {result.warnings.map((w, i) => (
+                  {(result.warnings ?? []).map((w, i) => (
                     <li key={i}>{w}</li>
                   ))}
                 </ul>

@@ -3,7 +3,7 @@
 // @thaw-domain: Schema Migration
 
 import { create } from "zustand";
-import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../wailsjs/go/app/App";
+import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../bindings/thaw/internal/app/app";
 import { useQueryStore } from "./queryStore";
 import { kindSupportsDdl } from "../utils/objectDdl";
 

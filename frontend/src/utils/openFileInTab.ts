@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { ReadFile } from "../../wailsjs/go/app/App";
+import { ReadFile } from "../../bindings/thaw/internal/app/app";
 import { useQueryStore } from "../store/queryStore";
 
 /**

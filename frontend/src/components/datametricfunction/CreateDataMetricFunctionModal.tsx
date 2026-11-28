@@ -7,12 +7,12 @@ import {
   Form, Input, Checkbox, Button, Space, Typography,
 } from "antd";
 import { FundOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateDataMetricFunctionSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateDataMetricFunctionSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { datametricfunction } from "../../../wailsjs/go/models";
+import type * as datametricfunction from "../../../bindings/thaw/internal/datametricfunction/models";
 
 const { Text } = Typography;
 

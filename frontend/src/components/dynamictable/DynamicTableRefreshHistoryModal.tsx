@@ -14,8 +14,8 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { GetDynamicTableRefreshHistory } from "../../../wailsjs/go/app/App";
-import type { dynamictable } from "../../../wailsjs/go/models";
+import { GetDynamicTableRefreshHistory } from "../../../bindings/thaw/internal/app/app";
+import type * as dynamictable from "../../../bindings/thaw/internal/dynamictable/models";
 import { formatTime, formatDuration } from "../../utils/formatTime";
 
 const { Text } = Typography;

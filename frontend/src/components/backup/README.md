@@ -15,8 +15,8 @@ Provides two components for managing Snowflake account-level backup governance: 
 
 ## Patterns & integration
 
-- **IPC**: All calls go through `wailsjs/go/app/App` to `internal/app/backup.go` delegators, which forward to `internal/backup` SQL builders and parsers.
-- **Backend types**: components consume `backup.BackupPolicyRow`, `backup.BackupSetRow`, and `backup.BackupRow` from `wailsjs/go/models`.
+- **IPC**: All calls go through `bindings/thaw/internal/app/app` to `internal/app/backup.go` delegators, which forward to `internal/backup` SQL builders and parsers.
+- **Backend types**: components consume `backup.BackupPolicyRow`, `backup.BackupSetRow`, and `backup.BackupRow` from `bindings/thaw/internal/*/models`.
 - **Feature flag**: both components are gated behind the `backupPoliciesAndSets` flag. `AccountPanel` (`../account/`) checks the flag before rendering `BackupPoliciesPanel`.
 - **Entry point**: `BackupPoliciesPanel` is rendered inside `AccountPanel` as a nested view; `BackupSetsModal` is opened from sidebar context menus on database and table nodes.
 

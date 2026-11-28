@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Button, Modal, Radio, Space, Typography, message } from "antd";
-import { GetNotebookPrefs, SaveNotebookPrefs } from "../../../wailsjs/go/app/App";
+import { GetNotebookPrefs, SaveNotebookPrefs } from "../../../bindings/thaw/internal/app/app";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
-import type { config } from "../../../wailsjs/go/models";
+import type * as config from "../../../bindings/thaw/internal/config/models";
 
 const { Text } = Typography;
 

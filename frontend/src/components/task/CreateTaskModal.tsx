@@ -6,7 +6,7 @@ import {
   Divider, InputNumber, Button, Tag,
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL } from "../../../wailsjs/go/app/App";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";

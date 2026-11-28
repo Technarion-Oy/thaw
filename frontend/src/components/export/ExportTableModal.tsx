@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Select, Switch, Input, Button, Space, Typography, Spin, Segmented } from "antd";
 import { DownloadOutlined, FolderOpenOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { ExportTableData, PickDirectory, ListObjects } from "../../../wailsjs/go/app/App";
+import { ExportTableData, PickDirectory, ListObjects } from "../../../bindings/thaw/internal/app/app";
 
 const { Text } = Typography;
 
@@ -69,7 +69,7 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
     setLoadingTables(true);
     ListObjects(db, schema)
       .then((objs) => {
-        const tables = objs
+        const tables = (objs ?? [])
           .filter((o) => o.kind?.toUpperCase() === "TABLE")
           .map((o) => o.name)
           .sort();

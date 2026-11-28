@@ -2,7 +2,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 export type RefreshMode = "AUTO" | "FULL" | "INCREMENTAL";
 
@@ -58,7 +58,8 @@ export function qualifiedOptionsFromResult(res: snowflake.QueryResult | null): s
   const nameI = cols.indexOf("name");
   const tableI = cols.indexOf("table_name");
   if (nameI < 0) return [];
-  return (res.rows ?? []).map((r) => {
+  return (res.rows ?? []).map((raw) => {
+    const r = raw ?? [];
     const nm = String(r[nameI]);
     const tbl = tableI >= 0 && r[tableI] != null ? String(r[tableI]) : "";
     return tbl ? `${tbl}.${nm}` : nm;

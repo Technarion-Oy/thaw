@@ -21,13 +21,13 @@ import { SearchOutlined, BarChartOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { GetQueryHistory, ListUsers, GetCurrentUser } from "../../../wailsjs/go/app/App";
+import { GetQueryHistory, ListUsers, GetCurrentUser } from "../../../bindings/thaw/internal/app/app";
 import QueryProfileModal from "../results/QueryProfileModal";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useQueryStore } from "../../store/queryStore";
 import { useSessionStore } from "../../store/sessionStore";
-import type { queryhistory } from "../../../wailsjs/go/models";
+import type * as queryhistory from "../../../bindings/thaw/internal/queryhistory/models";
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -463,7 +463,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
               }
               onDropdownVisibleChange={(open) => {
                 if (open && userList.length === 0) {
-                  ListUsers().then((users) => setUserList(users.map((u) => u.name))).catch(() => {});
+                  ListUsers().then((users) => setUserList((users ?? []).map((u) => u.name))).catch(() => {});
                 }
               }}
               style={{ width: 180 }}

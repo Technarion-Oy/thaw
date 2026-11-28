@@ -16,8 +16,8 @@ import type { DataNode } from "antd/es/tree";
 import {
   ListIntegrations,
   DropIntegration,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import CreateIntegrationModal from "./CreateIntegrationModal";
 import IntegrationPropertiesModal from "./IntegrationPropertiesModal";
 

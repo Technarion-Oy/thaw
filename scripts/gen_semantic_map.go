@@ -69,7 +69,7 @@ var domainOrder = []string{
 // staticFrontendPaths are frontend paths that cannot be annotated (e.g. auto-generated
 // code) but should still appear in the semantic map.
 var staticFrontendPaths = map[string][]string{
-	"Core IPC & App Lifecycle": {"frontend/wailsjs/"},
+	"Core IPC & App Lifecycle": {"frontend/bindings/"},
 }
 
 type domainData struct {
@@ -265,7 +265,7 @@ func scanTSFiles(root string, domains map[string]*domainData) error {
 			return nil // skip unreadable entries
 		}
 		if entry.IsDir() {
-			if entry.Name() == "wailsjs" {
+			if entry.Name() == "bindings" || entry.Name() == "wailsjs" {
 				return filepath.SkipDir // skip auto-generated bindings
 			}
 			return nil

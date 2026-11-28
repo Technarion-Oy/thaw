@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { AutoComplete, Form, Radio, Select } from "antd";
 import {
   ListImageRepositories, ListImagesInRepository, ListSecretsInAccount, ListSnapshots,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { rowsOf } from "../containerservices/computePools";
 import { getIn, parseImagePath, setIn, type Doc, type Path } from "./specDoc";
 import { Bool, Grid, Group, KV, List, Num, Sel, Str, Tags, useSpec } from "./specFields";

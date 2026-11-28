@@ -201,7 +201,7 @@ export default defineConfig({
   // Pre-bundle Monaco and its YAML plugin so Vite doesn't transform thousands
   // of ESM files on first request in dev mode.  We import the *slim* editor
   // (editor.api + editor.all) rather than the full "monaco-editor" barrel, so
-  // pre-bundling only the subpaths we actually use keeps `wails dev` cold start
+  // pre-bundling only the subpaths we actually use keeps `wails3 dev` cold start
   // fast and avoids a mid-session re-optimize page reload.
   optimizeDeps: {
     include: [
@@ -289,9 +289,9 @@ export default defineConfig({
 
   server: {
     watch: {
-      // Wails regenerates these files during dev-mode startup; ignore them so
-      // Vite doesn't trigger a full page reload when runtime.js is written.
-      ignored: ["**/wailsjs/**"],
+      // Wails regenerates bindings during dev-mode startup; ignore them so
+      // Vite doesn't trigger a full page reload when bindings are written.
+      ignored: ["**/bindings/**"],
     },
   },
 });

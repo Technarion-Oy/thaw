@@ -7,7 +7,7 @@ import {
   Form, Input, Select, Checkbox, Button, Space, Switch, Collapse,
 } from "antd";
 import { FunctionOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
-import { BuildCreateFunctionSql, ExecDDL } from "../../../wailsjs/go/app/App";
+import { BuildCreateFunctionSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";

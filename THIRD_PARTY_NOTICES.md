@@ -22,14 +22,14 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ## Contents
 
-- [Backend — Go modules](#backend--go-modules) (100)
-- [Frontend — npm packages](#frontend--npm-packages) (178)
+- [Backend — Go modules](#backend--go-modules) (96)
+- [Frontend — npm packages](#frontend--npm-packages) (179)
 
 ## Backend — Go modules
 
 | Package | Version | License |
 |---------|---------|---------|
-| `dario.cat/mergo` | v1.0.0 | BSD-3-Clause |
+| `dario.cat/mergo` | v1.0.2 | BSD-3-Clause |
 | `github.com/99designs/go-keychain` | v0.0.0-20191008050251-8e49817e8af4 | MIT |
 | `github.com/99designs/keyring` | v1.2.2 | MIT |
 | `github.com/apache/arrow-go/v18` | v18.4.0 | Apache-2.0 |
@@ -68,8 +68,10 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
 | `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
 | `github.com/go-git/go-git/v5` | v5.19.3 | Apache-2.0 |
+| `github.com/go-ole/go-ole` | v1.3.0 | MIT |
 | `github.com/goccy/go-json` | v0.10.5 | MIT |
 | `github.com/godbus/dbus` | v0.0.0-20190726142602-4481cbc300e2 | BSD-2-Clause |
+| `github.com/godbus/dbus/v5` | v5.2.2 | BSD-2-Clause |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT |
 | `github.com/golang/groupcache` | v0.0.0-20241129210726-2c02b8208cf8 | Apache-2.0 |
 | `github.com/google/flatbuffers` | v25.2.10+incompatible | Apache-2.0 |
@@ -78,12 +80,9 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/gsterjov/go-libsecret` | v0.0.0-20161001094733-a6f4afe4910c | MIT |
 | `github.com/jbenet/go-context` | v0.0.0-20150711004518-d14ea06fba99 | MIT |
 | `github.com/joho/godotenv` | v1.5.1 | MIT |
-| `github.com/kevinburke/ssh_config` | v1.2.0 | MIT |
+| `github.com/kevinburke/ssh_config` | v1.4.0 | MIT |
 | `github.com/klauspost/compress` | v1.20.2 | Apache-2.0 |
 | `github.com/klauspost/cpuid/v2` | v2.3.0 | MIT |
-| `github.com/leaanthony/go-ansi-parser` | v1.6.1 | MIT |
-| `github.com/leaanthony/slicer` | v1.6.0 | MIT |
-| `github.com/leaanthony/u` | v1.1.1 | MIT |
 | `github.com/mattn/go-ieproxy` | v0.0.12 | MIT |
 | `github.com/mattn/go-isatty` | v0.0.24 | MIT |
 | `github.com/Microsoft/go-winio` | v0.6.2 | MIT |
@@ -93,23 +92,20 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 | `github.com/pierrec/lz4/v4` | v4.1.22 | BSD-3-Clause |
 | `github.com/pjbgf/sha1cd` | v0.7.0 | Apache-2.0 |
 | `github.com/pkg/browser` | v0.0.0-20240102092130-5ac0b6a4141c | BSD-2-Clause |
-| `github.com/pkg/errors` | v0.9.1 | BSD-2-Clause |
-| `github.com/ProtonMail/go-crypto` | v1.1.6 | BSD-3-Clause |
+| `github.com/ProtonMail/go-crypto` | v1.3.0 | BSD-3-Clause |
 | `github.com/remyoudompheng/bigfft` | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause |
-| `github.com/rivo/uniseg` | v0.4.7 | MIT |
 | `github.com/rjeczalik/notify` | v0.9.3 | MIT |
 | `github.com/segmentio/asm` | v1.1.3 | MIT |
 | `github.com/segmentio/encoding` | v0.5.4 | MIT |
-| `github.com/sergi/go-diff` | v1.3.2-0.20230802210424-5b0b94c5c0d3 | MIT |
-| `github.com/skeema/knownhosts` | v1.3.1 | Apache-2.0 |
+| `github.com/sergi/go-diff` | v1.4.0 | MIT |
+| `github.com/skeema/knownhosts` | v1.3.2 | Apache-2.0 |
 | `github.com/snowflakedb/gosnowflake/v2` | v2.4.0 | Apache-2.0 |
 | `github.com/valyala/fastjson` | v1.6.10 | MIT |
-| `github.com/wailsapp/go-webview2` | v1.0.22 | MIT |
-| `github.com/wailsapp/wails/v2` | v2.17.1 | MIT |
+| `github.com/wailsapp/wails/v3` | v3.1.0 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/yosida95/uritemplate/v3` | v3.0.2 | BSD-3-Clause |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
-| `github.com/zeebo/xxh3` | v1.0.2 | BSD-2-Clause |
+| `github.com/zeebo/xxh3` | v1.1.0 | BSD-2-Clause |
 | `go.opentelemetry.io/otel` | v1.47.0 | Apache-2.0 |
 | `go.opentelemetry.io/otel/trace` | v1.47.0 | Apache-2.0 |
 | `golang.org/x/crypto` | v0.59.0 | BSD-3-Clause |
@@ -132,7 +128,7 @@ The Thaw application icon was generated with AppLaunchFlow (https://applaunchflo
 
 ### dario.cat/mergo
 
-- **Version:** v1.0.0
+- **Version:** v1.0.2
 - **License:** BSD-3-Clause
 
 ```
@@ -5373,6 +5369,35 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    limitations under the License.
 ```
 
+### github.com/go-ole/go-ole
+
+- **Version:** v1.3.0
+- **License:** MIT
+
+```
+The MIT License (MIT)
+
+Copyright © 2013-2017 Yasuhiro Matsumoto, <mattn.jp@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### github.com/goccy/go-json
 
 - **Version:** v0.10.5
@@ -5405,6 +5430,39 @@ SOFTWARE.
 ### github.com/godbus/dbus
 
 - **Version:** v0.0.0-20190726142602-4481cbc300e2
+- **License:** BSD-2-Clause
+
+```
+Copyright (c) 2013, Georg Reinke (<guelfey at gmail dot com>), Google
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### github.com/godbus/dbus/v5
+
+- **Version:** v5.2.2
 - **License:** BSD-2-Clause
 
 ```
@@ -6014,7 +6072,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### github.com/kevinburke/ssh_config
 
-- **Version:** v1.2.0
+- **Version:** v1.4.0
 - **License:** MIT
 
 ```
@@ -6390,93 +6448,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 The MIT License (MIT)
 
 Copyright (c) 2015 Klaus Post
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### github.com/leaanthony/go-ansi-parser
-
-- **Version:** v1.6.1
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2021-Present Lea Anthony
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### github.com/leaanthony/slicer
-
-- **Version:** v1.6.0
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2019 Lea Anthony
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### github.com/leaanthony/u
-
-- **Version:** v1.1.1
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2023-Present Lea Anthony
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -7131,40 +7102,9 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### github.com/pkg/errors
-
-- **Version:** v0.9.1
-- **License:** BSD-2-Clause
-
-```
-Copyright (c) 2015, Dave Cheney <dave@cheney.net>
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-* Redistributions of source code must retain the above copyright notice, this
-  list of conditions and the following disclaimer.
-
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
-
 ### github.com/ProtonMail/go-crypto
 
-- **Version:** v1.1.6
+- **Version:** v1.3.0
 - **License:** BSD-3-Clause
 
 ```
@@ -7230,35 +7170,6 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
-
-### github.com/rivo/uniseg
-
-- **Version:** v0.4.7
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2019 Oliver Kuederle
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ```
 
 ### github.com/rjeczalik/notify
@@ -7350,7 +7261,7 @@ SOFTWARE.
 
 ### github.com/sergi/go-diff
 
-- **Version:** v1.3.2-0.20230802210424-5b0b94c5c0d3
+- **Version:** v1.4.0
 - **License:** MIT
 
 ```
@@ -7377,7 +7288,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### github.com/skeema/knownhosts
 
-- **Version:** v1.3.1
+- **Version:** v1.3.2
 - **License:** Apache-2.0
 
 ```
@@ -7840,39 +7751,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### github.com/wailsapp/go-webview2
+### github.com/wailsapp/wails/v3
 
-- **Version:** v1.0.22
-- **License:** MIT
-
-```
-MIT License
-
-Copyright (c) 2020 John Chadwick
-Some portions Copyright (c) 2017 Serge Zaitsev
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### github.com/wailsapp/wails/v2
-
-- **Version:** v2.17.1
+- **Version:** v3.1.0
 - **License:** MIT
 
 ```
@@ -8172,14 +8053,17 @@ SOFTWARE.
 
 ### github.com/zeebo/xxh3
 
-- **Version:** v1.0.2
+- **Version:** v1.1.0
 - **License:** BSD-2-Clause
 
 ```
-xxHash Library
+BSD 2-Clause License
+
 Copyright (c) 2012-2014, Yann Collet
 Copyright (c) 2019, Jeff Wendling
 All rights reserved.
+
+xxHash Library
 
 Redistribution and use in source and binary forms, with or without modification,
 are permitted provided that the following conditions are met:
@@ -9357,6 +9241,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | `@types/trusted-types` | 2.0.7 | MIT |
 | `@types/use-sync-external-store` | 0.0.6 | MIT |
 | `@vscode/l10n` | 0.0.18 | MIT |
+| `@wailsio/runtime` | 3.1.0 | MIT |
 | `@xterm/addon-fit` | 0.11.0 | MIT |
 | `@xterm/xterm` | 6.0.0 | MIT |
 | `@xyflow/react` | 13.0.2 | MIT |
@@ -11798,6 +11683,13 @@ SOFTWARE.
 ### @vscode/l10n
 
 - **Version:** 0.0.18
+- **License:** MIT
+
+_No license file was found in the distributed package. Refer to the project's repository for its license terms._
+
+### @wailsio/runtime
+
+- **Version:** 3.1.0
 - **License:** MIT
 
 _No license file was found in the distributed package. Refer to the project's repository for its license terms._

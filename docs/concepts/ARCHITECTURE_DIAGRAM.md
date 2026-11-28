@@ -209,7 +209,7 @@ Use the `docs:` commit prefix — this does not trigger a release.
 
 | ID | Connection |
 |----|-----------|
-| `e1` | Frontend layer → `br-wailsjs` (IPC calls) |
+| `e1` | Frontend layer → `br-wailsjs` (Wails v3 `frontend/bindings/` IPC calls) |
 | `e2` | `br-wailsjs` → `br-ipc` |
 | `e3` | `br-events` → Frontend layer (Wails events, dashed) |
 | `e4` | `br-ipc` → `br-events` |

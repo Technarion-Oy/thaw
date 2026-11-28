@@ -30,4 +30,4 @@ Follow these invariants when modifying Thaw's SQL tokenizer, grammar engine, or 
 - Missing catalog data must **never** produce false positives (`hasSchemaDataForDB`, `FetchedObjectSchemas`, `isAlwaysPresentSchema`).
 - `DiagMarker.Severity` follows Monaco constants: `8` = Error, `4` = Warning.
 - `GetAutocompleteContextFull` is the single autocomplete IPC entry point on `sqleditor.Service`; keep helper steps as package-level functions.
-- After editing any method signature on `sqleditor.Service`, run `wails generate module`.
+- After editing any method signature on `sqleditor.Service`, run `wails3 generate bindings -ts -i -clean=true`.

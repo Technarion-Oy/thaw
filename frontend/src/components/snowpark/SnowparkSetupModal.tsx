@@ -40,8 +40,8 @@ import {
   PickFreezeOutputFile,
   FreezeRequirements,
   PickDirectory,
-} from "../../../wailsjs/go/app/App";
-import type { snowpark } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowpark from "../../../bindings/thaw/internal/snowpark/models";
 import { EventsOn } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 
@@ -70,7 +70,8 @@ function makeStepState(): StepState {
   return { status: "idle", log: [], error: null };
 }
 
-// Wails rejects a failing IPC call with a plain string carrying the Go error.
+// Wails v3 rejects a failing IPC call with a RuntimeError carrying the Go error
+// message (wailsRuntime.ts overrides toString() to return the clean message).
 // Backend pip errors are two blocks — "install from requirements.txt failed: …"
 // then a blank line and the explanation — so the text must survive intact.
 function errText(e: unknown): string {
@@ -218,7 +219,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       setCondaPythonOptions(cfg.condaPythonVersions || []);
       setConfigLoaded(true);
     });
-    ListSystemPythons().then(setAvailablePythons);
+    ListSystemPythons().then((pythons) => setAvailablePythons(pythons ?? []));
     // If the environment is already fully set up, pre-mark all steps done
     // and go straight to the package manager. If partially configured (has
     // venv but missing packages), auto-enter "use existing" mode.
@@ -342,7 +343,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setPackagesLoading(true);
     setPackagesError(null);
     ListEnvPackages()
-      .then((pkgs) => { setPackages(pkgs); setPackagesError(null); })
+      .then((pkgs) => { setPackages(pkgs ?? []); setPackagesError(null); })
       .catch((e) => { setPackages([]); setPackagesError(String(e)); })
       .finally(() => setPackagesLoading(false));
   }, [current]);
@@ -406,7 +407,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   // watching, so a stale package table can't be mistaken for fresh data.
   const refreshPackages = async () => {
     try {
-      setPackages(await ListEnvPackages());
+      setPackages((await ListEnvPackages()) ?? []);
       setPackagesError(null);
     } catch (e) {
       setPackagesError(String(e));

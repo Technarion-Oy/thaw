@@ -19,7 +19,7 @@
   "commitMessagePrefix": "chore:",
   "commitBodyTable": true,
   "description": [
-    "Renovate configuration for Thaw (Wails v2: Go backend + React/TS frontend).",
+    "Renovate configuration for Thaw (Wails v3: Go backend + React/TS frontend).",
     "The schedule is a whole day, not a morning window: GitHub starts the twice-daily cron in",
     "renovate.yml 4-6h late (~10:30-11:40 Helsinki), which never matched `before 6am on monday`,",
     "so no routine update ever left the dashboard's Awaiting Schedule list.",
@@ -68,16 +68,17 @@
     },
     {
       "description": [
-        "The Wails CLI pinned in `go install .../cmd/wails@vX.Y.Z` steps (build-check, build,",
+        "The Wails v3 CLI pinned in `go install .../cmd/wails3@vX.Y.Z` steps (build-check, build,",
         "manual-release, macos-sign-test). Same depName as the go.mod requirement, so the Wails",
-        "packageRule groups all five into one PR — the CLI and the library must not skew apart."
+        "packageRule groups the Go module, the four CLI pins, and @wailsio/runtime into one PR —",
+        "the CLI, Go library, and JS runtime must not skew apart."
       ],
       "customType": "regex",
       "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
       "matchStrings": [
-        "go install github\\.com/wailsapp/wails/v2/cmd/wails@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+        "go install github\\.com/wailsapp/wails/v3/cmd/wails3@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
-      "depNameTemplate": "github.com/wailsapp/wails/v2",
+      "depNameTemplate": "github.com/wailsapp/wails/v3",
       "datasourceTemplate": "go"
     },
     {
@@ -121,13 +122,12 @@
     },
     {
       "description": [
-        "Wails upgrades need `wails generate module` plus a build check on macOS, Windows and Linux — keep them isolated. Covers both managers, so the go.mod requirement and the four pinned `go install .../cmd/wails@` CLI versions move in the same PR.",
-        "Pinned to v2 minors/patches until the Wails v3 cutover (#23) lands — v3 is a port (different module path, CLI, API, and build system), not a routine major bump (#1044)."
+        "Wails v3 upgrades need `wails3 generate bindings -ts -i -clean=true` plus a build check on macOS, Windows and Linux — keep them isolated. Covers gomod, npm, and custom.regex so the go.mod requirement, @wailsio/runtime, and the four pinned `go install .../cmd/wails3@` CLI versions move in lockstep in the same PR. Wails v3 ships frequent minor releases, so dashboard approval lets us review release notes before taking each bump."
       ],
-      "matchPackageNames": ["github.com/wailsapp/**"],
-      "allowedVersions": "<3.0.0",
+      "matchPackageNames": ["github.com/wailsapp/**", "@wailsio/runtime"],
       "groupName": "Wails",
-      "addLabels": ["wails"]
+      "addLabels": ["wails"],
+      "dependencyDashboardApproval": true
     },
     {
       "description": "The Snowflake driver is the core runtime dependency — keep it alone so it can be run against a live account (integration tests).",

@@ -12,8 +12,8 @@ import {
 import {
   GetObjectProperties, ListIntegrations, AlterStage,
   ListFileFormats,
-} from "../../../wailsjs/go/app/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
 
@@ -210,8 +210,8 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
 
   useEffect(() => {
     load();
-    ListIntegrations("STORAGE").then(setIntegrations).catch(() => {});
-    ListFileFormats(db, schema).then(setFileFormats).catch(() => {});
+    ListIntegrations("STORAGE").then((rows) => setIntegrations(rows ?? [])).catch(() => {});
+    ListFileFormats(db, schema).then((rows) => setFileFormats(rows ?? [])).catch(() => {});
   }, [load, db, schema]);
 
   const get = (key: string): string => {

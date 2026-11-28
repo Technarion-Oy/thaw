@@ -5,13 +5,14 @@ import {
   Form, Input, Select, Radio, Switch, DatePicker,
 } from "antd";
 import { KeyOutlined } from "@ant-design/icons";
-import { ListSecurityIntegrations, ExecDDL, BuildCreateSecretSql } from "../../../wailsjs/go/app/App";
+import { ListSecurityIntegrations, ExecDDL, BuildCreateSecretSql } from "../../../bindings/thaw/internal/app/app";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import CreateModalShell from "../shared/CreateModalShell";
 import NameWithReplaceOptions from "../shared/NameWithReplaceOptions";
 import SqlPreview from "../shared/SqlPreview";
 import { useQuotedIdentifiers, useSqlPreview, useCreateSubmit } from "../shared/createModalHooks";
-import type { snowflake, secret } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
+import type * as secret from "../../../bindings/thaw/internal/secret/models";
 import dayjs from "dayjs";
 
 interface Props {

@@ -4,8 +4,8 @@
 import { useState } from "react";
 import { Button, Checkbox, Form, Input, InputNumber, Select } from "antd";
 import { ClusterOutlined } from "@ant-design/icons";
-import { BuildCreateComputePoolSql, ExecDDL } from "../../../wailsjs/go/app/App";
-import { computepool } from "../../../wailsjs/go/models";
+import { BuildCreateComputePoolSql, ExecDDL } from "../../../bindings/thaw/internal/app/app";
+import type * as computepool from "../../../bindings/thaw/internal/computepool/models";
 import CreateModalShell from "../shared/CreateModalShell";
 import SqlPreview from "../shared/SqlPreview";
 import TagInput, { type TagItem } from "../shared/TagInput";
@@ -36,7 +36,7 @@ export default function CreateComputePoolModal({ families, familiesLoading, fami
   const set = <K extends keyof typeof cfg>(k: K, v: (typeof cfg)[K]) => setCfg((p) => ({ ...p, [k]: v }));
 
   const preview = useSqlPreview(
-    () => BuildCreateComputePoolSql(computepool.ComputePoolConfig.createFrom({ ...cfg, tags })),
+    () => BuildCreateComputePoolSql({ ...cfg, tags } as computepool.ComputePoolConfig),
     [cfg, tags],
     { blankOnError: true },
   );

@@ -6,7 +6,7 @@ import {
   Divider, InputNumber, Tooltip,
 } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
-import type { fileformat } from "../../../wailsjs/go/models";
+import type * as fileformat from "../../../bindings/thaw/internal/fileformat/models";
 
 export const BASE_DEFAULTS: fileformat.FileFormatConfig = {
   name: "",

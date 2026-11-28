@@ -26,7 +26,7 @@ Comment. Rename / Drop are driven from the sidebar context menu via
 - `GetObjectProperties(db, schema, "SEQUENCE", name)` — properties panel data
 - `AlterSequence(db, schema, name, clause)` — `SET COMMENT …` / `UNSET COMMENT`
 
-**`sequence.SequenceConfig` type** from `wailsjs/go/models`: `name`,
+**`sequence.SequenceConfig` type** from `bindings/thaw/internal/*/models`: `name`,
 `caseSensitive`, `orReplace`, `ifNotExists`, `start`, `increment`, `ordered`
 (`""` / `"ORDER"` / `"NOORDER"`), `comment`. The Create modal keeps form state in
 a local `SeqConfig` and casts to the generated type only at the IPC boundary.

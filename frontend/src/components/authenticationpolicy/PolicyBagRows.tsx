@@ -21,8 +21,8 @@ import {
   BuildClientPolicyValue, ParseClientPolicy,
   ReconcileAllExclusiveList, AuthenticationPolicyClientDrivers,
   AuthenticationPolicyClientDriverVersions, AuthenticationPolicyBagOptions,
-} from "../../../wailsjs/go/app/App";
-import type { authenticationpolicy } from "../../../wailsjs/go/models";
+} from "../../../bindings/thaw/internal/app/app";
+import type * as authenticationpolicy from "../../../bindings/thaw/internal/authenticationpolicy/models";
 
 const { Text } = Typography;
 

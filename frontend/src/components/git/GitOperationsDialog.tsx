@@ -15,7 +15,7 @@ import {
   GlobalOutlined, CopyOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
-import { PickDirectory, GitInitWithRemote, GitCancelOAuth } from "../../../wailsjs/go/app/App";
+import { PickDirectory, GitInitWithRemote, GitCancelOAuth } from "../../../bindings/thaw/internal/app/app";
 import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../../utils/wailsRuntime";
 import ChangesView from "./ChangesView";
 

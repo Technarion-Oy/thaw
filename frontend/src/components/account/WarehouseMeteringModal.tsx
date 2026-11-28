@@ -27,9 +27,9 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { GetWarehouseMeteringHistory } from "../../../wailsjs/go/app/App";
+import { GetWarehouseMeteringHistory } from "../../../bindings/thaw/internal/app/app";
 import { useSessionStore } from "../../store/sessionStore";
-import type { warehouse } from "../../../wailsjs/go/models";
+import type * as warehouse from "../../../bindings/thaw/internal/warehouse/models";
 
 const { RangePicker } = DatePicker;
 

@@ -6,9 +6,9 @@ import { useShallow } from "zustand/react/shallow";
 import { App as AntApp, Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import { BrowserOpenURL, ClipboardSetText, EventsOn } from "../utils/wailsRuntime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, GetAccountParameters, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../wailsjs/go/app/App";
-import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
-import type { snowflake } from "../../wailsjs/go/models";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, PickAnyFile, ReadFile, GetSessionParameters, GetSessionVariables, GetAccountParameters, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession, SetQueryLogEnabled, GetFeatureFlags, SaveFeatureFlags, StartFileWatcher, StopFileWatcher } from "../../bindings/thaw/internal/app/app";
+import { GetSqlStatementRanges } from "../../bindings/thaw/internal/sqleditor/service";
+import type * as snowflake from "../../bindings/thaw/internal/snowflake/models";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import SqlEditor, { type DiagMarker, pendingMcpMarkers, clearMetadataCaches } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -258,8 +258,10 @@ export default function QueryPage() {
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
   useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
-  // Load current user/region/url on mount.
+  // Load current user/region/url on mount only if already connected (the
+  // connect-transition effect below loads them once a connection opens).
   useEffect(() => {
+    if (!useConnectionStore.getState().isConnected) return;
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
     GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
@@ -267,11 +269,13 @@ export default function QueryPage() {
 
   // When the active tab changes (including on mount), immediately reflect its
   // context in the toolbar: setActiveTab gives instant feedback from cache,
-  // loadContext fetches fresh state from Go.
+  // loadContext fetches fresh state from Go when connected.
   useEffect(() => {
     const store = useSessionStore.getState();
     store.setActiveTab(activeTabId);
-    store.loadContext(activeTabId);
+    if (useConnectionStore.getState().isConnected) {
+      store.loadContext(activeTabId);
+    }
     setGridSearchOpen(false);
     useGridStore.getState().resetNavigation();
   }, [activeTabId]);
@@ -537,7 +541,7 @@ export default function QueryPage() {
       const offset = sql.indexOf(selectedSql);
       if (offset >= 0) {
         const linesBefore = sql.slice(0, offset).split("\n").length; // 1-based
-        const fullRanges = await GetSqlStatementRanges(sql);
+        const fullRanges = (await GetSqlStatementRanges(sql)) ?? [];
         const baseIdx = fullRanges.findIndex((r) => r.startLine >= linesBefore);
         selectionBaseStmtIdxRef.current = baseIdx >= 0 ? baseIdx : 0;
       } else {
@@ -562,7 +566,14 @@ export default function QueryPage() {
       if (qid) flushSync(() => setRunningQueryId(qid));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       // Phase 2: block until results are ready.
-      const res = await WaitForQueryResult(runTabId);
+      const rawRes = await WaitForQueryResult(runTabId);
+      const res = {
+        columns: rawRes?.columns ?? [],
+        rows: (rawRes?.rows ?? []).map((r) => r ?? []),
+        rowsAffected: rawRes?.rowsAffected ?? 0,
+        queryID: rawRes?.queryID,
+        truncated: rawRes?.truncated,
+      };
       setResult(res);
       const newId = crypto.randomUUID();
       updateTabHistory(runTabId, (prev) => {

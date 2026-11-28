@@ -12,7 +12,7 @@ import { parseAllowedValues } from "../tag/allowedValues";
 import { ActionRow } from "../shared/PropertyRows";
 import * as dtc from "../dynamictable/dynamicTableClauses";
 import { withMaskingOptions } from "../common/tableClauses";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import {
   AlterTable,
   ExecDDL,
@@ -33,7 +33,7 @@ import {
   BuildDropColumnDefaultSql,
   BuildSetColumnMaskingPolicySql,
   BuildUnsetColumnMaskingPolicySql,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 
 // A schema-qualified object (masking policy or tag) parsed from a SHOW … result.
 // allowedValues is populated from SHOW TAGS' allowed_values column (empty for
@@ -42,14 +42,15 @@ interface QualifiedObject { db: string; schema: string; name: string; fqn: strin
 
 // SHOW MASKING POLICIES / SHOW TAGS share the name/database_name/schema_name
 // columns; pull the qualified object list out by column name.
-function parseObjectList(res: snowflake.QueryResult): QualifiedObject[] {
-  const cols = res.columns ?? [];
+function parseObjectList(res: snowflake.QueryResult | null): QualifiedObject[] {
+  const cols = res?.columns ?? [];
   const iName = cols.indexOf("name");
   const iDb = cols.indexOf("database_name");
   const iSc = cols.indexOf("schema_name");
   const iAllowed = cols.indexOf("allowed_values");
   if (iName < 0) return [];
-  return (res.rows ?? []).map((r) => {
+  return (res?.rows ?? []).map((raw) => {
+    const r = raw ?? [];
     const name = String(r[iName]);
     const db = iDb >= 0 && r[iDb] != null ? String(r[iDb]) : "";
     const schema = iSc >= 0 && r[iSc] != null ? String(r[iSc]) : "";
@@ -135,7 +136,7 @@ export default function ColumnPropertiesModal({ db, schema, table, column, paren
   const loadTags = () => {
     GetColumnTagReferences(parentKind, db, schema, table)
       .then((res) => {
-        const rows = res.rows ?? [];
+        const rows = (res?.rows ?? []).map((r) => r ?? []);
         setTags(rows
           .filter((r) => String(r[0]).toLowerCase() === column.toLowerCase())
           .map((r) => ({ db: String(r[1]), schema: String(r[2]), name: String(r[3]), value: r[4] == null ? "" : String(r[4]) })));

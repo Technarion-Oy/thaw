@@ -27,7 +27,7 @@ import {
   GetWarehouseDDL,
   ExportAccountObjectsDDL,
   GetObjectProperties,
-} from "../../../wailsjs/go/app/App";
+} from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
@@ -41,7 +41,7 @@ import QueryHistoryModal from "./QueryHistoryModal";
 const WarehouseMeteringModal = lazy(() => import("./WarehouseMeteringModal"));
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";

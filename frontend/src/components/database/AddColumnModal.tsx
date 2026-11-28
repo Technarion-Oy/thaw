@@ -6,8 +6,9 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListUserSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/app/App";
-import { column, snowflake } from "../../../wailsjs/go/models";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListUserSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../bindings/thaw/internal/app/app";
+import type * as column from "../../../bindings/thaw/internal/column/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 import TagInput from "../shared/TagInput";

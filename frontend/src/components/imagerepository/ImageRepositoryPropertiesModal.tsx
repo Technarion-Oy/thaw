@@ -9,11 +9,11 @@ import {
 import {
   ContainerOutlined, EditOutlined, CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterImageRepository, ListImagesInRepository } from "../../../wailsjs/go/app/App";
+import { GetObjectProperties, AlterImageRepository, ListImagesInRepository } from "../../../bindings/thaw/internal/app/app";
 import { ClipboardSetText } from "../../utils/wailsRuntime";
 import TagsRow from "../shared/TagsRow";
 import { useObjectTags } from "../shared/useObjectTags";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type * as snowflake from "../../../bindings/thaw/internal/snowflake/models";
 import RegistryCommands from "./RegistryCommands";
 
 const { Text } = Typography;
@@ -213,7 +213,7 @@ export default function ImageRepositoryPropertiesModal({ db, schema, name, onClo
   }));
   const imageData = (images?.rows ?? []).map((row, ri) => {
     const obj: Record<string, unknown> = { key: ri };
-    row.forEach((cell, ci) => { obj[String(ci)] = cell; });
+    (row ?? []).forEach((cell, ci) => { obj[String(ci)] = cell; });
     return obj;
   });
 

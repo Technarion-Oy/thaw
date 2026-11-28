@@ -19,7 +19,7 @@ import MCPSessionsModal from "./components/settings/MCPSessionsModal";
 import AboutModal from "./components/help/AboutModal";
 import UpdateNotification from "./components/help/UpdateNotification";
 import LicenseAgreement from "./components/setup/LicenseAgreement";
-import { IsConnected, IsLicenseAccepted, SubmitMFACode } from "../wailsjs/go/app/App";
+import { IsConnected, IsLicenseAccepted, SubmitMFACode } from "../bindings/thaw/internal/app/app";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "./utils/wailsRuntime";
 import { useMonaco } from "@monaco-editor/react";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
