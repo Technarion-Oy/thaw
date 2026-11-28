@@ -161,7 +161,7 @@ Insert new node snippets **before** the closing `</root>` tag. Insert new edge s
 
 ### 7. Commit and PR
 
-Follow the project branching convention from `CLAUDE.md`:
+Follow the project branching convention from [`CONTRIBUTING.md`](../../CONTRIBUTING.md):
 
 ```bash
 git checkout -b docs/update-architecture-diagram

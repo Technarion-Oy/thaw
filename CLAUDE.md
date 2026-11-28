@@ -86,6 +86,8 @@ thaw/
 │   ├── objectkind/      # canonical object-kind registry (KIND, SHOW plural, label, order,
 │   │                    #   GET_DDL type) — every consumer derives from it; generates
 │   │                    #   frontend/src/generated/objectKinds.ts. See its README.
+│   ├── sqltok/          # single-pass Snowflake SQL tokenizer & splitter (leaf pkg)
+│   ├── sqlgrammar/      # recursive-descent Snowflake SQL grammar engine (imports only sqltok)
 │   ├── sqleditor/       # SQL diagnostics & JOIN engine (its own Wails-bound Service)
 │   ├── <domain>/        # SQL builders + parsers per object type (backup, table, column, pipe,
 │   │                    #   stage, secret, warehouse, tasks, objects, queryhistory, dbtproject, …)
@@ -104,8 +106,8 @@ thaw/
 
 ## Documentation is part of every change
 
-When you add, remove, or modify a user-facing feature, internal package, frontend component/store, or architectural pattern, update the relevant docs **in the same commit/PR**: `README.md`, `FEATURES.md`, `CLAUDE.md`, `GEMINI.md`, the affected `internal/<pkg>/README.md` or `frontend/src/<dir>/README.md`, and any `docs/concepts/*.md` it touches. The generated reference under `docs/backend/` and `docs/frontend/` is produced by `make docs` — never hand-edit it. Do not defer docs to a follow-up PR.
+When you add, remove, or modify a user-facing feature, internal package, frontend component/store, or architectural pattern, update the relevant docs **in the same commit/PR**: `README.md`, `FEATURES.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/` (if an Antigravity rule or skill changed), the affected `internal/<pkg>/README.md` or `frontend/src/<dir>/README.md`, and any `docs/concepts/*.md` it touches. The generated reference under `docs/backend/` and `docs/frontend/` is produced by `make docs` — never hand-edit it. Do not defer docs to a follow-up PR.
 
 ## Tech stack
 
-Wails v2.11 · Go 1.26 · gosnowflake v2.0 · React 18 + TypeScript 5.6 · Vite 6 · Ant Design 5 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js.
+Wails v2.17 · Go 1.26 (toolchain 1.27) · gosnowflake v2.4 · React 19 + TypeScript 7 · Vite 8 · Ant Design 6 · Monaco · TanStack Table v9 · Zustand 5 · xterm.js 6.
