@@ -120,7 +120,7 @@ thaw/
 
 A per-package `README.md` documents the types, builders, parsers, and gotchas of every
 `internal/<pkg>/` and `frontend/src/<dir>/`. The authoritative, machine-checked domain map
-is `internal/architecture/semantic_map.go` (generated — see [CLAUDE.md](../CLAUDE.md)).
+is `internal/architecture/semantic_map.go` (generated — see [CLAUDE.md](../CLAUDE.md) / [GEMINI.md](../GEMINI.md)).
 
 ---
 

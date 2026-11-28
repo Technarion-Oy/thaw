@@ -65,7 +65,7 @@ A typical "add a backend feature surfaced in the UI" loop:
 
 - **Branch** off `main` with a `feat/`/`fix/`/`chore/` prefix; **never** amend, rebase, or force-push.
 - **Commit** with Conventional Commits (`feat`/`fix`/`perf` trigger releases).
-- **Docs travel with code** — update README/FEATURES/CLAUDE/GEMINI/module-README/concepts as part of the change.
+- **Docs travel with code** — update README/FEATURES/CLAUDE/GEMINI/.agents/module-README/concepts as part of the change.
 - **Never edit** `frontend/wailsjs/` or `internal/architecture/semantic_map.go` by hand (both generated).
 
 Full workflow rules: [`CONTRIBUTING.md`](../../CONTRIBUTING.md). Test details: [Testing](testing.md).

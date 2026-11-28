@@ -85,8 +85,9 @@ Keep PR titles short (< 70 chars); put detail in the body. Review the full diff 
 |------|--------------------------|
 | `README.md` | feature descriptions, project-structure tree, SQL validation list, keyboard shortcuts |
 | `FEATURES.md` | the feature list; if toggleable, also "Feasible Optional Features" |
-| `CLAUDE.md` | architecture tree, Zustand store list, key patterns, critical gotchas |
-| `GEMINI.md` | architecture overview, engineering standards, common workflows |
+| `CLAUDE.md` | Claude Code guide: architecture tree, build/test commands, key references |
+| `GEMINI.md` | Google Antigravity & Gemini guide (keep under 24 KB rule cap): architecture tree, invariants, commands |
+| `.agents/` | Google Antigravity glob-scoped workspace rules (`.agents/rules/`) and on-demand skills (`.agents/skills/`) |
 | `internal/<pkg>/README.md` | a backend package's responsibility, types, or gotchas |
 | `frontend/src/<dir>/README.md` | a frontend folder's components/state |
 | `docs/concepts/*.md` | a cross-cutting pattern, the architecture, or onboarding flow |
