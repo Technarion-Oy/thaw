@@ -106,6 +106,7 @@ func buildOrLocateE2EBinary(t *testing.T) string {
 func isolatedEnv(stateDir, authToken string) []string {
 	overrides := map[string]string{
 		"HOME":                  stateDir,
+		"USERPROFILE":           stateDir,
 		"XDG_CONFIG_HOME":       filepath.Join(stateDir, "xdg-config"),
 		"XDG_DATA_HOME":         filepath.Join(stateDir, "xdg-data"),
 		"XDG_STATE_HOME":        filepath.Join(stateDir, "xdg-state"),
@@ -186,7 +187,6 @@ type wailsE2EInstance struct {
 
 	waitOnce sync.Once
 	waitCh   chan error
-	waitErr  error
 }
 
 // launchThaw starts binaryPath using stateDir as its isolated profile root,
@@ -221,9 +221,7 @@ func launchThaw(t *testing.T, binaryPath, stateDir string) *wailsE2EInstance {
 		waitCh:     make(chan error, 1),
 	}
 	go func() {
-		err := cmd.Wait()
-		inst.waitErr = err
-		inst.waitCh <- err
+		inst.waitCh <- cmd.Wait()
 		close(inst.waitCh)
 	}()
 
@@ -547,37 +545,47 @@ type triggerMenuOutcome struct {
 // triggerNativeMenu asks the in-app E2E menu driver (compiled only under
 // `mcp && !production`) to look up label on the live application menu, verify
 // its enabled state, and invoke its registered OnClick callback.
+//
+// Because wait_for_event and emit_event travel over separate HTTP calls, a busy
+// runner can occasionally deliver emit_event before wait_for_event registers
+// its listener. Retrying on a short per-attempt timeout avoids timing flakes.
 func (w *wailsE2EInstance) triggerNativeMenu(label string) (triggerMenuOutcome, error) {
 	type waitResult struct {
 		Name string             `json:"name"`
 		Data triggerMenuOutcome `json:"data"`
 	}
-	done := make(chan struct {
-		res waitResult
-		err error
-	}, 1)
 
-	go func() {
-		var r waitResult
-		err := w.waitForEvent("wails-e2e:trigger-menu-result", 10*time.Second, &r)
-		done <- struct {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		done := make(chan struct {
 			res waitResult
 			err error
-		}{res: r, err: err}
-	}()
+		}, 1)
 
-	// Allow wait_for_event to register its listener on Wails's event bus before
-	// emitting the trigger event.
-	time.Sleep(200 * time.Millisecond)
-	if err := w.emitEvent("wails-e2e:trigger-menu", label); err != nil {
-		return triggerMenuOutcome{}, fmt.Errorf("emit trigger-menu(%q): %w", label, err)
-	}
+		go func() {
+			var r waitResult
+			err := w.waitForEvent("wails-e2e:trigger-menu-result", 3*time.Second, &r)
+			done <- struct {
+				res waitResult
+				err error
+			}{res: r, err: err}
+		}()
 
-	got := <-done
-	if got.err != nil {
-		return triggerMenuOutcome{}, fmt.Errorf("wait trigger-menu-result(%q): %w", label, got.err)
+		// Give wait_for_event a head start to register its listener on Wails's
+		// event bus before emitting the trigger event.
+		time.Sleep(200 * time.Millisecond)
+		if err := w.emitEvent("wails-e2e:trigger-menu", label); err != nil {
+			return triggerMenuOutcome{}, fmt.Errorf("emit trigger-menu(%q): %w", label, err)
+		}
+
+		got := <-done
+		if got.err == nil {
+			return got.res.Data, nil
+		}
+		lastErr = got.err
 	}
-	return got.res.Data, nil
+	return triggerMenuOutcome{}, fmt.Errorf("wait trigger-menu-result(%q) after %d attempts: %w", label, maxAttempts, lastErr)
 }
 
 // pollUntil retries fn until it returns (true, nil) or timeout expires.

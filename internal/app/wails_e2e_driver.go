@@ -6,13 +6,15 @@ package app
 
 import "sync"
 
-// wailsE2EState holds native menu click callbacks solely for the Wails v3
-// end-to-end smoke suite (compiled only with `-tags mcp` and never with
-// `production`). Unrelated to Thaw's Snowflake MCP server in internal/mcp.
-type wailsE2EState struct {
-	mu          sync.Mutex
-	menuActions map[string]func()
-}
+// wailsE2EMenuActions stores native menu OnClick closures per App instance
+// solely for the Wails v3 end-to-end smoke suite (compiled only with
+// `-tags mcp` and never with `production`). Keeping this state at package scope
+// avoids adding unused fields to App in default/production builds. Unrelated to
+// Thaw's Snowflake MCP server in internal/mcp.
+var (
+	wailsE2EMenuMu      sync.Mutex
+	wailsE2EMenuActions = make(map[*App]map[string]func())
+)
 
 // recordWailsE2EMenuAction records a native menu item's OnClick closure so the
 // E2E harness can trigger it through the live application menu tree.
@@ -20,12 +22,12 @@ func (a *App) recordWailsE2EMenuAction(label string, fn func()) {
 	if label == "" || fn == nil {
 		return
 	}
-	a.wailsE2E.mu.Lock()
-	defer a.wailsE2E.mu.Unlock()
-	if a.wailsE2E.menuActions == nil {
-		a.wailsE2E.menuActions = make(map[string]func())
+	wailsE2EMenuMu.Lock()
+	defer wailsE2EMenuMu.Unlock()
+	if wailsE2EMenuActions[a] == nil {
+		wailsE2EMenuActions[a] = make(map[string]func())
 	}
-	a.wailsE2E.menuActions[label] = fn
+	wailsE2EMenuActions[a][label] = fn
 }
 
 // registerWailsE2EMenuDriver subscribes to the test-only "wails-e2e:trigger-menu"
@@ -39,9 +41,12 @@ func (a *App) registerWailsE2EMenuDriver(inspect func(label string) (found, enab
 		found, enabled := inspect(label)
 		triggered := false
 		if found && enabled {
-			a.wailsE2E.mu.Lock()
-			fn := a.wailsE2E.menuActions[label]
-			a.wailsE2E.mu.Unlock()
+			wailsE2EMenuMu.Lock()
+			var fn func()
+			if actions := wailsE2EMenuActions[a]; actions != nil {
+				fn = actions[label]
+			}
+			wailsE2EMenuMu.Unlock()
 			if fn != nil {
 				fn()
 				triggered = true

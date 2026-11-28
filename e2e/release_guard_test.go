@@ -15,11 +15,20 @@ import (
 )
 
 // releaseWorkflowFiles are the CI workflows that build distributable or signed
-// binaries. None of them may ever pass the Wails v3 `mcp` app-control tag.
+// binaries. Each must exist and must never inject EXTRA_TAGS, DEV=true, or the
+// Wails v3 `mcp` app-control build tag.
 var releaseWorkflowFiles = []string{
 	".github/workflows/build.yml",
 	".github/workflows/manual-release.yml",
 	".github/workflows/macos-sign-test.yml",
+}
+
+// allowedWailsMCPWorkflows is the sole allowlist of GitHub Actions workflows
+// permitted to compile with Wails v3's `mcp` app-control tag. Every other
+// workflow file under .github/workflows/ (including any future release/signing
+// workflow) is checked and rejected if it enables `mcp`.
+var allowedWailsMCPWorkflows = map[string]bool{
+	"e2e-smoke.yml": true,
 }
 
 // platformTaskfiles are the OS build definitions invoked by release workflows.
@@ -30,7 +39,7 @@ var platformTaskfiles = []string{
 }
 
 // forbiddenMCPTagPattern matches attempts to enable Wails v3's `mcp` build tag
-// or configure its runtime env vars in release workflows / platform Taskfiles.
+// or configure its runtime env vars in workflows / platform Taskfiles.
 var forbiddenMCPTagPattern = regexp.MustCompile(
 	`(?i)(` +
 		`-tags(?:=|\s+)[^\n]*\bmcp\b` +
@@ -71,29 +80,65 @@ func stripYAMLComments(src string) string {
 }
 
 // TestReleaseWorkflowsNeverEnableWailsMCPTag enforces the security invariant
-// from issue #1053: release and signing workflows must never compile with
-// Wails v3's `mcp` app-control build tag, and every platform Taskfile's
-// production build must carry `-tags production` (which pairs with the
-// compile-time guard in internal/app/wails_e2e_guard.go).
+// from issue #1053:
+//   - No GitHub Actions workflow outside allowedWailsMCPWorkflows may enable
+//     Wails v3's `mcp` app-control build tag or WAILS_MCP_* env vars (covers
+//     both current release/signing workflows and any workflow added later).
+//   - The known release/signing workflows must exist and must not pass
+//     EXTRA_TAGS or DEV=true (ensuring they stay on `-tags production`).
+//   - Every platform Taskfile's non-dev build must carry `-tags production`,
+//     pairing with internal/app/wails_e2e_guard.go to refuse `production,mcp`
+//     at compile time.
 func TestReleaseWorkflowsNeverEnableWailsMCPTag(t *testing.T) {
 	root := repoRoot(t)
 
+	// 1. Scan every workflow under .github/workflows/ so a newly added release
+	// or signing workflow cannot slip past a hardcoded list.
+	wfDir := filepath.Join(root, ".github", "workflows")
+	entries, err := os.ReadDir(wfDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", wfDir, err)
+	}
+	scanned := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
+		scanned++
+		if allowedWailsMCPWorkflows[name] {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(wfDir, name))
+		if err != nil {
+			t.Fatalf("reading .github/workflows/%s: %v", name, err)
+		}
+		cleaned := stripYAMLComments(string(data))
+		if match := forbiddenMCPTagPattern.FindString(cleaned); match != "" {
+			t.Errorf(".github/workflows/%s must never enable the Wails `mcp` build tag or WAILS_MCP_* env vars (matched %q)", name, match)
+		}
+	}
+	if scanned == 0 {
+		t.Fatalf("expected to scan GitHub workflow files in %s, found none", wfDir)
+	}
+
+	// 2. Stricter invariants on the release/signing workflows themselves.
 	for _, rel := range releaseWorkflowFiles {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {
 			t.Fatalf("reading %s: %v", rel, err)
 		}
 		cleaned := stripYAMLComments(string(data))
-		if match := forbiddenMCPTagPattern.FindString(cleaned); match != "" {
-			t.Errorf("%s must never enable the Wails `mcp` build tag or WAILS_MCP_* env vars (matched %q)", rel, match)
-		}
-		// Ensure none of the release workflows pass EXTRA_TAGS at all, which could
-		// otherwise smuggle `mcp` into platform Taskfiles.
 		if strings.Contains(cleaned, "EXTRA_TAGS") {
 			t.Errorf("%s references EXTRA_TAGS — release workflows must not inject arbitrary build tags", rel)
 		}
+		if strings.Contains(cleaned, "DEV=true") {
+			t.Errorf("%s references DEV=true — release workflows must use production builds", rel)
+		}
 	}
 
+	// 3. Every platform Taskfile must compile non-dev builds with `-tags production`
+	// and never hardcode `mcp`.
 	for _, rel := range platformTaskfiles {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {

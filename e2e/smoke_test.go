@@ -27,7 +27,9 @@ func TestWailsE2ESmoke(t *testing.T) {
 	app1 := launchThaw(t, binaryPath, stateDir)
 
 	// ── 1. App startup ────────────────────────────────────────────────────────
-	t.Run("AppStartup", func(t *testing.T) {
+	// Gate the remaining subtests on AppStartup: they reuse app1 and assume
+	// the license gate has been accepted.
+	if !t.Run("AppStartup", func(t *testing.T) {
 		tools, err := app1.listTools()
 		if err != nil {
 			t.Fatalf("tools/list failed: %v", err)
@@ -102,7 +104,9 @@ func TestWailsE2ESmoke(t *testing.T) {
 		if _, err := os.Stat(isolatedConfigPath(stateDir)); err != nil {
 			t.Errorf("expected AcceptLicense to persist config.json at %s: %v", isolatedConfigPath(stateDir), err)
 		}
-	})
+	}) {
+		return
+	}
 
 	// ── 2. Native menu event delivery to frontend ────────────────────────────
 	// Run BEFORE LiveIPCRoundTrip because Wails v3's `call_bound_method` tool

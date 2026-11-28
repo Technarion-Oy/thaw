@@ -29,15 +29,21 @@ go build -tags mcp -buildvcs=false -o build/bin/thaw-wails-e2e .
 THAW_E2E_BINARY=$PWD/build/bin/thaw-wails-e2e go test -tags wails_e2e -v -count=1 ./e2e/...
 ```
 
+> **Security warning:** Never run a `-tags mcp` binary (`build/bin/thaw-wails-e2e`) manually outside the E2E harness against your real profile. Upstream Wails v3 allows unauthenticated loopback requests on `127.0.0.1:9099` unless `WAILS_MCP_TOKEN` is set, exposing JS evaluation and bound Go methods to any local process. The harness always launches against a temp profile directory with an ephemeral port and a per-run random `WAILS_MCP_TOKEN`.
+
 On headless Linux (CI), wrap the test command with `dbus-run-session` and `xvfb-run` plus a lightweight window manager (see `.github/workflows/e2e-smoke.yml`).
+
+## How native menu triggering works
+
+Because Wails v3's `MenuItem.handleClick` is unexported, `internal/app/menu.go` shares each item's `OnClick` closure with `recordWailsE2EMenuAction` (a no-op outside `mcp && !production`). When the E2E suite emits `wails-e2e:trigger-menu`, `internal/app/wails_e2e_driver.go` checks `wailsApp.Menu.GetApplicationMenu().FindByLabel(label)` and `item.Enabled()` on the live menu tree before invoking the shared closure.
 
 ## Security boundary
 
-Wails v3's `-tags mcp` app-control server exposes arbitrary JavaScript evaluation, DOM inspection, and bound-method invocation over localhost HTTP. Three independent layers guarantee it can never ship in a release binary:
+Wails v3's `-tags mcp` app-control server exposes arbitrary JavaScript evaluation, DOM inspection, and bound-method invocation over localhost HTTP. Three independent layers protect release builds:
 
 1. **Compile-time refusal (`internal/app/wails_e2e_guard.go`):** `//go:build production && mcp` intentionally fails compilation if both tags are ever combined.
 2. **Taskfile enforcement (`build/*/Taskfile.yml`):** all non-dev builds pass `-tags production`.
-3. **CI & unit-test guard (`e2e/release_guard_test.go`):** `TestReleaseWorkflowsNeverEnableWailsMCPTag` and `TestProductionAndMCPTagsFailToCompile` run on every PR in `build-check.yml` and `e2e-smoke.yml`.
+3. **CI & unit-test guard (`e2e/release_guard_test.go`):** scans every `.github/workflows/*.yml` (only `e2e-smoke.yml` is allowlisted for Wails's `mcp` tag), forbids `EXTRA_TAGS` and `DEV=true` in release/signing workflows, proves `go build -tags production,mcp ./internal/app` fails at compile time, and enforces zero overlap with `internal/mcp/`. Runs in `go test ./...` and `e2e-smoke.yml`.
 
 ## Gotcha (Wails v3.1.0 `call_bound_method` & Vite bundles)
 

@@ -177,10 +177,6 @@ type App struct {
 	// first-launch license agreement gate (see license.go). Served to the
 	// frontend via GetLicenseText. Set once in NewApp and never mutated.
 	licenseText string
-
-	// wailsE2E holds test-only native-menu hooks compiled in strictly under
-	// `mcp && !production` (zero-sized in release and normal builds).
-	wailsE2E wailsE2EState
 }
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.

@@ -69,13 +69,15 @@ go build -tags mcp -buildvcs=false -o build/bin/thaw-wails-e2e .
 THAW_E2E_BINARY=$PWD/build/bin/thaw-wails-e2e go test -tags wails_e2e -v -count=1 ./e2e/...
 ```
 
+> **Warning:** Never launch a `-tags mcp` binary manually outside the E2E harness against your real profile — upstream Wails v3 leaves loopback (`127.0.0.1:9099`) unauthenticated unless `WAILS_MCP_TOKEN` is set. The harness isolates `HOME`/`XDG_*`/`APPDATA`/`USERPROFILE` and always sets a per-run bearer token.
+
 ### CI and release-build security guards
 
 - `.github/workflows/e2e-smoke.yml` runs the full smoke suite on PRs, `main` pushes, and Renovate Wails bumps inside the Ubuntu 26.04 container under `dbus-run-session` + `xvfb-run` + `openbox` (GTK4 + WebKitGTK 6.0).
-- Three layers guarantee Wails's `-tags mcp` app-control driver can **never** ship in a release binary:
+- Three layers protect release builds from enabling Wails's `-tags mcp` app-control driver:
   1. `internal/app/wails_e2e_guard.go` (`//go:build production && mcp`) fails compilation if both tags are ever combined.
   2. All platform Taskfiles (`build/*/Taskfile.yml`) compile non-dev builds with `-tags production`.
-  3. `e2e/release_guard_test.go` (no build tag — runs in `go test ./...`, `build-check.yml`, and `e2e-smoke.yml`) asserts `.github/workflows/build.yml`, `.github/workflows/manual-release.yml`, and `.github/workflows/macos-sign-test.yml` never enable `mcp`, proves `go build -tags production,mcp ./internal/app` fails to compile, and enforces zero overlap between `e2e/` and `internal/mcp/`.
+  3. `e2e/release_guard_test.go` (no build tag — runs in `go test ./...` and `e2e-smoke.yml`) scans every `.github/workflows/*.yml` (allowlisting only `e2e-smoke.yml`), asserts `build.yml`, `manual-release.yml`, and `macos-sign-test.yml` never pass `EXTRA_TAGS` or `DEV=true`, proves `go build -tags production,mcp ./internal/app` fails to compile, and enforces zero overlap between `e2e/` and `internal/mcp/`.
 
 ## Generated-artifact guards
 
